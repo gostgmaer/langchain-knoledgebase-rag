@@ -5,6 +5,7 @@ from dependency_injector import containers, providers
 from packages.agent.prompt import PromptBuilder
 from packages.agent.runtime import AgentRuntime
 from packages.infrastructure.container.conversation import ConversationContainer
+from packages.tools.manager import ToolManager
 
 from .ai import AIContainer
 
@@ -61,11 +62,15 @@ class ApplicationContainer(containers.DeclarativeContainer):
     prompt_builder = providers.Singleton(
         PromptBuilder,
     )
+    tool_manager = providers.Singleton(
+        ToolManager,
+    )
 
     agent_runtime = providers.Singleton(
         AgentRuntime,
         llm=ai,
         prompt_builder=prompt_builder,
+        tools=tool_manager,
     )
     rag = providers.Container(
         RAGContainer,

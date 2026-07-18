@@ -16,7 +16,7 @@ class GraphBuilder:
     ) -> None:
         self.nodes = nodes
         self.router = router
-        self.graph = builder.build()
+        
 
     def build(self):
 

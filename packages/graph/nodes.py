@@ -53,7 +53,9 @@ class GraphNodes:
 
         ai_message = state["messages"][-1]
 
-        tool_messages: list[ToolMessage] = []
+       
+
+        tool_messages = []
 
         for tool_call in ai_message.tool_calls:
 

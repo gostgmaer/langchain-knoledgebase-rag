@@ -12,7 +12,9 @@ class GraphManager:
         builder: GraphBuilder,
               
     ) -> None:
+        
         self.graph = builder.build()
+        GraphVisualizer.save_png(self.graph) 
 
     async def invoke(
         self,
