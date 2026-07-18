@@ -4,7 +4,7 @@ from __future__ import annotations
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from packages.config.settings import settings
+from packages.config.loader import settings
 from packages.rag.types import Documents
 
 

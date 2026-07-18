@@ -4,9 +4,9 @@ from __future__ import annotations
 from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStore
 from langchain_chroma import Chroma
-from langchain_postgres import PGVector
+from pgvector.sqlalchemy import Vector
 
-from packages.config.settings import settings
+from packages.config.loader import settings
 from packages.rag.embeddings import EmbeddingManager
 from packages.rag.exceptions import VectorStoreException
 
@@ -33,15 +33,9 @@ class VectorStoreManager:
             )
 
         if self.provider == "pgvector":
-            return PGVector(
-                embeddings=self.embeddings.client,
-                collection_name=settings.vector_collection_name,
-                connection=settings.database_url,
+            raise VectorStoreException(
+                "PGVector backend is not implemented. Use Chroma or implement a SQLAlchemy-based repository."
             )
-
-        raise VectorStoreException(
-            f"Unsupported vector store: {self.provider}"
-        )
 
     @property
     def client(self) -> VectorStore:

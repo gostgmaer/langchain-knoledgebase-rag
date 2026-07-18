@@ -23,11 +23,12 @@ from packages.domain.enums.search_type import SearchType
 from packages.domain.enums.similarity_metric import (
     SimilarityMetric,
 )
-from packages.domain.models.agent_knowledge_base import AgentKnowledgeBase
+
 from packages.domain.models.base import BaseModel
 
 if TYPE_CHECKING:
     from packages.domain.models.document import Document
+    from packages.domain.models.agent_knowledge_base import AgentKnowledgeBase
 
 
 class KnowledgeBase(BaseModel):

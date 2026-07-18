@@ -40,7 +40,7 @@ class ChatResponse:
     """LLM response."""
     conversation_id: UUID
     response: str
-    stream: bool = False
     model: str
+    stream: bool = False
     usage: dict[str, int] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.utcnow)

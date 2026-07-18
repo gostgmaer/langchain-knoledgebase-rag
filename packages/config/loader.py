@@ -19,18 +19,18 @@ from .iam import IAMSettings
 @lru_cache
 def get_settings() -> Settings:
     return Settings(
-        # app=AppSettings(),
-        # api=APISettings(),
-        # database=DatabaseSettings(),
-        # redis=RedisSettings(),
-        ai=AISettings()
-        # logging=LoggingSettings(),
-        # security=SecuritySettings(),
-        # queue=QueueSettings(),
-        # storage=StorageSettings(),
-        # features=FeatureSettings(),
-        # upload_service=UploadServiceSettings(),
-        # iam = IAMSettings()
-    )
+        app=AppSettings(),
+        api=APISettings(),
+        database=DatabaseSettings(),
+        redis=RedisSettings(),
+        ai=AISettings(),
+        logging=LoggingSettings(),
+        security=SecuritySettings(),
+        queue=QueueSettings(),
+        storage=StorageSettings(),
+        features=FeatureSettings(),
+        upload_service=UploadServiceSettings(),
+        iam = IAMSettings()
+        )
 
 settings = get_settings()

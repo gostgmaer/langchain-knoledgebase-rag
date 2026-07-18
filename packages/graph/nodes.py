@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from packages.ai.manager import AIManager
+from packages.infrastructure.ai.manager import LLMManager
 from packages.memory.manager import MemoryManager
 from packages.rag.manager import RAGManager
 from packages.tools.manager import ToolManager
@@ -12,7 +12,7 @@ from packages.graph.state import GraphState
 
 @dataclass(slots=True)
 class NodeContext:
-    ai: AIManager
+    ai: LLMManager
     rag: RAGManager
     tools: ToolManager
     memory: MemoryManager

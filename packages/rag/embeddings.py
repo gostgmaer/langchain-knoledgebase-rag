@@ -4,7 +4,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_openai import OpenAIEmbeddings
 
-from packages.config.settings import settings
+from packages.config.loader import settings
 from packages.rag.exceptions import EmbeddingException
 
 
