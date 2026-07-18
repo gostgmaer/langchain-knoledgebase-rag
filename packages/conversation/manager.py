@@ -96,6 +96,10 @@ class ConversationManager:
             "conversation_id": str(request.conversation_id),
             "user_id": str(request.user_id),
             "thread_id": str(request.conversation_id),
+            "documents": [],
+            "tool_results": [],
+            "next_node": None,
+            "system_prompt": request.system_prompt,
         }
 
         #

@@ -1,11 +1,9 @@
 from __future__ import annotations
-
-from langchain_core.messages import AIMessage
-
 from packages.agent.prompt import PromptBuilder
 from packages.agent.response import AgentResponse, AgentUsage
 from packages.graph.state import GraphState
 from packages.infrastructure.ai.manager import LLMManager
+from packages.tools.manager import ToolManager
 
 
 class AgentRuntime:
@@ -14,9 +12,11 @@ class AgentRuntime:
         self,
         llm: LLMManager,
         prompt_builder: PromptBuilder,
+        tools: ToolManager,
     ) -> None:
         self.llm = llm
         self.prompt_builder = prompt_builder
+        self.tools = tools
 
     async def run(
         self,
@@ -24,8 +24,12 @@ class AgentRuntime:
     ) -> AgentResponse:
 
         messages = self.prompt_builder.build(state)
+        tools = self.tools.list()
+        model = self.llm.model
 
-        response = await self.llm.ainvoke(messages)
+        if tools:
+            model = model.bind_tools(tools)
+        response = await model.ainvoke(messages)
 
         usage = AgentUsage()
 
