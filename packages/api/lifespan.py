@@ -1,4 +1,3 @@
-# API lifespan
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -13,72 +12,28 @@ from packages.shared.logging import configure_logger, get_logger
 async def lifespan(app: FastAPI):
     """
     FastAPI application lifecycle.
-
-    Responsible for:
-
-    - Building the dependency injection container
-    - Initializing infrastructure
-    - Running startup checks
-    - Cleaning up resources on shutdown
     """
 
-    #
-    # Build dependency container
-    #
     container = ApplicationContainer()
 
-    #
-    # Store container on app state
-    #
     app.state.container = container
 
-    #
-    # Resolve core services
-    #
     settings = container.settings.config()
-    configure_logger(
-        settings.logging.level,  # or whatever field exists in LoggingSettings
-    )
+
+    configure_logger(settings.logging.level)
 
     logger = get_logger(__name__)
 
-    logger.info("Starting EasyDev AI Platform...")
-
-    #
-    # Initialize database
-    #
-    database = container.database.session_manager()
-
-    await database.initialize()
-
-    logger.info("Database initialized.")
-
-    #
-    # Initialize graph
-    #
-    graph = container.graph.manager()
-
-    await graph.initialize()
-
-    logger.info("LangGraph initialized.")
-
-    #
-    # Register tools
-    #
-    tools = container.tools.manager()
-
-    await tools.initialize()
-
-    logger.info("Tools initialized.")
-
-    logger.info("Application startup completed.")
+    logger.info("Starting EasyDev AI Platform")
 
     try:
         yield
 
     finally:
-        logger.info("Shutting down EasyDev AI Platform...")
+        logger.info("Shutting down EasyDev AI Platform")
 
-        await database.close()
+        engine = container.database.engine()
 
-        logger.info("Database closed.")
+        await engine.dispose()
+
+        logger.info("Database engine disposed")

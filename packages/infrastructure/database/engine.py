@@ -5,13 +5,15 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from packages.config import get_settings
+from packages.config.settings import Settings
 
 
-def create_database_engine() -> AsyncEngine:
-    """Create the application's async SQLAlchemy engine."""
-
-    settings = get_settings()
+def create_database_engine(
+    settings: Settings,
+) -> AsyncEngine:
+    """
+    Create the application's async SQLAlchemy engine.
+    """
 
     return create_async_engine(
         url=str(settings.database.url),
@@ -21,5 +23,4 @@ def create_database_engine() -> AsyncEngine:
         pool_timeout=settings.database.pool_timeout,
         pool_pre_ping=True,
         pool_recycle=3600,
-        future=True,
     )
