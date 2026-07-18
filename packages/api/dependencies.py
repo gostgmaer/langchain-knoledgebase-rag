@@ -19,7 +19,7 @@ from packages.tools.manager import ToolManager
 # Root Container
 #
 
-@inject
+
 def get_container(
     container: Annotated[
         ApplicationContainer,
@@ -33,7 +33,6 @@ def get_container(
 # AI
 #
 
-@inject
 def get_ai_manager(
     manager: Annotated[
         LLMManager,
@@ -47,7 +46,7 @@ def get_ai_manager(
 # Conversation
 #
 
-@inject
+
 def get_conversation_manager(
     manager: Annotated[
         ConversationManager,
@@ -61,7 +60,7 @@ def get_conversation_manager(
 # Graph
 #
 
-@inject
+
 def get_graph_manager(
     manager: Annotated[
         GraphManager,
@@ -75,7 +74,7 @@ def get_graph_manager(
 # Memory
 #
 
-@inject
+
 def get_memory_manager(
     manager: Annotated[
         MemoryManager,
@@ -89,7 +88,7 @@ def get_memory_manager(
 # RAG
 #
 
-@inject
+
 def get_rag_manager(
     manager: Annotated[
         RAGManager,
@@ -103,7 +102,7 @@ def get_rag_manager(
 # Tools
 #
 
-@inject
+
 def get_tool_manager(
     manager: Annotated[
         ToolManager,

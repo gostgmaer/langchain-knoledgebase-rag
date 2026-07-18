@@ -26,7 +26,6 @@ router = APIRouter(
     summary="Chat with the AI assistant",
     description="Send a message to the conversation graph.",
 )
-@inject
 async def chat(
     request: ChatRequestSchema,
     manager: ConversationManager = Depends(get_conversation_manager),
