@@ -1,0 +1,12 @@
+from enum import StrEnum
+
+
+class AgentPromptRole(StrEnum):
+    SYSTEM = "SYSTEM"
+    RAG = "RAG"
+    ROUTER = "ROUTER"
+    SUMMARIZATION = "SUMMARIZATION"
+    CLASSIFICATION = "CLASSIFICATION"
+    SAFETY = "SAFETY"
+    TOOL_SELECTION = "TOOL_SELECTION"
+    CUSTOM = "CUSTOM"

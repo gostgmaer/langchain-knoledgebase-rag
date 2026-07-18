@@ -1,1 +1,88 @@
 # Document chunk model
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
+
+from sqlalchemy import (
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    Text,
+)
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from packages.domain.models.base import BaseModel
+
+if TYPE_CHECKING:
+    from packages.domain.models.document import Document
+    from packages.domain.models.embedding import Embedding
+
+
+class DocumentChunk(BaseModel):
+    """Represents a chunk of a document."""
+
+    __tablename__ = "document_chunks"
+
+    __table_args__ = (
+        Index("ix_chunk_document", "document_id"),
+        Index("ix_chunk_tenant", "tenant_id"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        nullable=False,
+    )
+
+    document_id: Mapped[UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    chunk_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    page_number: Mapped[int | None] = mapped_column(
+        Integer,
+    )
+
+    section: Mapped[str | None]
+
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    token_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    character_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    start_offset: Mapped[int | None]
+
+    end_offset: Mapped[int | None]
+
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSON,
+        default=dict,
+        nullable=False,
+    )
+
+    document: Mapped["Document"] = relationship(
+        back_populates="chunks",
+    )
+
+    embeddings: Mapped[list["Embedding"]] = relationship(
+        back_populates="chunk",
+        cascade="all, delete-orphan",
+    )
