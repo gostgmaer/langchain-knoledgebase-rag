@@ -1,72 +1,24 @@
-# Graph manager
-from __future__ import annotations
-
-from typing import Any
-
-from langchain_core.messages import HumanMessage
-
-from packages.chat.chat_service import ChatService
-from packages.graph.builder import GraphBuilder
+from .builder import build_graph
 
 
 class GraphManager:
-    """
-    Singleton manager responsible for:
 
-    - Building the graph
-    - Compiling the graph
-    - Invoking the graph
-    - Streaming graph execution
-    """
+    def __init__(self):
+        self._graph = build_graph()
 
-    def __init__(
-        self,
-        chat_service: ChatService,
-    ) -> None:
+    @property
+    def graph(self):
+        return self._graph
 
-        self._graph = GraphBuilder(
-            chat_service=chat_service,
-        ).build()
+    def invoke(self, state):
+        return self._graph.invoke(state)
 
-    async def ainvoke(
-        self,
-        message: str,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
+    async def ainvoke(self, state):
+        return await self._graph.ainvoke(state)
 
-        state = {
-            "messages": [
-                HumanMessage(content=message),
-            ],
-            "session_id": kwargs.get("session_id"),
-            "conversation_id": kwargs.get("conversation_id"),
-            "agent_id": kwargs.get("agent_id"),
-            "metadata": kwargs.get("metadata", {}),
-        }
+    def stream(self, state):
+        yield from self._graph.stream(state)
 
-        result = await self._graph.ainvoke(
-            state,
-            config={
-                "configurable": {
-                    "thread_id": session_id,
-                }
-            },
-        )
-
-    async def astream(
-        self,
-        message: str,
-        **kwargs: Any,
-    ):
-        state = {
-            "messages": [
-                HumanMessage(content=message),
-            ],
-            "session_id": kwargs.get("session_id"),
-            "conversation_id": kwargs.get("conversation_id"),
-            "agent_id": kwargs.get("agent_id"),
-            "metadata": kwargs.get("metadata", {}),
-        }
-
+    async def astream(self, state):
         async for event in self._graph.astream(state):
             yield event
