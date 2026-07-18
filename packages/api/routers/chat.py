@@ -27,6 +27,7 @@ router = APIRouter(
     description="Send a message to the conversation graph.",
 )
 async def chat(
+    
     request: ChatRequestSchema,
     manager: ConversationManager = Depends(get_conversation_manager),
 ):

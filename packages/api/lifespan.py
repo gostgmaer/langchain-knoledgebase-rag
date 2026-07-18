@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from packages.api import dependencies
+from packages.api.routers import chat, health
 from packages.infrastructure.container import ApplicationContainer
 from packages.shared.logging import configure_logger, get_logger
 
@@ -15,6 +17,15 @@ async def lifespan(app: FastAPI):
     """
 
     container = ApplicationContainer()
+
+    # Wire the container to the modules that use Provide(...)
+    container.wire(
+        packages=[
+            dependencies,
+            chat,
+            health,
+        ]
+    )
 
     app.state.container = container
 
@@ -32,8 +43,9 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("Shutting down EasyDev AI Platform")
 
-        engine = container.database.engine()
+        container.unwire()
 
+        engine = container.database.engine()
         await engine.dispose()
 
         logger.info("Database engine disposed")
