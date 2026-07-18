@@ -14,7 +14,7 @@ class LLMFactory:
     @staticmethod
     def create() -> BaseLLMProvider:
 
-        provider = settings.llm.provider.lower()
+        provider = settings.ai.provider.lower()
 
         if provider == "google":
             return GoogleProvider()

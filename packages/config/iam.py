@@ -6,6 +6,7 @@ class IAMSettings(BaseSettings):
         env_prefix="IAM_",
         env_file=".env",
         case_sensitive=False,
+        extra="ignore",
     )
 
     base_url: str

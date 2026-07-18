@@ -13,37 +13,37 @@ class LLMRegistry:
     @staticmethod
     def create():
 
-        provider = settings.llm.provider.lower()
+        provider = settings.ai.default_provider.lower()
 
         common = {
-            "temperature": settings.llm.temperature,
+            "temperature": settings.ai.default_temperature,
         }
 
         if provider == "google":
             return ChatGoogleGenerativeAI(
-                model=settings.llm.model,
-                google_api_key=settings.google.api_key,
+                model=settings.ai.model,
+                google_api_key=settings.ai.google_api_key,
                 **common,
             )
 
         if provider == "openai":
             return ChatOpenAI(
-                model=settings.llm.model,
-                api_key=settings.openai.api_key,
+                model=settings.ai.model,
+                api_key=settings.ai.openai_api_key,
                 **common,
             )
 
         if provider == "anthropic":
             return ChatAnthropic(
-                model=settings.llm.model,
-                api_key=settings.anthropic.api_key,
+                model=settings.ai.model,
+                api_key=settings.ai.anthropic_api_key,
                 **common,
             )
 
         if provider == "groq":
             return ChatGroq(
-                model=settings.llm.model,
-                api_key=settings.groq.api_key,
+                model=settings.ai.model,
+                api_key=settings.ai.groq_api_key,
                 **common,
             )
 

@@ -23,7 +23,7 @@ def get_settings() -> Settings:
         # api=APISettings(),
         # database=DatabaseSettings(),
         # redis=RedisSettings(),
-        ai=AISettings(),
+        ai=AISettings()
         # logging=LoggingSettings(),
         # security=SecuritySettings(),
         # queue=QueueSettings(),

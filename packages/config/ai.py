@@ -11,6 +11,7 @@ class AISettings(BaseSettings):
         env_file=".env",
         extra="ignore",
     )
+    model: str = Field(default="gemini-pro", alias="LLM_MODEL")
 
     google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")

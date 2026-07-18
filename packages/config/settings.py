@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
+from pydantic import Field
 from pydantic_settings import BaseSettings
 from .ai import AISettings
 from .api import APISettings
@@ -16,16 +15,17 @@ from .storage import StorageSettings
 from .upload_service import UploadServiceSettings
 from .iam import IAMSettings
 
+
 class Settings(BaseSettings):
-    # app=AppSettings(),
-        # api=APISettings(),
-        # database=DatabaseSettings(),
-        # redis=RedisSettings(),
-        ai=AISettings(),
-        # logging=LoggingSettings(),
-        # security=SecuritySettings(),
-        # queue=QueueSettings(),
-        # storage=StorageSettings(),
-        # features=FeatureSettings(),
-        # upload_service=UploadServiceSettings(),
-        # iam = IAMSettings()
+    app: AppSettings = Field(default_factory=AppSettings)
+    api: APISettings = Field(default_factory=APISettings)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    redis: RedisSettings = Field(default_factory=RedisSettings)
+    ai: AISettings = Field(default_factory=AISettings)
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    security: SecuritySettings = Field(default_factory=SecuritySettings)
+    queue: QueueSettings = Field(default_factory=QueueSettings)
+    storage: StorageSettings = Field(default_factory=StorageSettings)
+    features: FeatureSettings = Field(default_factory=FeatureSettings)
+    upload_service: UploadServiceSettings = Field(default_factory=UploadServiceSettings)
+    iam: IAMSettings = Field(default_factory=IAMSettings)
