@@ -1,8 +1,32 @@
-from typing import Annotated, TypedDict
+from __future__ import annotations
 
-from langgraph.graph.message import add_messages
-from langchain_core.messages import BaseMessage
+from typing import Any
+from typing_extensions import TypedDict
+
+from langchain_core.documents import Document
+
+from packages.graph.types import Messages
 
 
-class GraphState(TypedDict):
-    messages: Annotated[list[BaseMessage], add_messages]
+class GraphState(TypedDict, total=False):
+    """
+    Shared state across every node.
+    """
+
+    messages: Messages
+
+    documents: list[Document]
+
+    tools: list[dict[str, Any]]
+
+    user_id: str
+
+    conversation_id: str
+
+    thread_id: str
+
+    system_prompt: str
+
+    summary: str
+
+    metadata: dict[str, Any]

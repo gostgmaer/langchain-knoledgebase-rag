@@ -1,21 +1,32 @@
 # Tools registry
-from langchain_core.tools import BaseTool
+from __future__ import annotations
 
-from .calculator import calculator_tool
-from .datetime import datetime_tool
-from .news import news_tool
-from .weather import weather_tool
-from .web_search import web_search_tool
+from langchain_core.tools import BaseTool
 
 
 class ToolRegistry:
 
-    @staticmethod
-    def get_tools() -> list[BaseTool]:
-        return [
-            weather_tool,
-            news_tool,
-            web_search_tool,
-            calculator_tool,
-            datetime_tool,
-        ]
+    def __init__(self):
+
+        self._tools: dict[
+            str,
+            BaseTool,
+        ] = {}
+
+    def register(
+        self,
+        tool: BaseTool,
+    ) -> None:
+
+        self._tools[tool.name] = tool
+
+    def get(
+        self,
+        name: str,
+    ) -> BaseTool:
+
+        return self._tools[name]
+
+    def list(self):
+
+        return list(self._tools.values())

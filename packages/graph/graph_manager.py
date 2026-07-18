@@ -1,24 +1,33 @@
-from .builder import build_graph
+from __future__ import annotations
+
+from packages.graph.builder import GraphBuilder
+from packages.graph.state import GraphState
 
 
 class GraphManager:
 
-    def __init__(self):
-        self._graph = build_graph()
+    def __init__(
+        self,
+        builder: GraphBuilder,
+    ) -> None:
 
-    @property
-    def graph(self):
-        return self._graph
+        self.graph = builder.build()
 
-    def invoke(self, state):
-        return self._graph.invoke(state)
+    async def invoke(
+        self,
+        state: GraphState,
+    ):
 
-    async def ainvoke(self, state):
-        return await self._graph.ainvoke(state)
+        return await self.graph.ainvoke(
+            state,
+        )
 
-    def stream(self, state):
-        yield from self._graph.stream(state)
+    async def stream(
+        self,
+        state: GraphState,
+    ):
 
-    async def astream(self, state):
-        async for event in self._graph.astream(state):
+        async for event in self.graph.astream(
+            state,
+        ):
             yield event

@@ -1,17 +1,41 @@
 # Tools manager
+from __future__ import annotations
+
 from langchain_core.tools import BaseTool
 
-from .registry import ToolRegistry
+from packages.tools.executor import ToolExecutor
+from packages.tools.registry import ToolRegistry
 
 
 class ToolManager:
 
-    def __init__(self):
-        self._tools = ToolRegistry.get_tools()
+    def __init__(
+        self,
+        registry: ToolRegistry,
+        executor: ToolExecutor,
+    ):
 
-    @property
-    def tools(self) -> list[BaseTool]:
-        return self._tools
+        self.registry = registry
+        self.executor = executor
 
-    def bind(self, llm):
-        return llm.bind_tools(self._tools)
+    def register(
+        self,
+        tool: BaseTool,
+    ):
+
+        self.registry.register(tool)
+
+    def list(self):
+
+        return self.registry.list()
+
+    async def execute(
+        self,
+        name: str,
+        **kwargs,
+    ):
+
+        return await self.executor.execute(
+            name,
+            **kwargs,
+        )
