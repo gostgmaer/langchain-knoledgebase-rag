@@ -9,12 +9,12 @@
 
 
 from dataclasses import dataclass
+import os
 
 from langchain.tools import tool
 import httpx
 
-from config.settings import settings
-from shared.logger import logger
+from packages.logging import logger
 
 client = httpx.AsyncClient(timeout=10)
 
@@ -48,15 +48,17 @@ client = httpx.AsyncClient(timeout=10)
 async def get_weather(city: str):
     """Get the current weather for a city."""
 
-    if not settings.weather_api_key:
+    url  = os.getenv("OPENWEATHER_BASE_URL")
+
+    if not os.getenv("OPENWEATHER_API_KEY"):
         return "Weather API key is missing."
     logger.debug("Weather tool executed for %s", city)
     try:
         response = await client.get(
-            settings.weather_api_url,
+            url,
             params={
                 "q": city,
-                "appid": settings.weather_api_key,
+                "appid": os.getenv("OPENWEATHER_API_KEY"),
                 "units": "metric",
             },
         )

@@ -13,14 +13,7 @@
 import os
 
 from langchain_core.tools import tool
-from config.settings import settings
 from langchain_community.utilities import GoogleSerperAPIWrapper
-
-
-search = GoogleSerperAPIWrapper(
-    serper_api_key=settings.serper_api_key
-)
-
 
 @tool(
     "get_google_search",
@@ -38,4 +31,7 @@ def get_google_search(topic: str) -> dict:
         Structured Google search results.
     """
     
+    search = GoogleSerperAPIWrapper(
+        serper_api_key=os.getenv("SERPER_API_KEY", "")
+    )
     return search.results(query=topic,)

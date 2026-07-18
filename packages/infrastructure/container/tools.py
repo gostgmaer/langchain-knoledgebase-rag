@@ -7,6 +7,17 @@ from dependency_injector import providers
 from packages.tools.executor import ToolExecutor
 from packages.tools.manager import ToolManager
 from packages.tools.registry import ToolRegistry
+from packages.tools.builtin.weather import get_weather
+from packages.tools.builtin.news import get_news
+from packages.tools.builtin.search import get_google_search
+
+
+def init_tool_manager(registry: ToolRegistry, executor: ToolExecutor) -> ToolManager:
+    manager = ToolManager(registry=registry, executor=executor)
+    manager.register(get_weather)
+    manager.register(get_news)
+    manager.register(get_google_search)
+    return manager
 
 
 class ToolsContainer(containers.DeclarativeContainer):
@@ -23,7 +34,7 @@ class ToolsContainer(containers.DeclarativeContainer):
     )
 
     manager = providers.Singleton(
-        ToolManager,
+        init_tool_manager,
         registry=registry,
         executor=executor,
     )

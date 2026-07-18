@@ -12,8 +12,8 @@
 from langchain_tavily import TavilySearch
 from langchain.tools import tool
 
-from config.settings import settings
-from shared.logger import logger
+import os
+from packages.logging import logger
 
 
 @tool(
@@ -23,14 +23,16 @@ from shared.logger import logger
 async def get_news(topic: str):
     """Get the latest news for a topic."""
 
-    if not settings.tavily_api_key:
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
         return "Tavily API key is missing."
 
     try:
         search = TavilySearch(
             max_results=5,
-            tavily_api_key=settings.tavily_api_key,
+            api_wrapper={"tavily_api_key": api_key},
         )
+
 
         results =  search.invoke({"query": f"Latest news about {topic}"})
 

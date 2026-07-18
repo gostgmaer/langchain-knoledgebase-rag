@@ -58,18 +58,17 @@ class GraphNodes:
         tool_messages = []
 
         for tool_call in ai_message.tool_calls:
-
             result = await self.context.tools.execute(
                 tool_call["name"],
                 **tool_call["args"],
             )
 
-        tool_messages.append(
-            ToolMessage(
-                content=str(result),
-                tool_call_id=tool_call["id"],
+            tool_messages.append(
+                ToolMessage(
+                    content=str(result),
+                    tool_call_id=tool_call["id"],
+                )
             )
-        )
 
         return {
             "messages": tool_messages,

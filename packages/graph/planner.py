@@ -23,8 +23,8 @@ class GraphPlanner:
         # Temporary rules
         #
 
-        if "weather" in message:
-            return PlannerResult("tool")
+        # if "weather" in message:
+        #     return PlannerResult("tool")
 
         if "search" in message:
             return PlannerResult("retrieve")
