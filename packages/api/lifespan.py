@@ -4,8 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from packages.api import dependencies
-from packages.api.routers import chat, health
+from packages.graph.visualizer import GraphVisualizer
 from packages.infrastructure.container import ApplicationContainer
 from packages.shared.logging import configure_logger, get_logger
 
@@ -16,16 +15,8 @@ async def lifespan(app: FastAPI):
     FastAPI application lifecycle.
     """
 
+    # Instantiating the container wires "packages.api" via wiring_config.
     container = ApplicationContainer()
-
-    # Wire the container to the modules that use Provide(...)
-    container.wire(
-        packages=[
-            dependencies,
-            chat,
-            health,
-        ]
-    )
 
     app.state.container = container
 
@@ -36,6 +27,12 @@ async def lifespan(app: FastAPI):
     logger = get_logger(__name__)
 
     logger.info("Starting EasyDev AI Platform")
+
+    try:
+        # Rendering uses the remote mermaid.ink API — never block startup on it.
+        GraphVisualizer.save_png(container.graph.builder().build())
+    except Exception as exc:
+        logger.warning("Could not render graph.png: %s", exc)
 
     try:
         yield

@@ -17,8 +17,10 @@ class BaseRepository(Generic[ModelType]):
 
     def __init__(
         self,
+        model: type[ModelType],
         session: AsyncSession,
     ) -> None:
+        self.model = model
         self.session = session
 
     # ------------------------------------------------------------------

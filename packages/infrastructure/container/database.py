@@ -1,7 +1,10 @@
 from dependency_injector import providers,containers
 
 from packages.infrastructure.database.engine import create_database_engine
-from packages.infrastructure.database.session import create_session_factory
+from packages.infrastructure.database.session import (
+    create_session,
+    create_session_factory,
+)
 from packages.infrastructure.database.transaction import UnitOfWork
 
 
@@ -14,12 +17,17 @@ class DatabaseContainer(containers.DeclarativeContainer):
         settings=settings.config,
     )
 
-    session = providers.Singleton(
+    session_factory = providers.Singleton(
         create_session_factory,
         engine=engine,
     )
 
+    session = providers.Factory(
+        create_session,
+        session_factory=session_factory,
+    )
+
     uow = providers.Factory(
         UnitOfWork,
-        session_factory=session.provided.session,
+        session=session,
     )

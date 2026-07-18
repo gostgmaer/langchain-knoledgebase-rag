@@ -21,7 +21,7 @@ class RepositoryContainer(
 
     database = providers.DependenciesContainer()
 
-    session = database.session.provided.session
+    session = database.session
 
     conversation = providers.Factory(
         ConversationRepository,
