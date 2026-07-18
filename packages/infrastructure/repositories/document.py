@@ -1,0 +1,90 @@
+# Document repository
+# Document chunk repository
+from __future__ import annotations
+
+from uuid import UUID
+
+from sqlalchemy import desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from packages.domain.models.document import Document
+from packages.infrastructure.repositories.base import BaseRepository
+
+
+class DocumentRepository(BaseRepository[Document]):
+    """Repository for Document entities."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__(Document, session)
+
+    async def get_by_filename(
+        self,
+        filename: str,
+    ) -> Document | None:
+        """Return a document by filename."""
+        stmt = (
+            select(Document)
+            .where(Document.filename == filename)
+        )
+
+        return await self.scalar(stmt)
+
+    async def list_by_knowledge_base(
+        self,
+        knowledge_base_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Document]:
+        """Return all documents belonging to a knowledge base."""
+        stmt = (
+            select(Document)
+            .where(Document.knowledge_base_id == knowledge_base_id)
+            .order_by(desc(Document.created_at))
+            .offset(offset)
+            .limit(limit)
+        )
+
+        return await self.scalars(stmt)
+
+    async def get_with_chunks(
+        self,
+        document_id: UUID,
+    ) -> Document | None:
+        """Return document with all chunks."""
+        stmt = (
+            select(Document)
+            .options(selectinload(Document.chunks))
+            .where(Document.id == document_id)
+        )
+
+        return await self.scalar(stmt)
+
+    async def count_by_knowledge_base(
+        self,
+        knowledge_base_id: UUID,
+    ) -> int:
+        """Count documents in a knowledge base."""
+        stmt = (
+            select(func.count())
+            .select_from(Document)
+            .where(
+                Document.knowledge_base_id == knowledge_base_id
+            )
+        )
+
+        return int(await self.session.scalar(stmt) or 0)
+
+    async def update_status(
+        self,
+        document: Document,
+        status: str,
+    ) -> Document:
+        """Update document processing status."""
+        document.status = status
+
+        await self.session.flush()
+        await self.session.refresh(document)
+
+        return document
