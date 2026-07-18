@@ -1,30 +1,18 @@
-from __future__ import annotations
-
-from pydantic import AnyHttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class IAMSettings(BaseSettings):
-    """IAM service configuration."""
-
     model_config = SettingsConfigDict(
         env_prefix="IAM_",
-        extra="ignore",
+        env_file=".env",
+        case_sensitive=False,
     )
 
-    # Service
-    base_url: AnyHttpUrl
-
-    # Service-to-service authentication
+    base_url: str
     client_id: str
-    client_secret: SecretStr
+    client_secret: str
+    introspection_api_key: str
 
-    # Session introspection
-    introspection_api_key: SecretStr
-
-    # HTTP
-    timeout: float = 30.0
-
+    timeout: int = 30
     verify_ssl: bool = True
-
     max_retries: int = 3
