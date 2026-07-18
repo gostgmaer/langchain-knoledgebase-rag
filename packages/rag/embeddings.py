@@ -12,8 +12,8 @@ class EmbeddingManager:
     """Manages embedding providers."""
 
     def __init__(self) -> None:
-        self.provider = settings.embedding_provider.lower()
-        self.model = settings.embedding_model
+        self.provider = settings.rag.embedding_provider.lower()
+        self.model = settings.rag.embedding_model
         self._embeddings = self._create()
 
     def _create(self) -> Embeddings:
@@ -22,13 +22,13 @@ class EmbeddingManager:
         if self.provider == "google":
             return GoogleGenerativeAIEmbeddings(
                 model=self.model,
-                google_api_key=settings.google_api_key,
+                google_api_key=settings.ai.google_api_key,
             )
 
         if self.provider == "openai":
             return OpenAIEmbeddings(
                 model=self.model,
-                api_key=settings.openai_api_key,
+                api_key=settings.ai.openai_api_key,
             )
 
         raise EmbeddingException(

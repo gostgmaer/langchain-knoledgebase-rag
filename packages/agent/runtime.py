@@ -1,9 +1,12 @@
 from __future__ import annotations
+from typing import TYPE_CHECKING
 from packages.agent.prompt import PromptBuilder
 from packages.agent.response import AgentResponse, AgentUsage
-from packages.graph.state import GraphState
 from packages.infrastructure.ai.manager import LLMManager
 from packages.tools.manager import ToolManager
+
+if TYPE_CHECKING:
+    from packages.graph.state import GraphState
 
 
 class AgentRuntime:

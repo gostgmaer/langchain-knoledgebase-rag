@@ -15,8 +15,12 @@ def create_database_engine(
     Create the application's async SQLAlchemy engine.
     """
 
+    url_str = str(settings.database.url)
+    if url_str.startswith("postgresql://"):
+        url_str = url_str.replace("postgresql://", "postgresql+asyncpg://", 1)
+
     return create_async_engine(
-        url=str(settings.database.url),
+        url=url_str,
         echo=settings.database.echo,
         pool_size=settings.database.pool_size,
         max_overflow=settings.database.max_overflow,

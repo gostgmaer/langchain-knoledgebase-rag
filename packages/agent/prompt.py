@@ -1,6 +1,9 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
 from langchain_core.messages import BaseMessage, SystemMessage
 
-from packages.graph.state import GraphState
+if TYPE_CHECKING:
+    from packages.graph.state import GraphState
 
 class PromptBuilder:
 

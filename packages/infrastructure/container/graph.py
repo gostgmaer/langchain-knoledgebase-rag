@@ -6,8 +6,9 @@ from dependency_injector import providers
 
 from packages.graph.builder import GraphBuilder
 from packages.graph.manager import GraphManager
-from packages.graph.nodes import GraphNodes
+from packages.graph.nodes import GraphNodes, NodeContext
 from packages.graph.router import GraphRouter
+from packages.graph.planner import GraphPlanner
 
 
 class GraphContainer(containers.DeclarativeContainer):
@@ -20,12 +21,24 @@ class GraphContainer(containers.DeclarativeContainer):
 
     memory = providers.DependenciesContainer()
 
-    nodes = providers.Singleton(
-        GraphNodes,
-        ai=ai.manager,
+    runtime = providers.Dependency()
+
+    planner = providers.Singleton(
+        GraphPlanner,
+    )
+
+    context = providers.Factory(
+        NodeContext,
+        runtime=runtime,
         rag=rag.manager,
         tools=tools.manager,
         memory=memory.manager,
+        planner=planner,
+    )
+
+    nodes = providers.Singleton(
+        GraphNodes,
+        context=context,
     )
 
     router = providers.Singleton(
@@ -41,5 +54,4 @@ class GraphContainer(containers.DeclarativeContainer):
     manager = providers.Singleton(
         GraphManager,
         builder=builder,
-        memory=memory.manager,
     )

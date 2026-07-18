@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import Field, PostgresDsn
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,7 +12,7 @@ class DatabaseSettings(BaseSettings):
         extra="ignore",
     )
 
-    url: PostgresDsn = Field(alias="DATABASE_URL")
+    url: str = Field(alias="DATABASE_URL")
 
     pool_size: int = 10
     max_overflow: int = 20

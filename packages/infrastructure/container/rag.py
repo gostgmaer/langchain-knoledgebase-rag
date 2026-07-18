@@ -24,12 +24,10 @@ class RAGContainer(
 
     embeddings = providers.Singleton(
         EmbeddingManager,
-        ai=ai.manager,
     )
 
     vectorstore = providers.Singleton(
         VectorStoreManager,
-        settings=settings.config,
         embeddings=embeddings,
     )
 
@@ -45,6 +43,7 @@ class RAGContainer(
         DocumentIndexer,
         loader=loader,
         splitter=splitter,
+        embeddings=embeddings,
         vectorstore=vectorstore,
     )
 

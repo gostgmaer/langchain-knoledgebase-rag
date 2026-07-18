@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from fastapi import HTTPException
 from langchain_core.messages import HumanMessage
 
 from packages.conversation.context import (
@@ -14,6 +15,8 @@ from packages.conversation.models import (
 from packages.conversation.service import (
     ConversationService,
 )
+from packages.domain.models.message import Message
+from packages.domain.enums.message_role import MessageRole
 from packages.graph.manager import GraphManager
 from packages.graph.state import GraphState
 
@@ -56,16 +59,21 @@ class ConversationManager:
         )
 
         if conversation is None:
-            raise ValueError("Conversation not found.")
+            raise HTTPException(
+                status_code=404,
+                detail="Conversation not found.",
+            )
 
         #
         # Save user message
         #
 
         await self.service.add_message(
-            conversation_id=request.conversation_id,
-            role="user",
-            content=request.message,
+            Message(
+                conversation_id=request.conversation_id,
+                role=MessageRole.USER,
+                content=request.message,
+            )
         )
 
         #
@@ -112,17 +120,29 @@ class ConversationManager:
 
         assistant = result["messages"][-1]
 
+        assistant_content = assistant.content
+        if isinstance(assistant_content, list):
+            text_parts = [
+                part.get("text", "")
+                for part in assistant_content
+                if isinstance(part, dict) and part.get("type") == "text"
+            ]
+            assistant_content = "\n".join(text_parts)
+
         #
         # Persist assistant message
         #
 
         await self.service.add_message(
-            conversation_id=request.conversation_id,
-            role="assistant",
-            content=assistant.content,
+            Message(
+                conversation_id=request.conversation_id,
+                role=MessageRole.ASSISTANT,
+                content=assistant_content,
+            )
         )
 
         return ChatResponse(
             conversation_id=request.conversation_id,
-            message=assistant.content,
+            response=assistant_content,
+            model="default",
         )

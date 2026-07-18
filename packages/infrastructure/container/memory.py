@@ -6,6 +6,7 @@ from dependency_injector import providers
 
 from packages.memory.checkpoint import CheckpointFactory
 from packages.memory.manager import MemoryManager
+from packages.memory.strategy import MemoryStrategy
 
 
 class MemoryContainer(containers.DeclarativeContainer):
@@ -14,10 +15,10 @@ class MemoryContainer(containers.DeclarativeContainer):
 
     checkpoint = providers.Singleton(
         CheckpointFactory,
-        settings=settings.config,
+        strategy=MemoryStrategy.MEMORY,
     )
 
     manager = providers.Singleton(
         MemoryManager,
-        checkpoint=checkpoint,
+        factory=checkpoint,
     )

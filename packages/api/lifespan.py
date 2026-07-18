@@ -6,6 +6,9 @@ from fastapi import FastAPI
 
 from packages.graph.visualizer import GraphVisualizer
 from packages.infrastructure.container import ApplicationContainer
+from packages.infrastructure.database.base import Base
+from sqlalchemy import text
+import packages.domain.models  # noqa: F401 - Ensure models are loaded for Base.metadata
 from packages.shared.logging import configure_logger, get_logger
 
 
@@ -30,9 +33,20 @@ async def lifespan(app: FastAPI):
 
     try:
         # Rendering uses the remote mermaid.ink API — never block startup on it.
-        GraphVisualizer.save_png(container.graph.builder().build())
+        # GraphVisualizer.save_png(container.graph.builder().build())
+        pass
     except Exception as exc:
         logger.warning("Could not render graph.png: %s", exc)
+
+    logger.info("Initializing database schema...")
+    try:
+        engine = container.database.engine()
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database schema initialized successfully.")
+    except Exception as exc:
+        logger.error("Failed to initialize database schema: %s", exc)
 
     try:
         yield

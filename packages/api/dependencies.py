@@ -11,6 +11,7 @@ from packages.infrastructure.container import ApplicationContainer
 from packages.memory.manager import MemoryManager
 from packages.rag.manager import RAGManager
 from packages.tools.manager import ToolManager
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # NOTE: dependency-injector's wiring does not see markers inside
 # Annotated[...] metadata — keep Depends(Provide[...]) as a default value.
@@ -26,6 +27,12 @@ def get_container(
     container: ApplicationContainer = Depends(Provide[ApplicationContainer]),
 ) -> ApplicationContainer:
     return container
+
+@inject
+def get_db_session(
+    session: AsyncSession = Depends(Provide[ApplicationContainer.database.session]),
+) -> AsyncSession:
+    return session
 
 
 #

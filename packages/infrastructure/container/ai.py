@@ -15,10 +15,8 @@ class AIContainer(
 
     registry = providers.Singleton(
         LLMRegistry,
-        settings=settings.config,
     )
 
     manager = providers.Singleton(
         LLMManager,
-        registry=registry,
     )

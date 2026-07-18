@@ -18,7 +18,7 @@ class VectorStoreManager:
         self,
         embeddings: EmbeddingManager,
     ) -> None:
-        self.provider = settings.vector_store_backend.lower()
+        self.provider = settings.rag.vector_store_backend.lower()
         self.embeddings = embeddings
 
         self._store = self._create()
@@ -27,9 +27,9 @@ class VectorStoreManager:
 
         if self.provider == "chroma":
             return Chroma(
-                collection_name=settings.vector_collection_name,
+                collection_name=settings.rag.vector_collection_name,
                 embedding_function=self.embeddings.client,
-                persist_directory=settings.chroma_directory,
+                persist_directory=settings.rag.chroma_directory,
             )
 
         if self.provider == "pgvector":

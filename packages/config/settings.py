@@ -14,6 +14,7 @@ from .security import SecuritySettings
 from .storage import StorageSettings
 from .upload_service import UploadServiceSettings
 from .iam import IAMSettings
+from .rag import RAGSettings
 
 
 class Settings(BaseSettings):
@@ -29,3 +30,4 @@ class Settings(BaseSettings):
     features: FeatureSettings = Field(default_factory=FeatureSettings)
     upload_service: UploadServiceSettings = Field(default_factory=UploadServiceSettings)
     iam: IAMSettings = Field(default_factory=IAMSettings)
+    rag: RAGSettings = Field(default_factory=RAGSettings)

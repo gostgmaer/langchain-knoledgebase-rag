@@ -62,6 +62,11 @@ class GraphBuilder:
         graph.add_conditional_edges(
             "planner",
             self.router.route,
+            {
+                "retrieve": "retrieve",
+                "tool": "tool",
+                "llm": "llm",
+            },
         )
 
         #
@@ -89,6 +94,10 @@ class GraphBuilder:
         graph.add_conditional_edges(
             "llm",
             self.router.after_llm,
+            {
+                "tool": "tool",
+                END: END,
+            },
         )
         
         return graph.compile()

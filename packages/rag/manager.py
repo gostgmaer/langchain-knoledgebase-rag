@@ -17,32 +17,23 @@ from packages.rag.vectorstore import VectorStoreManager
 class RAGManager:
     """Facade for the complete RAG subsystem."""
 
-    def __init__(self) -> None:
-        self.embeddings = EmbeddingManager()
-
-        self.vectorstore = VectorStoreManager(
-            self.embeddings,
-        )
-
-        self.loader = DocumentLoader()
-
-        self.splitter = DocumentSplitter()
-
-        self.indexer = DocumentIndexer(
-            loader=self.loader,
-            splitter=self.splitter,
-            embeddings=self.embeddings,
-            vectorstore=self.vectorstore,
-        )
-
-        self.retriever = RAGRetriever(
-            self.vectorstore,
-        )
-
-        self.pipeline = RAGPipeline(
-            self.indexer,
-            self.retriever,
-        )
+    def __init__(
+        self,
+        embeddings: EmbeddingManager,
+        vectorstore: VectorStoreManager,
+        loader: DocumentLoader,
+        splitter: DocumentSplitter,
+        indexer: DocumentIndexer,
+        retriever: RAGRetriever,
+        pipeline: RAGPipeline,
+    ) -> None:
+        self.embeddings = embeddings
+        self.vectorstore = vectorstore
+        self.loader = loader
+        self.splitter = splitter
+        self.indexer = indexer
+        self.retriever = retriever
+        self.pipeline = pipeline
 
     async def index(
         self,
