@@ -5,7 +5,7 @@ from dependency_injector import containers
 from dependency_injector import providers
 
 from packages.graph.builder import GraphBuilder
-from packages.graph.graph_manager import GraphManager
+from packages.graph.manager import GraphManager
 from packages.graph.nodes import GraphNodes
 from packages.graph.router import GraphRouter
 

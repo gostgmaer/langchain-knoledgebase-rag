@@ -14,7 +14,7 @@ from packages.conversation.models import (
 from packages.conversation.service import (
     ConversationService,
 )
-from packages.graph.graph_manager import GraphManager
+from packages.graph.manager import GraphManager
 from packages.graph.state import GraphState
 
 

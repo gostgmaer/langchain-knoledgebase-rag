@@ -25,16 +25,22 @@ class ChatRequest:
 
     conversation_id: UUID
     message: str
+
+    user_id: UUID | None = None
+
+    system_prompt: str | None = None
+
     stream: bool = False
+
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
 class ChatResponse:
     """LLM response."""
-
     conversation_id: UUID
     response: str
+    stream: bool = False
     model: str
     usage: dict[str, int] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.utcnow)

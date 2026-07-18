@@ -1,6 +1,6 @@
 # Application module
 from packages.chat.chat_service import ChatService
-from packages.graph.graph_manager import GraphManager
+from packages.graph.manager import GraphManager
 from packages.conversation.manager import ConversationManager
 from packages.conversation.memory_store import MemoryConversationStore
 

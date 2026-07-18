@@ -12,7 +12,7 @@ class KnowledgeBaseRepository(BaseRepository[KnowledgeBase]):
     """Repository for KnowledgeBase entities."""
 
     def __init__(self, session: AsyncSession) -> None:
-        super().__init__(KnowledgeBase, session)
+        super().__init__("KnowledgeBase", session)
 
     async def get_by_name(
         self,
