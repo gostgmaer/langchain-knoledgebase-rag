@@ -11,23 +11,16 @@ class GraphRouter:
         self,
         state: GraphState,
     ) -> str:
+        return state["next_node"]
+
+    def after_llm(
+        self,
+        state: GraphState,
+    ) -> str:
 
         message = state["messages"][-1]
 
         if getattr(message, "tool_calls", None):
             return "tool"
-
-        if state.get("documents") is None:
-            return "retrieve"
-
-        return "llm"
-
-    def should_summarize(
-        self,
-        state: GraphState,
-    ) -> str:
-
-        if len(state["messages"]) > 30:
-            return "summarize"
 
         return END

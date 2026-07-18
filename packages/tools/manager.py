@@ -33,7 +33,7 @@ class ToolManager:
         self,
         name: str,
         **kwargs,
-    ):
+    ) -> object:
 
         return await self.executor.execute(
             name,

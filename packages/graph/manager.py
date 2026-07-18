@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from packages.graph.builder import GraphBuilder
 from packages.graph.state import GraphState
+from packages.graph.visualizer import GraphVisualizer
 
 
 class GraphManager:
@@ -9,8 +10,9 @@ class GraphManager:
     def __init__(
         self,
         builder: GraphBuilder,
+              
     ) -> None:
-
+        GraphVisualizer.save_png(self.graph) 
         self.graph = builder.build()
 
     async def invoke(

@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from dependency_injector import containers, providers
+from packages.agent.prompt import PromptBuilder
+from packages.agent.runtime import AgentRuntime
 from packages.infrastructure.container.conversation import ConversationContainer
 
 from .ai import AIContainer
+
 # from package.conversation import ConversationContainer
 from packages.infrastructure.container.database import DatabaseContainer
 from packages.infrastructure.container.graph import GraphContainer
@@ -55,6 +58,15 @@ class ApplicationContainer(containers.DeclarativeContainer):
         settings=settings,
     )
 
+    prompt_builder = providers.Singleton(
+        PromptBuilder,
+    )
+
+    agent_runtime = providers.Singleton(
+        AgentRuntime,
+        llm=ai,
+        prompt_builder=prompt_builder,
+    )
     rag = providers.Container(
         RAGContainer,
         settings=settings,

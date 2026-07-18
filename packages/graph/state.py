@@ -1,32 +1,67 @@
 from __future__ import annotations
 
 from typing import Any
-from typing_extensions import TypedDict
 
 from langchain_core.documents import Document
-
-from packages.graph.types import Messages
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
+from typing_extensions import Annotated, TypedDict
 
 
 class GraphState(TypedDict, total=False):
     """
-    Shared state across every node.
+    Shared state across the LangGraph workflow.
+    Every node reads from and writes to this state.
     """
 
-    messages: Messages
+    #
+    # Conversation
+    #
+
+    messages: Annotated[list[BaseMessage], add_messages]
+
+    conversation_id: str
+    thread_id: str
+    tenant_id: str
+    user_id: str
+
+    #
+    # AI
+    #
+
+    model: str
+    system_prompt: str
+
+    #
+    # RAG
+    #
 
     documents: list[Document]
 
-    tools: list[dict[str, Any]]
+    #
+    # Tools
+    #
 
-    user_id: str
+    tool_calls: list[dict[str, Any]]
+    tool_results: list[Any]
 
-    conversation_id: str
-
-    thread_id: str
-
-    system_prompt: str
+    #
+    # Memory
+    #
 
     summary: str
 
+    #
+    # Execution
+    #
+
+    next_node: str
     metadata: dict[str, Any]
+    usage: dict[str, Any]
+
+    #
+    # Error Handling
+    #
+
+    retry_count: int
+    error: str | None

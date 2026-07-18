@@ -1,21 +1,26 @@
-# Graph nodes
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from langchain_core.messages import SystemMessage
+
+from packages.agent.runtime import AgentRuntime
+from packages.graph.planner import GraphPlanner
+from packages.graph.state import GraphState
 from packages.infrastructure.ai.manager import LLMManager
 from packages.memory.manager import MemoryManager
 from packages.rag.manager import RAGManager
 from packages.tools.manager import ToolManager
-from packages.graph.state import GraphState
+from langchain_core.messages import ToolMessage
 
 
 @dataclass(slots=True)
 class NodeContext:
-    ai: LLMManager
+    runtime: AgentRuntime
     rag: RAGManager
     tools: ToolManager
     memory: MemoryManager
+    planner: GraphPlanner
 
 
 class GraphNodes:
@@ -41,62 +46,65 @@ class GraphNodes:
             "documents": documents,
         }
 
-    async def llm(
-        self,
-        state: GraphState,
-    ) -> GraphState:
-
-        messages = state["messages"]
-
-        if state.get("documents"):
-
-            context = "\n\n".join(
-                doc.page_content
-                for doc in state["documents"]
-            )
-
-            messages = [
-                *messages,
-            ]
-
-            messages.insert(
-                0,
-                {
-                    "role": "system",
-                    "content": context,
-                },
-            )
-
-        response = await self.context.ai.chat(
-            messages,
-        )
-
-        return {
-            "messages": [response],
-        }
-
     async def tool(
         self,
         state: GraphState,
     ) -> GraphState:
 
-        result = await self.context.tools.execute(
-            state["messages"],
+        ai_message = state["messages"][-1]
+
+        tool_messages: list[ToolMessage] = []
+
+        for tool_call in ai_message.tool_calls:
+
+            result = await self.context.tools.execute(
+                tool_call["name"],
+                **tool_call["args"],
+            )
+
+        tool_messages.append(
+            ToolMessage(
+                content=str(result),
+                tool_call_id=tool_call["id"],
+            )
         )
 
         return {
-            "messages": result,
+            "messages": tool_messages,
+        }
+
+    async def llm(
+        self,
+        state: GraphState,
+    ) -> GraphState:
+
+        response = await self.context.runtime.run(state)
+
+        return {
+            "messages": [response.message],
+            "usage": {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "total_tokens": response.usage.total_tokens,
+            },
         }
 
     async def summarize(
         self,
         state: GraphState,
     ) -> GraphState:
+        """
+        Placeholder node.
+        Conversation summarization will be implemented later.
+        """
+        return {}
 
-        summary = await self.context.memory.summarize(
-            state["messages"],
-        )
+    async def planner(
+        self,
+        state: GraphState,
+    ):
+        result = await self.context.planner.plan(state)
 
         return {
-            "summary": summary,
+            "next_node": result.next_node,
         }

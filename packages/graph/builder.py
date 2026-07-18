@@ -1,12 +1,6 @@
-# Graph builder
 from __future__ import annotations
 
-
-from langgraph.graph import (
-    END,
-    START,
-    StateGraph,
-)
+from langgraph.graph import END, START, StateGraph
 
 from packages.graph.nodes import GraphNodes
 from packages.graph.router import GraphRouter
@@ -22,12 +16,20 @@ class GraphBuilder:
     ) -> None:
         self.nodes = nodes
         self.router = router
+        self.graph = builder.build()
 
     def build(self):
 
         graph = StateGraph(GraphState)
 
+        #
         # Nodes
+        #
+
+        graph.add_node(
+            "planner",
+            self.nodes.planner,
+        )
 
         graph.add_node(
             "retrieve",
@@ -44,22 +46,26 @@ class GraphBuilder:
             self.nodes.llm,
         )
 
-        graph.add_node(
-            "summarize",
-            self.nodes.summarize,
+        #
+        # Start
+        #
+
+        graph.add_edge(
+            START,
+            "planner",
         )
 
         #
-        # START
+        # Planner
         #
 
         graph.add_conditional_edges(
-            START,
+            "planner",
             self.router.route,
         )
 
         #
-        # retrieve
+        # Retrieval
         #
 
         graph.add_edge(
@@ -68,7 +74,7 @@ class GraphBuilder:
         )
 
         #
-        # tool
+        # Tool
         #
 
         graph.add_edge(
@@ -77,21 +83,12 @@ class GraphBuilder:
         )
 
         #
-        # llm
+        # LLM
         #
 
         graph.add_conditional_edges(
             "llm",
-            self.router.should_summarize,
+            self.router.after_llm,
         )
-
-        #
-        # summarize
-        #
-
-        graph.add_edge(
-            "summarize",
-            END,
-        )
-
+        
         return graph.compile()
