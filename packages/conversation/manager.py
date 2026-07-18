@@ -1,46 +1,60 @@
 # Conversation manager
+
+
+
+from __future__ import annotations
 from __future__ import annotations
 
-from langchain_core.messages import HumanMessage
+from uuid import UUID
 
-from packages.conversation.store import ConversationStore
-from packages.graph.graph_manager import GraphManager
-from packages.graph.state import AgentState
+from packages.chat.chat_service import ChatService
+from packages.conversation.models import (
+    ChatRequest,
+    ChatResponse,
+)
+from packages.conversation.service import ConversationService
 
 
 class ConversationManager:
+    """Coordinates chat, history and persistence."""
 
     def __init__(
         self,
-        graph: GraphManager,
-        store: ConversationStore,
+        service: ConversationService,
+        chat: ChatService,
     ) -> None:
-        self._graph = graph
-        self._store = store
+        self.service = service
+        self.chat = chat
 
-    async def chat(
+    async def chat_completion(
         self,
-        session_id: str,
-        message: str,
-    ) -> AgentState:
-
-        state = await self._store.load(session_id)
-
-        if state is None:
-            state = {
-                "messages": [],
-                "session_id": session_id,
-                "conversation_id": None,
-                "agent_id": None,
-                "metadata": {},
-            }
-
-        state["messages"].append(
-            HumanMessage(content=message)
+        request: ChatRequest,
+    ) -> ChatResponse:
+        conversation = await self.service.get(
+            request.conversation_id
         )
 
-        state = await self._graph.ainvoke(state)
+        if conversation is None:
+            raise ValueError("Conversation not found.")
 
-        await self._store.save(state)
+        response = await self.chat.chat(
+            request.message
+        )
 
-        return state
+        return ChatResponse(
+            conversation_id=request.conversation_id,
+            response=response.content,
+            model=response.response_metadata.get(
+                "model_name",
+                "",
+            ),
+            usage=response.usage_metadata or {},
+        )
+
+    async def history(
+        self,
+        conversation_id: UUID,
+    ):
+        return await self.service.list_messages(
+            conversation_id
+        )

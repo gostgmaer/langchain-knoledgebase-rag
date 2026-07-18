@@ -1,15 +1,26 @@
-# RAG exceptions
-class RAGError(Exception):
-    """Base RAG exception."""
+class RAGException(Exception):
+    """Base exception for RAG."""
 
 
-class EmbeddingError(RAGError):
-    pass
+class LoaderException(RAGException):
+    """Raised when document loading fails."""
 
 
-class VectorStoreError(RAGError):
-    pass
+class SplitterException(RAGException):
+    """Raised when document splitting fails."""
 
 
-class RetrievalError(RAGError):
-    pass
+class EmbeddingException(RAGException):
+    """Raised when embedding generation fails."""
+
+
+class VectorStoreException(RAGException):
+    """Raised when vector store operations fail."""
+
+
+class RetrievalException(RAGException):
+    """Raised when retrieval fails."""
+
+
+class IndexingException(RAGException):
+    """Raised when indexing fails."""
