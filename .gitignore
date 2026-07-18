@@ -10,6 +10,13 @@ wheels/
 .venv
 .env
 .env.local
+
+.idea/
+.vscode/
+
+.coverage
+htmlcov/
+
 storage/
 
 uploads/
