@@ -37,3 +37,4 @@ class DocumentIndexer:
         await self.vectorstore.add_documents(chunks)
 
         return chunks
+    

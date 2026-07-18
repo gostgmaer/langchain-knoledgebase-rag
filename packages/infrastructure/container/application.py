@@ -3,16 +3,18 @@ from __future__ import annotations
 
 from dependency_injector import containers
 
+from packages.infrastructure.container.conversation import ConversationContainer
+
 from .ai import AIContainer
-from .conversation import ConversationContainer
-from .database import DatabaseContainer
-from .graph import GraphContainer
-from .memory import MemoryContainer
-from .rag import RAGContainer
-from .repositories import RepositoryContainer
-from .services import ServiceContainer
-from .settings import SettingsContainer
-from .tools import ToolsContainer
+# from package.conversation import ConversationContainer
+from packages.infrastructure.container.database import DatabaseContainer
+from packages.infrastructure.container.graph import GraphContainer
+from packages.infrastructure.container.memory import MemoryContainer
+from packages.infrastructure.container.rag import RAGContainer
+from packages.infrastructure.container.repositories import RepositoryContainer
+from packages.infrastructure.container.services import ServiceContainer
+from packages.infrastructure.container.settings import SettingsContainer
+from packages.infrastructure.container.tools import ToolsContainer
 
 
 class ApplicationContainer(containers.DeclarativeContainer):

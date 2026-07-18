@@ -5,11 +5,11 @@ from dependency_injector import containers
 from dependency_injector import providers
 
 from packages.rag.embeddings import EmbeddingManager
-from packages.rag.indexer import Indexer
+from packages.rag.indexer import DocumentIndexer
 from packages.rag.loader import DocumentLoader
 from packages.rag.manager import RAGManager
 from packages.rag.pipeline import RAGPipeline
-from packages.rag.retriever import Retriever
+from packages.rag.retriever import RAGRetriever
 from packages.rag.splitter import DocumentSplitter
 from packages.rag.vectorstore import VectorStoreManager
 
@@ -42,14 +42,14 @@ class RAGContainer(
     )
 
     indexer = providers.Singleton(
-        Indexer,
+        DocumentIndexer,
         loader=loader,
         splitter=splitter,
         vectorstore=vectorstore,
     )
 
     retriever = providers.Singleton(
-        Retriever,
+        RAGRetriever,
         vectorstore=vectorstore,
     )
 

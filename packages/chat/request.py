@@ -12,10 +12,9 @@ class ChatRequest:
     """
     Represents a single chat request.
     """
-
+    conversation_id: UUID
     messages: list[BaseMessage]
     temperature: float | None = None
     max_tokens: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    conversation_id: UUID
     stream: bool = False
