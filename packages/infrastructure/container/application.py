@@ -1,8 +1,7 @@
 # Container application setup
 from __future__ import annotations
 
-from dependency_injector import containers
-
+from dependency_injector import containers, providers
 from packages.infrastructure.container.conversation import ConversationContainer
 
 from .ai import AIContainer
@@ -27,7 +26,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     wiring_config = containers.WiringConfiguration(
         packages=[
             "packages.api",
-            "packages.workers",
+            # "packages.workers",
         ]
     )
 
@@ -35,16 +34,14 @@ class ApplicationContainer(containers.DeclarativeContainer):
     # Core
     #
 
-    settings = containers.Container(
-        SettingsContainer,
-    )
+    settings = providers.Container(SettingsContainer)
 
-    database = containers.Container(
+    database = providers.Container(
         DatabaseContainer,
         settings=settings,
     )
 
-    repositories = containers.Container(
+    repositories = providers.Container(
         RepositoryContainer,
         database=database,
     )
@@ -53,23 +50,23 @@ class ApplicationContainer(containers.DeclarativeContainer):
     # AI
     #
 
-    ai = containers.Container(
+    ai = providers.Container(
         AIContainer,
         settings=settings,
     )
 
-    rag = containers.Container(
+    rag = providers.Container(
         RAGContainer,
         settings=settings,
         ai=ai,
     )
 
-    tools = containers.Container(
+    tools = providers.Container(
         ToolsContainer,
         settings=settings,
     )
 
-    memory = containers.Container(
+    memory = providers.Container(
         MemoryContainer,
         settings=settings,
     )
@@ -78,7 +75,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     # Shared Services
     #
 
-    services = containers.Container(
+    services = providers.Container(
         ServiceContainer,
         ai=ai,
         repositories=repositories,
@@ -88,7 +85,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     # LangGraph
     #
 
-    graph = containers.Container(
+    graph = providers.Container(
         GraphContainer,
         ai=ai,
         rag=rag,
@@ -100,7 +97,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     # Conversation
     #
 
-    conversation = containers.Container(
+    conversation = providers.Container(
         ConversationContainer,
         repositories=repositories,
         graph=graph,

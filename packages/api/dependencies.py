@@ -6,7 +6,7 @@ from typing import Annotated
 from dependency_injector.wiring import Provide, inject
 from fastapi import Depends
 
-from packages.infrastructure.ai.manager import AIManager
+from packages.infrastructure.ai.manager import LLMManager
 from packages.conversation.manager import ConversationManager
 from packages.graph.manager import GraphManager
 from packages.infrastructure.container import ApplicationContainer
@@ -36,10 +36,10 @@ def get_container(
 @inject
 def get_ai_manager(
     manager: Annotated[
-        AIManager,
+        LLMManager,
         Depends(Provide[ApplicationContainer.ai.manager]),
     ],
-) -> AIManager:
+) -> LLMManager:
     return manager
 
 

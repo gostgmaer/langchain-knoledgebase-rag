@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from packages.infrastructure.container import ApplicationContainer
+from packages.shared.logging import configure_logger, get_logger
 
 
 @asynccontextmanager
@@ -34,8 +35,12 @@ async def lifespan(app: FastAPI):
     #
     # Resolve core services
     #
-    settings = container.settings.settings()
-    logger = container.settings.logger()
+    settings = container.settings.config()
+    configure_logger(
+        settings.logging.level,  # or whatever field exists in LoggingSettings
+    )
+
+    logger = get_logger(__name__)
 
     logger.info("Starting EasyDev AI Platform...")
 

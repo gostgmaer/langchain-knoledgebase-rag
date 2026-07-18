@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dependency_injector.wiring import inject
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 
 from packages.api.dependencies import get_conversation_manager
 from packages.api.responses import ApiResponse
@@ -29,8 +29,8 @@ router = APIRouter(
 @inject
 async def chat(
     request: ChatRequestSchema,
-    manager: ConversationManager = get_conversation_manager(),
-) -> ApiResponse[ChatResponseSchema]:
+    manager: ConversationManager = Depends(get_conversation_manager),
+):
     """
     Execute a chat request.
     """

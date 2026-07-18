@@ -41,15 +41,10 @@ class ErrorResponse(BaseModel):
         populate_by_name=True,
         extra="forbid",
     )
-
     success: bool = False
-
     error: str
-
     message: str
-
     details: dict[str, Any] = Field(default_factory=dict)
-
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
     )

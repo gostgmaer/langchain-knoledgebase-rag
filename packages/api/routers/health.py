@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-
-from packages.api.responses import success
+from packages.api.responses import ApiResponse
 
 router = APIRouter(
     prefix="/health",
@@ -19,11 +18,11 @@ async def health(
     Basic application health check.
     """
 
-    return success(
-        message="Application is healthy.",
+    return ApiResponse(
+        message="Health check successful.",
         data={
             "service": "EasyDev AI Platform",
             "version": "1.0.0",
             "status": "healthy",
-        },
+        }
     )
