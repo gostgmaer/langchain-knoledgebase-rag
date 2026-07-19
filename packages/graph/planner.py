@@ -4,6 +4,18 @@ from dataclasses import dataclass
 
 from packages.graph.state import GraphState
 
+RETRIEVAL_KEYWORDS = (
+    "search",
+    "find",
+    "lookup",
+    "document",
+    "knowledge",
+    "manual",
+    "policy",
+    "wiki",
+    "rag",
+)
+
 
 @dataclass(slots=True)
 class PlannerResult:
@@ -26,7 +38,7 @@ class GraphPlanner:
         # if "weather" in message:
         #     return PlannerResult("tool")
 
-        if "search" in message:
+        if any(keyword in message for keyword in RETRIEVAL_KEYWORDS):
             return PlannerResult("retrieve")
 
         return PlannerResult("llm")

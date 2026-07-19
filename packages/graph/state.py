@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from langchain_core.documents import Document
+from uuid import UUID
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from typing_extensions import Annotated, TypedDict
-
+from packages.knowledge.schemas import SearchResult
+from packages.rag.schemas import Context
+from packages.rag.schemas import Citation
 
 class GraphState(TypedDict, total=False):
     """
@@ -17,26 +19,29 @@ class GraphState(TypedDict, total=False):
     #
     # Conversation
     #
-
+    response:str
     messages: Annotated[list[BaseMessage], add_messages]
 
-    conversation_id: str
-    thread_id: str
-    tenant_id: str
-    user_id: str
+    conversation_id: UUID
+    thread_id: UUID
+    tenant_id: UUID
+    user_id: UUID
 
     #
     # AI
     #
 
-    model: str
+    model_profile_id: UUID
     system_prompt: str
-
+    temperature: float
+    max_tokens: int
     #
     # RAG
     #
 
-    documents: list[Document]
+    search_results: list[SearchResult]
+    context: Context | None
+    citations: list[Citation]
 
     #
     # Tools
@@ -54,8 +59,10 @@ class GraphState(TypedDict, total=False):
     #
     # Execution
     #
-
-    next_node: str
+    retrieval_enabled: bool
+    tools_enabled: bool
+    stream: bool
+    next_step: str
     metadata: dict[str, Any]
     usage: dict[str, Any]
 
@@ -65,3 +72,4 @@ class GraphState(TypedDict, total=False):
 
     retry_count: int
     error: str | None
+

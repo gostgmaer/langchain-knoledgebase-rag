@@ -14,8 +14,8 @@ class GraphBuilder:
         nodes: GraphNodes,
         router: GraphRouter,
     ) -> None:
-        self.nodes = nodes
-        self.router = router
+        self._nodes = nodes
+        self._router = router
         
 
     def build(self):
@@ -28,22 +28,22 @@ class GraphBuilder:
 
         graph.add_node(
             "planner",
-            self.nodes.planner,
+            self._nodes.planner,
         )
 
         graph.add_node(
             "retrieve",
-            self.nodes.retrieve,
+            self._nodes.retrieve,
         )
 
         graph.add_node(
             "tool",
-            self.nodes.tool,
+            self._nodes.tool,
         )
 
         graph.add_node(
             "llm",
-            self.nodes.llm,
+            self._nodes.llm,
         )
 
         #
@@ -61,7 +61,7 @@ class GraphBuilder:
 
         graph.add_conditional_edges(
             "planner",
-            self.router.route,
+            self._router.route,
             {
                 "retrieve": "retrieve",
                 "tool": "tool",
@@ -93,7 +93,7 @@ class GraphBuilder:
 
         graph.add_conditional_edges(
             "llm",
-            self.router.after_llm,
+            self._router.after_llm,
             {
                 "tool": "tool",
                 END: END,

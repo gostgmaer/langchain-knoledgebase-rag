@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from langchain_core.messages import SystemMessage
 
 from packages.agent.runtime import AgentRuntime
 from packages.graph.planner import GraphPlanner
 from packages.graph.state import GraphState
-from packages.infrastructure.ai.manager import LLMManager
 from packages.memory.manager import MemoryManager
 from packages.rag.manager import RAGManager
+from packages.rag.schemas import RAGRequest
 from packages.tools.manager import ToolManager
 from langchain_core.messages import ToolMessage
 
@@ -32,19 +31,36 @@ class GraphNodes:
         self.context = context
 
     async def retrieve(
-        self,
-        state: GraphState,
-    ) -> GraphState:
+    self,
+    state: GraphState,
+) -> GraphState:
 
-        query = state["messages"][-1].content
+        request = RAGRequest(
+        tenant_id=state["tenant_id"],
+        model_profile_id=state["model_profile_id"],
+        query=state["messages"][-1].content,
+        conversation_id=state.get("conversation_id"),
+        system_prompt=state.get("system_prompt"),
+        metadata=state.get("metadata", {}),
+    )
 
-        documents = await self.context.rag.retrieve(
-            query=query,
-        )
+        search_results = await self.context.rag.retrieve(
+        request,
+    )
+
+        context = self.context.rag.build_context(
+        search_results,
+    )
+
+        citations = self.context.rag.build_citations(
+        search_results,
+    )
 
         return {
-            "documents": documents,
-        }
+        "search_results": search_results,
+        "context": context,
+        "citations": citations,
+    }
 
     async def tool(
         self,

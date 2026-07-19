@@ -9,7 +9,7 @@ from packages.rag.indexer import DocumentIndexer
 from packages.rag.loader import DocumentLoader
 from packages.rag.manager import RAGManager
 from packages.rag.pipeline import RAGPipeline
-from packages.rag.retriever import RAGRetriever
+from packages.rag.pipelines.retrieval import RetrievalPipeline
 from packages.rag.splitter import DocumentSplitter
 from packages.rag.vectorstore import VectorStoreManager
 
@@ -48,7 +48,7 @@ class RAGContainer(
     )
 
     retriever = providers.Singleton(
-        RAGRetriever,
+        RetrievalPipeline,
         vectorstore=vectorstore,
     )
 
