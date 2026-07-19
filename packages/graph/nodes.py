@@ -66,6 +66,7 @@ class GraphNodes:
             tool_messages.append(
                 ToolMessage(
                     content=str(result),
+                    name=tool_call["name"],
                     tool_call_id=tool_call["id"],
                 )
             )

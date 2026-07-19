@@ -9,9 +9,9 @@
 # ============================================================
 
 
-
 import os
-
+from dotenv import load_dotenv
+load_dotenv()
 from langchain_core.tools import tool
 from langchain_community.utilities import GoogleSerperAPIWrapper
 

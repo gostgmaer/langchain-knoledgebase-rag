@@ -80,19 +80,10 @@ class ConversationManager:
         # Build history
         #
 
+        # Build history
         history = await self.context.build(
             conversation_id=request.conversation_id,
             system_prompt=request.system_prompt,
-        )
-
-        #
-        # Append latest user message
-        #
-
-        history.append(
-            HumanMessage(
-                content=request.message,
-            )
         )
 
         #

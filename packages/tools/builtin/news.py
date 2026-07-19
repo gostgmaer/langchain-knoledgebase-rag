@@ -10,10 +10,15 @@
 
 
 from langchain_tavily import TavilySearch
+from dotenv import load_dotenv
+load_dotenv()
+
 from langchain.tools import tool
 
 import os
-from packages.logging import logger
+from packages.logging.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 @tool(

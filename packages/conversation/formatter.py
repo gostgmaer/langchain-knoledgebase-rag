@@ -28,8 +28,9 @@ class MessageFormatter:
         result: list[BaseMessage] = []
 
         for message in messages:
+            role_val = message.role.value if hasattr(message.role, "value") else str(message.role)
             cls = self.ROLE_MAP.get(
-                message.role.lower(),
+                role_val.lower(),
                 HumanMessage,
             )
 

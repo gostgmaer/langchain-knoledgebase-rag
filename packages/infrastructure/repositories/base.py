@@ -33,6 +33,7 @@ class BaseRepository(Generic[ModelType]):
     ) -> ModelType:
         self.session.add(entity)
         await self.session.flush()
+        await self.session.commit()
         await self.session.refresh(entity)
         return entity
 
@@ -93,6 +94,7 @@ class BaseRepository(Generic[ModelType]):
         entity: ModelType,
     ) -> ModelType:
         await self.session.flush()
+        await self.session.commit()
         await self.session.refresh(entity)
         return entity
 
@@ -105,6 +107,7 @@ class BaseRepository(Generic[ModelType]):
         entity: ModelType,
     ) -> None:
         await self.session.delete(entity)
+        await self.session.commit()
 
     async def delete_by_id(
         self,
@@ -116,6 +119,7 @@ class BaseRepository(Generic[ModelType]):
         )
 
         result = await self.session.execute(stmt)
+        await self.session.commit()
 
         return result.rowcount > 0
 
