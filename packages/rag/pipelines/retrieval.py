@@ -5,9 +5,10 @@ RAG retrieval pipeline.
 
 from __future__ import annotations
 
-from packages.knowledge.manager import KnowledgeManager
-from packages.knowledge.retrievers.schemas import SearchRequest
+import uuid
+from packages.rag.vectorstore import VectorStoreManager
 from packages.knowledge.retrievers.schemas import SearchResult
+from packages.knowledge.vectorstores.schema import SearchFilter
 from packages.rag.schemas import RAGRequest
 
 
@@ -18,9 +19,9 @@ class RetrievalPipeline:
 
     def __init__(
         self,
-        knowledge_manager: KnowledgeManager,
+        vectorstore: VectorStoreManager,
     ) -> None:
-        self._knowledge_manager = knowledge_manager
+        self._vectorstore = vectorstore
 
     async def retrieve(
         self,
@@ -30,13 +31,22 @@ class RetrievalPipeline:
         Retrieve relevant knowledge for a user query.
         """
 
-        search_request = SearchRequest(
-            tenant_id=request.tenant_id,
-            model_profile_id=request.model_profile_id,
+        documents = await self._vectorstore.similarity_search(
             query=request.query,
-            metadata=request.metadata,
+            k=5,
         )
 
-        return await self._knowledge_manager.search(
-            search_request,
-        )
+        results = []
+        for index, doc in enumerate(documents):
+            results.append(
+                SearchResult(
+                    document_id=uuid.uuid4(),
+                    chunk_id=uuid.uuid4(),
+                    chunk_index=index,
+                    content=doc.page_content,
+                    score=1.0,
+                    metadata=doc.metadata,
+                )
+            )
+
+        return results

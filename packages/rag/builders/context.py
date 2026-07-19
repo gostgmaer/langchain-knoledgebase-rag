@@ -32,7 +32,7 @@ class ContextBuilder:
 
         for index, result in enumerate(search_results, start=1):
             sections.append(
-                f"[{index}]\n{result.chunk.content}"
+                f"[{index}]\n{result.content}"
             )
 
         return Context(

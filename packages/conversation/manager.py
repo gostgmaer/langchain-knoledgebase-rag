@@ -95,6 +95,8 @@ class ConversationManager:
         state: GraphState = {
             "messages": history,
             "conversation_id": str(request.conversation_id),
+            "tenant_id": str(conversation.tenant_id),
+            "model_profile_id": str(conversation.agent.model_profile_id),
             "user_id": str(request.user_id),
             "thread_id": str(request.conversation_id),
             "documents": [],

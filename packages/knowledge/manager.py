@@ -69,7 +69,7 @@ class KnowledgeManager:
             model_profile_id=filters.model_profile_id,
         )
 
-        request = RetrievalRequest(
+        request = IngestionRequest(
             query_embedding=query_embedding,
             filters=filters,
             options=options,

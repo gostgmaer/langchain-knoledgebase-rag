@@ -12,6 +12,10 @@ from packages.rag.pipeline import RAGPipeline
 from packages.rag.pipelines.retrieval import RetrievalPipeline
 from packages.rag.splitter import DocumentSplitter
 from packages.rag.vectorstore import VectorStoreManager
+from packages.knowledge.manager import KnowledgeManager
+from packages.rag.builders.context import ContextBuilder
+from packages.rag.builders.prompt import PromptBuilder
+from packages.rag.builders.citation import CitationBuilder
 
 
 class RAGContainer(
@@ -21,6 +25,8 @@ class RAGContainer(
     settings = providers.DependenciesContainer()
 
     ai = providers.DependenciesContainer()
+
+    services = providers.DependenciesContainer()
 
     embeddings = providers.Singleton(
         EmbeddingManager,
@@ -47,6 +53,13 @@ class RAGContainer(
         vectorstore=vectorstore,
     )
 
+    knowledge_manager = providers.Singleton(
+        KnowledgeManager,
+        ingestion_pipeline=providers.Object(None),
+        embedding_manager=providers.Object(None),
+        retriever_manager=providers.Object(None),
+    )
+
     retriever = providers.Singleton(
         RetrievalPipeline,
         vectorstore=vectorstore,
@@ -58,13 +71,15 @@ class RAGContainer(
         indexer=indexer,
     )
 
+    context_builder = providers.Singleton(ContextBuilder)
+    prompt_builder = providers.Singleton(PromptBuilder)
+    citation_builder = providers.Singleton(CitationBuilder)
+
     manager = providers.Singleton(
         RAGManager,
-        embeddings=embeddings,
-        vectorstore=vectorstore,
-        loader=loader,
-        splitter=splitter,
-        indexer=indexer,
-        retriever=retriever,
-        pipeline=pipeline,
+        retrieval_pipeline=retriever,
+        context_builder=context_builder,
+        prompt_builder=prompt_builder,
+        citation_builder=citation_builder,
+        chat_service=services.chat,
     )

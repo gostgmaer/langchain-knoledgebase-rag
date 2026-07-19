@@ -74,17 +74,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
         tools=tools.manager,
     )
 
-    rag = providers.Container(
-        RAGContainer,
-        settings=settings,
-        ai=ai,
-    )
-
-    memory = providers.Container(
-        MemoryContainer,
-        settings=settings,
-    )
-
     #
     # Shared Services
     #
@@ -93,6 +82,18 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ServiceContainer,
         ai=ai,
         repositories=repositories,
+    )
+
+    rag = providers.Container(
+        RAGContainer,
+        settings=settings,
+        ai=ai,
+        services=services,
+    )
+
+    memory = providers.Container(
+        MemoryContainer,
+        settings=settings,
     )
 
     #

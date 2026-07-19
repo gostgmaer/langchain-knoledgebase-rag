@@ -25,7 +25,7 @@ class ServiceContainer(containers.DeclarativeContainer):
 
     chat = providers.Singleton(
         ChatService,
-        ai=ai.manager,
+        llm=ai.manager,
     )
 
     #

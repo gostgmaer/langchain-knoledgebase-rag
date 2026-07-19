@@ -27,9 +27,9 @@ class CitationBuilder:
         for result in search_results:
             citations.append(
                 Citation(
-                    document_id=result.chunk.document_id,
-                    chunk_id=result.chunk.id,
-                    chunk_index=result.chunk.chunk_index,
+                    document_id=result.document_id,
+                    chunk_id=result.chunk_id,
+                    chunk_index=result.chunk_index,
                     score=result.score,
                 )
             )

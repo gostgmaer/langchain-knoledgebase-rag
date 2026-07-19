@@ -62,7 +62,7 @@ class GraphState(TypedDict, total=False):
     retrieval_enabled: bool
     tools_enabled: bool
     stream: bool
-    next_step: str
+    next_node: str
     metadata: dict[str, Any]
     usage: dict[str, Any]
 
