@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from pgvector import Vector
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -17,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
+from packages.config import settings
 from packages.domain.enums.model_provider import ModelProvider
 from packages.domain.enums.model_status import ModelStatus
 from packages.domain.models.base import BaseModel
@@ -112,6 +114,11 @@ class ModelProfile(BaseModel):
     embedding_dimensions: Mapped[int] = mapped_column(
         Integer,
         default=0,
+        nullable=False,
+    )
+
+    vector: Mapped[list[float]] = mapped_column(
+        Vector(settings.embedding.dimensions),
         nullable=False,
     )
 

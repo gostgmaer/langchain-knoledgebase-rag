@@ -5,13 +5,15 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import (
+    CheckConstraint,
     ForeignKey,
     Index,
     Integer,
     JSON,
     Text,
+    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from packages.domain.models.base import BaseModel
@@ -29,6 +31,15 @@ class DocumentChunk(BaseModel):
     __table_args__ = (
         Index("ix_chunk_document", "document_id"),
         Index("ix_chunk_tenant", "tenant_id"),
+        UniqueConstraint(
+            "document_id",
+            "chunk_index",
+            name="uq_document_chunk_index",
+        ),
+        CheckConstraint(
+            "chunk_index >= 0",
+            name="ck_chunk_index_positive",
+        ),
     )
 
     tenant_id: Mapped[UUID] = mapped_column(
@@ -50,7 +61,9 @@ class DocumentChunk(BaseModel):
         Integer,
     )
 
-    section: Mapped[str | None]
+    section: Mapped[str | None] = mapped_column(
+        nullable=True,
+    )
 
     content: Mapped[str] = mapped_column(
         Text,
@@ -67,13 +80,18 @@ class DocumentChunk(BaseModel):
         nullable=False,
     )
 
-    start_offset: Mapped[int | None]
+    start_offset: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
 
-    end_offset: Mapped[int | None]
+    end_offset: Mapped[int | None] = mapped_column(
+        Integer,
+    )
 
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
-        JSON,
+        JSONB,
         default=dict,
         nullable=False,
     )
@@ -81,8 +99,9 @@ class DocumentChunk(BaseModel):
     document: Mapped["Document"] = relationship(
         back_populates="chunks",
     )
-
+    source: Mapped[str | None]
     embeddings: Mapped[list["Embedding"]] = relationship(
         back_populates="chunk",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )

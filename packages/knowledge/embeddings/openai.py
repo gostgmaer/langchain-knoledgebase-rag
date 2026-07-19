@@ -1,0 +1,52 @@
+"""
+OpenAI embedding provider.
+"""
+
+from __future__ import annotations
+
+from langchain_openai import OpenAIEmbeddings
+
+from packages.config.loader import settings
+from packages.shared.logging import get_logger
+
+from packages.knowledge.schemas.chunk import KnowledgeChunk
+
+from .base import EmbeddingProvider
+
+logger = get_logger(__name__)
+
+
+class OpenAIEmbeddingProvider(EmbeddingProvider):
+
+    def __init__(self) -> None:
+
+        self._client = OpenAIEmbeddings(
+            model=settings.embedding.model,
+            api_key=settings.openai.api_key,
+        )
+
+    async def embed(
+        self,
+        chunks: list[KnowledgeChunk],
+    ) -> list[KnowledgeChunk]:
+
+        logger.info(
+            "Generating OpenAI embeddings",
+            chunks=len(chunks),
+        )
+
+        vectors = await self._client.aembed_documents(
+            [
+                chunk.document.page_content
+                for chunk in chunks
+            ]
+        )
+
+        for chunk, vector in zip(
+            chunks,
+            vectors,
+            strict=True,
+        ):
+            chunk.embedding = vector
+
+        return chunks

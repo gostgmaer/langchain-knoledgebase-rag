@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from packages.config.rag import RAGSettings
 from packages.config.upload_service import UploadServiceSettings
 
 from .ai import AISettings
@@ -30,7 +31,8 @@ def get_settings() -> Settings:
         storage=StorageSettings(),
         features=FeatureSettings(),
         upload_service=UploadServiceSettings(),
-        iam = IAMSettings()
+        iam = IAMSettings(),
+        rag=RAGSettings()
         )
 
 settings = get_settings()
