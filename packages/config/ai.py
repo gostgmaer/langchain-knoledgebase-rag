@@ -11,7 +11,7 @@ class AISettings(BaseSettings):
         env_file=".env",
         extra="ignore",
     )
-    model: str = Field(default="gemini-pro", alias="LLM_MODEL")
+    model: str = Field(default="gemini-3.1-flash-lite", alias="LLM_MODEL")
 
     google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
@@ -22,3 +22,5 @@ class AISettings(BaseSettings):
     default_temperature: float = Field(default=0.2, alias="LLM_TEMPERATURE")
     max_tokens: int = Field(default=8192, alias="LLM_MAX_TOKENS")
     streaming: bool = Field(default=True, alias="LLM_STREAMING")
+    top_p: float = Field(default=0.95, alias="LLM_TOP_P")
+    top_k: float = Field(default=0.9, alias="LLM_TOP_K")
