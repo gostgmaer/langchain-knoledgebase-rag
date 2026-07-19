@@ -1,21 +1,33 @@
-# base.py
 """
 Base document splitter.
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
-from langchain_core.documents import Document
+from packages.knowledge.splitters.schema import SplitRequest
+from packages.domain.models.document_chunk import DocumentChunk
 
 
-class DocumentSplitter(ABC):
-    """Base contract for all document splitters."""
+class BaseSplitter(ABC):
+    """
+    Base contract for all document splitters.
+    """
 
     @abstractmethod
     async def split(
         self,
-        documents: list[Document],
-    ) -> list[Document]:
+        request: SplitRequest,
+    ) -> list[DocumentChunk]:
+        """
+        Split a document into chunks.
+
+        Args:
+            request: Split request.
+
+        Returns:
+            List of document chunks.
+        """
         raise NotImplementedError
