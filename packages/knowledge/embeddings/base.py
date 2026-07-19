@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from packages.knowledge.schemas.chunk import KnowledgeChunk
+from packages.knowledge.schema.chunk import KnowledgeChunk
 
 
 class EmbeddingProvider(ABC):

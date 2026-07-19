@@ -5,7 +5,8 @@ Embedding manager.
 
 from __future__ import annotations
 
-from packages.knowledge.schemas.chunk import KnowledgeChunk
+
+from packages.knowledge.schema.chunk import KnowledgeChunk
 from packages.shared.logging import get_logger
 
 from .factory import EmbeddingFactory

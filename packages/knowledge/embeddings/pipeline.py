@@ -4,7 +4,7 @@ Embedding pipeline.
 
 from __future__ import annotations
 
-from packages.knowledge.schemas.chunk import KnowledgeChunk
+from packages.knowledge.schema.chunk import KnowledgeChunk
 
 from .base import EmbeddingProvider
 

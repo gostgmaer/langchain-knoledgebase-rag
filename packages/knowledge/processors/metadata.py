@@ -10,10 +10,10 @@ from datetime import UTC, datetime
 
 from langchain_core.documents import Document
 
-from .base import DocumentTransformer
+from packages.knowledge.processors.base import DocumentProcessor
 
 
-class MetadataTransformer(DocumentTransformer):
+class MetadataTransformer(DocumentProcessor):
     """Adds common metadata to every document."""
 
     async def transform(

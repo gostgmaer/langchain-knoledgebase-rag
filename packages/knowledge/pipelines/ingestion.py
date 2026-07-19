@@ -18,7 +18,7 @@ from packages.knowledge.embeddings.manager import EmbeddingManager
 from packages.knowledge.loaders.base import BaseDocumentLoader
 from packages.knowledge.processors.base import DocumentProcessor
 from packages.knowledge.schemas import IngestionRequest
-from packages.knowledge.splitters.base import DocumentSplitter
+from packages.knowledge.splitters.base import BaseSplitter
 
 
 class IngestionPipeline:
@@ -30,7 +30,7 @@ class IngestionPipeline:
         self,
         loader: BaseDocumentLoader,
         transformer: DocumentProcessor,
-        splitter: DocumentSplitter,
+        splitter: BaseSplitter,
         embedding_manager: EmbeddingManager,
         document_repository: DocumentRepository,
         chunk_repository: DocumentChunkRepository,

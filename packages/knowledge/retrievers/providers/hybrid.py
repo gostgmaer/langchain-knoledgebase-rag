@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from packages.knowledge.retrievers.base import BaseRetriever
-from packages.knowledge.retrievers.schemas import RetrievalRequest
+from packages.knowledge.retrievers.schemas import IngestionRequest
 
 
 class HybridRetriever(BaseRetriever):
 
     async def retrieve(
         self,
-        request: RetrievalRequest,
+        request: IngestionRequest,
     ):
         raise NotImplementedError(
             "Hybrid retrieval is not implemented."

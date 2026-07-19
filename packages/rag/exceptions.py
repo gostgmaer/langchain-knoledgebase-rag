@@ -39,3 +39,15 @@ class ResponseGenerationError(RAGError):
     """
     Raised when the language model fails to generate a response.
     """
+class EmbeddingException(RAGError):
+    """
+    Raised when embedding generation fails.
+    """
+class LoaderException(RAGError):
+    """
+    Raised when document loading fails.
+    """
+class VectorStoreException(RAGError):
+    """
+    Raised when vector store operations fail.
+    """

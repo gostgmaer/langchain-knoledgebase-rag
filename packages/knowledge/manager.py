@@ -6,7 +6,7 @@ from packages.domain.models.document import Document
 from packages.knowledge.embeddings.manager import EmbeddingManager
 from packages.knowledge.pipelines.ingestion import IngestionPipeline
 from packages.knowledge.retrievers.manager import RetrieverManager
-from packages.knowledge.retrievers.schemas import RetrievalRequest
+from packages.knowledge.retrievers.schemas import IngestionRequest
 from packages.knowledge.schemas import IngestionRequest
 from packages.knowledge.vectorstores.schema import (
     SearchFilter,

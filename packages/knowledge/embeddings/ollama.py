@@ -10,7 +10,7 @@ from langchain_ollama import OllamaEmbeddings
 from packages.config.loader import settings
 from packages.shared.logging import get_logger
 
-from packages.knowledge.schemas.chunk import KnowledgeChunk
+from packages.knowledge.schema.chunk import KnowledgeChunk
 
 from .base import EmbeddingProvider
 

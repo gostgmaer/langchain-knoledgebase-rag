@@ -6,7 +6,7 @@ from pathlib import Path
 from langchain_core.documents import Document
 
 from packages.rag.indexer import DocumentIndexer
-from packages.rag.retriever import RAGRetriever
+from packages.rag.retriever import RetrievalPipeline
 
 
 class RAGPipeline:
@@ -15,7 +15,7 @@ class RAGPipeline:
     def __init__(
         self,
         indexer: DocumentIndexer,
-        retriever: RAGRetriever,
+        retriever: RetrievalPipeline,
     ) -> None:
         self.indexer = indexer
         self.retriever = retriever

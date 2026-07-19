@@ -9,13 +9,13 @@ from pathlib import Path
 from packages.knowledge.exceptions import UnsupportedDocumentError
 from packages.knowledge.interfaces import DocumentLoader
 
-from .csv import CSVDocumentLoader
-from .docx import DocxDocumentLoader
-from .html import HTMLDocumentLoader
-from .json import JSONDocumentLoader
-from .markdown import MarkdownDocumentLoader
-from .pdf import PDFDocumentLoader
-from .text import TextDocumentLoader
+from packages.knowledge.loaders.csv import CSVDocumentLoader
+from packages.knowledge.loaders.docx import DocxDocumentLoader
+from packages.knowledge.loaders.html import HTMLDocumentLoader
+from packages.knowledge.loaders.json import JSONDocumentLoader
+from packages.knowledge.loaders.markdown import MarkdownDocumentLoader
+from packages.knowledge.loaders.pdf import PDFDocumentLoader
+from packages.knowledge.loaders.text import TextDocumentLoader
 
 
 class LoaderFactory:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+from packages.config.embedding import EmbeddingSettings
 from .ai import AISettings
 from .api import APISettings
 from .app import AppSettings
@@ -31,3 +33,4 @@ class Settings(BaseSettings):
     upload_service: UploadServiceSettings = Field(default_factory=UploadServiceSettings)
     iam: IAMSettings = Field(default_factory=IAMSettings)
     rag: RAGSettings = Field(default_factory=RAGSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)

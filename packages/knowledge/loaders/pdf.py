@@ -13,7 +13,7 @@ from packages.shared.logging import get_logger
 from .base import BaseDocumentLoader
 
 
-class PDFLoader(BaseDocumentLoader):
+class PDFDocumentLoader(BaseDocumentLoader):
     """Loads PDF documents using LangChain."""
 
     loader_name = "pdf"

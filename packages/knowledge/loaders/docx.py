@@ -14,7 +14,7 @@ from packages.shared.logging import get_logger
 from .base import BaseDocumentLoader
 
 
-class DocxLoader(BaseDocumentLoader):
+class DocxDocumentLoader(BaseDocumentLoader):
 
     loader_name = "docx"
 

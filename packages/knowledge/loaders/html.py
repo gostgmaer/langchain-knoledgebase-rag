@@ -9,15 +9,15 @@ from pathlib import Path
 from langchain_community.document_loaders import BSHTMLLoader
 from langchain_core.documents import Document
 
-from packages.core.logger import Logger
+from packages.shared.logging import get_logger
 from .base import BaseDocumentLoader
 
 
-class HTMLLoader(BaseDocumentLoader):
+class HTMLDocumentLoader(BaseDocumentLoader):
 
     loader_name = "html"
 
-    def __init__(self, logger: Logger) -> None:
+    def __init__(self, logger: get_logger) -> None:
         super().__init__(logger)
 
     async def load(

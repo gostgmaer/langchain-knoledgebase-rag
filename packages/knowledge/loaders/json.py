@@ -12,7 +12,7 @@ from langchain_core.documents import Document
 from .base import BaseDocumentLoader
 
 
-class JSONLoader(BaseDocumentLoader):
+class JSONDocumentLoader(BaseDocumentLoader):
     """Loads JSON files into LangChain Documents."""
 
     loader_name = "json"

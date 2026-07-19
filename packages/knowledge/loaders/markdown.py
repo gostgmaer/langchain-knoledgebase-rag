@@ -14,7 +14,7 @@ from packages.shared.logging import get_logger
 from .base import BaseDocumentLoader
 logger = get_logger(__name__)
 
-class MarkdownLoader(BaseDocumentLoader):
+class MarkdownDocumentLoader(BaseDocumentLoader):
 
     loader_name = "markdown"
 

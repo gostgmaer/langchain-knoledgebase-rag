@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from pgvector import Vector
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -18,7 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
-from packages.config import settings
+from packages.config.loader import settings
 from packages.domain.enums.model_provider import ModelProvider
 from packages.domain.enums.model_status import ModelStatus
 from packages.domain.models.base import BaseModel

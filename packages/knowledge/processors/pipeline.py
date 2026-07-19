@@ -9,7 +9,7 @@ from langchain_core.documents import Document
 
 from packages.shared.logging import get_logger
 
-from .base import DocumentTransformer
+from packages.knowledge.processors.base import DocumentProcessor
 
 logger = get_logger(__name__)
 
@@ -19,7 +19,7 @@ class DocumentTransformerPipeline:
 
     def __init__(
         self,
-        transformers: list[DocumentTransformer],
+        transformers: list[DocumentProcessor],
     ) -> None:
         self._transformers = transformers
 

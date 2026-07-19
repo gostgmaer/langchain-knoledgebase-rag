@@ -12,7 +12,7 @@ from langchain_core.documents import Document
 from .base import BaseDocumentLoader
 
 
-class CSVLoader(BaseDocumentLoader):
+class CSVDocumentLoader(BaseDocumentLoader):
     """Loads CSV documents using LangChain."""
 
     loader_name = "csv"
