@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from packages.graph.visualizer import GraphVisualizer
 from packages.infrastructure.container import ApplicationContainer
 from packages.infrastructure.database.base import Base
 from sqlalchemy import text
@@ -47,6 +46,7 @@ async def lifespan(app: FastAPI):
         logger.info("Database schema initialized successfully.")
     except Exception as exc:
         logger.error("Failed to initialize database schema: %s", exc)
+        raise
 
     try:
         yield
@@ -54,9 +54,9 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("Shutting down EasyDev AI Platform")
 
-        container.unwire()
+        
 
         engine = container.database.engine()
         await engine.dispose()
-
+        container.unwire()
         logger.info("Database engine disposed")

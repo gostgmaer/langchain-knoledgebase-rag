@@ -2,9 +2,11 @@
 
 Verified against [`docs/mvpRAG.md`](./mvpRAG.md) — that file is the **target roadmap** (what's in scope for v1.0/v1.1/v2.0 and why); this file is the **reality check** (what's actually built, working, broken, or missing right now). Read them as a pair: mvpRAG.md's ✅ marks mean "in v1.0 scope," not "done" — this document is where "done" gets verified.
 
-Fifth audit pass, HEAD `d48ce50` + 1 uncommitted file (`packages/graph/manager.py`), re-verified 2026-07-19 by reading the actual current code (not commit messages) and cross-checking against prior runtime testing (`TestClient` requests, direct `container.graph.manager().invoke()` calls against live Gemini/Serper/OpenWeather APIs, and a full import sweep of `packages/`).
+Sixth audit pass, HEAD `4f4e5db` + 6 uncommitted files (`packages/application/services/runtime_service.py`, `packages/infrastructure/ai/prompts/context.py`, `packages/api/dependencies.py`, `packages/api/exception_handlers.py`, `packages/infrastructure/repositories/unit_of_work.py`, and new untracked `packages/application/services/history_services.py`), re-verified 2026-07-19 by reading the actual current code, running a full import sweep, and live `TestClient` smoke tests (including `raise_server_exceptions=True` to find root causes hidden behind the exception handler).
 
-- Modules importing cleanly (last full sweep): **266 / 285 (93.3%)**
+**Headline finding this pass:** four real new subsystems landed (Docker, Alembic migrations, a background worker process, a rebuilt AI provider architecture) — but the same batch of commits also introduced a regression that currently **breaks every chat request**: `LLMManager.__init__` now reads `settings.ai.top_p`/`settings.ai.top_k`, but `AISettings` (`packages/config/ai.py`) defines no such fields. This crashes during dependency-injection, before the route handler even runs, undoing the "it works end-to-end" proof from the previous pass. Net effect: real infrastructure progress, but overall verified completion is *down* this pass, not up — see the phase table below.
+
+- Modules importing cleanly (last full sweep): **309 / 331 (93.4%)**
 
 Status legend:
 - **✅ Done** — built and proven to work at runtime.
@@ -22,27 +24,27 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 
 | Phase | Items | ✅ Done | 🟡 Partial | 🔴 Broken | ⚪ Pending | % Done |
 |---|---|---|---|---|---|---|
-| 1 — Foundation | 11 | 8 | 1 | 0 | 2 | **72.7%** |
+| 1 — Foundation | 11 | 7 | 3 | 1 | 0 | **63.6%** ▼ |
 | 2 — IAM | 7 | 2 | 0 | 0 | 5 | **28.6%** |
 | 3 — Database | 12 | 8 | 0 | 0 | 4 | **66.7%** |
-| 4 — LangChain | 10 | 3 | 4 | 0 | 3 | **30.0%** |
-| 5 — LangGraph | 9 | 3 | 3 | 0 | 3 | **33.3%** |
-| 6 — Session Management | 4 | 1 | 2 | 0 | 1 | **25.0%** |
+| 4 — LangChain | 10 | 1 | 1 | 5 | 3 | **10.0%** ▼▼ |
+| 5 — LangGraph | 9 | 2 | 3 | 1 | 3 | **22.2%** ▼ |
+| 6 — Session Management | 4 | 0 | 2 | 1 | 1 | **0.0%** ▼ |
 | 7 — Memory | 5 | 0 | 1 | 0 | 4 | **0.0%** |
 | 8 — Document Processing | 15 | 0 | 10 | 0 | 5 | **0.0%** |
 | 9 — Production Retrieval ⭐ | 13 | 0 | 4 | 0 | 9 | **0.0%** |
 | 10 — Tools | 6 | 1 | 1 | 1 | 3 | **16.7%** |
 | 11 — Human in the Loop | 3 | 0 | 0 | 0 | 3 | **0.0%** |
-| 12 — Background Jobs | 5 | 1 | 0 | 0 | 4 | **20.0%** |
+| 12 — Background Jobs | 5 | 1 | 1 | 0 | 3 | **20.0%** |
 | 13 — Production hardening | 5 | 3 | 0 | 0 | 2 | **60.0%** |
-| 14 — APIs | 7 | 0 | 1 | 0 | 6 | **0.0%** |
+| 14 — APIs | 7 | 0 | 0 | 1 | 6 | **0.0%** |
 | 15 — Testing | 4 | 0 | 0 | 0 | 4 | **0.0%** |
-| 16 — Deployment | 3 | 0 | 0 | 0 | 3 | **0.0%** |
-| **Total** | **119** | **30** | **27** | **1** | **61** | **25.2%** |
+| 16 — Deployment | 3 | 0 | 3 | 0 | 0 | **0.0%** ▲ |
+| **Total** | **119** | **25** | **29** | **10** | **55** | **21.0%** ▼ |
 
-**Overall: 25.2% done · 22.7% partial · 0.8% broken · 51.3% pending** (30 / 27 / 1 / 61 out of 119 roadmap items).
+**Overall: 21.0% done · 24.4% partial · 8.4% broken · 46.2% pending** (25 / 29 / 10 / 55 out of 119 roadmap items) — down from 25.2% done last pass, despite four new subsystems landing.
 
-A quick way to read this: **51% of the roadmap hasn't been started at all**, another **23% has real code behind it that isn't proven to work end to end yet**, and only about a **quarter is both built and verified**. The phases dragging the average down hardest are the three sitting at 0%: Memory (long-term memory entirely unbuilt), Document Processing (real pipeline shape, zero live verification), and Production Retrieval — the roadmap's own starred centerpiece. IAM (28.6%) and Tools (16.7%) are the next biggest gaps, both for the same reason: what's "done" is real but only covers a fraction of what the phase actually promises (tenant-header presence without JWT verification; one working tool out of six).
+**Why "done" went down even though real new code landed:** the `AISettings.top_p`/`top_k` regression (see Broken, below) breaks `LLMManager` construction outright, which cascades into every phase whose "done" status depended on a live proof through the chat/graph/LLM path — LangChain (Chat Models + all 4 providers), LangGraph (the live agent-turn proof), and Session Management (the live chat-persistence proof) all got knocked from done/partial down to broken this pass, for the same root cause. Meanwhile Deployment went from 0% pending to 0%-done-but-100%-partial — real Docker/Compose/Alembic files exist now, each with concrete bugs (wrong healthcheck path, an empty dev-compose file, a corrupted shell script, an "initial" migration that doesn't create tables) that keep them from counting as done. Net: more of the roadmap now has *real, broken* code behind it instead of *nothing* — arguably progress, but not the kind the "% done" column rewards, and the regression is a one-line fix away from restoring last pass's proven-working state.
 
 ---
 
@@ -55,8 +57,7 @@ A quick way to read this: **51% of the roadmap hasn't been started at all**, ano
 | FastAPI application | `packages/api/app.py` — real app factory + `lifespan` (`packages/api/lifespan.py`), not a placeholder |
 | Exception handling (structure) | `packages/api/exception_handlers.py` — maps `RequestValidationError` → 422, `HTTPException` → passthrough status, unhandled `Exception` → 500, all through one `ErrorResponse` envelope (`packages/api/responses.py`) |
 | OpenAPI | `/docs`, `/redoc`, `/openapi.json` live with real title/description/version, per-route summaries |
-| Health checks | `packages/api/routers/health.py` — genuinely checks Postgres and Redis connectivity, confirmed live returning `{"database":"healthy","redis":"healthy"}` against real services, not a static "OK" |
-| Dependency injection | `packages/infrastructure/container/*.py` — `ApplicationContainer`'s `ai`, `graph`, `memory`, `database`, and `tools` branches all construct without error (confirmed by resolving `container.graph.manager()` directly) |
+| Health checks | `packages/api/routers/health.py` — genuinely checks Postgres and Redis connectivity, confirmed live returning `{"status":"degraded","database":"unhealthy","redis":"unhealthy"}` when neither is reachable — real logic, unregressed |
 | Logging | `packages/shared/logging.py` (structlog) + `packages/api/middleware/request_id.py` — confirmed emitting structured logs with request IDs on real requests |
 | Tenant-context middleware | `packages/api/middleware/tenant.py` (63 lines) + `packages/api/security.py`'s `get_tenant_id` dependency — reads `X-Tenant-ID`/`X-Organization-ID` headers into `request.state`, enforced on every `/api/v1/*` route via `Depends(get_tenant_id)` in `packages/api/routers/__init__.py`. **Caveat:** presence only, no verification — see Pending → IAM |
 
@@ -67,30 +68,30 @@ A quick way to read this: **51% of the roadmap hasn't been started at all**, ano
 | Knowledge Base / Document / Chunk / Embeddings models | 4 SQLAlchemy models present under `packages/domain/models/` |
 | Prompt Templates / Model Configurations | `prompt.py`, `prompt_version.py`, `model_profile.py` |
 | Repository layer (11 classes) | `packages/infrastructure/repositories/` — import cleanly, circular import between `knowledge_base.py`/`agent_knowledge_base.py` resolved with `TYPE_CHECKING` guards |
-| Repository layer, at runtime | `packages/infrastructure/database/session.py`'s `create_session()` returns a real `AsyncSession` (not the raw `async_sessionmaker`); `packages/infrastructure/repositories/base.py`'s `create/update/delete/delete_by_id` now `await self.session.commit()` after the write, not just `flush()`. Proven live: a chat request against a nonexistent conversation ID returns a clean 404, not a crash |
+| Repository layer, at runtime (models/schema) | `packages/infrastructure/database/session.py`'s `create_session()` returns a real `AsyncSession` (not the raw `async_sessionmaker`) — session *construction* is still sound. **But durability regressed this pass**: see Broken → "commit calls removed again." |
 
 ### LangChain
 | Item | Evidence |
 |---|---|
-| Chat models | `packages/infrastructure/ai/manager.py`'s `LLMManager` + `registry.py`'s `LLMRegistry.create()` (static method, reads `packages.config.loader.settings`) — both the direct call path and `container.ai.manager()` through DI now work. Verified live: real Gemini completion (`gemini-3.1-flash-lite`, real token usage) |
-| Provider wiring | Gemini, OpenAI, Anthropic, Groq all wired in `LLMRegistry.create()` (only Gemini exercised live so far) |
-| Document objects | `packages/rag/types.py` aliases `Document`/`Embeddings`/`VectorStore`, actually consumed by the RAG modules |
+| Document objects | `packages/rag/types.py` aliases `Document`/`Embeddings`/`VectorStore`, actually consumed by the RAG modules — unaffected by this pass's regression |
+
+**Regressed to Broken this pass:** Chat Models and all four provider entries (Gemini/OpenAI/Anthropic/Groq) — see Broken section. The previous pass's live-verified Gemini completion no longer reproduces; `LLMManager.__init__` now crashes before any provider is even selected.
 
 ### LangGraph
 | Item | Evidence |
 |---|---|
-| Graph construction via DI | `container.graph.manager()` resolves cleanly (previously `TypeError: LLMRegistry() takes no arguments`) |
-| Nodes | `packages/graph/nodes.py`'s `GraphNodes` — real `retrieve`/`llm`/`tool`/`summarize` methods |
-| Conditional routing | `packages/graph/router.py`'s `GraphRouter` — planner routes messages through `retrieve`/`tool`/`llm` branches; proven live in a full agent turn ending in a tool-call loop back to a final answer |
-| GraphState | `packages/graph/state.py` — `messages`, `documents`, `tools`, `user_id`, `conversation_id`, `thread_id`, `summary`, `metadata`, all populated in the live run above |
-| Checkpointing (in-memory) | `packages/graph/checkpoint.py`'s `GraphCheckpointFactory` wraps `MemorySaver`; constructor signature now matches container wiring (previously `CheckpointFactory.__init__() got an unexpected keyword argument 'settings'`) |
-| Agent runtime | New `packages/agent/` package (`context.py`, `prompt.py`, `runtime.py`, `response.py`) — `AgentRuntime` wired into `ApplicationContainer` (`llm=ai.manager, prompt_builder=prompt_builder, tools=tools.manager`), consumed by `NodeContext.runtime`, called from `GraphNodes.llm()` |
+| Nodes & package wiring | `packages/graph/nodes.py`'s `GraphNodes` — real `retrieve`/`llm`/`tool`/`summarize` methods; the code itself is unchanged and structurally sound |
+| GraphState | `packages/graph/state.py` — `messages`, `documents`, `tools`, `user_id`, `conversation_id`, `thread_id`, `summary`, `metadata` fields all real |
+| Checkpointing (in-memory) | `packages/graph/checkpoint.py`'s `GraphCheckpointFactory` wraps `MemorySaver`; constructor signature matches container wiring |
+
+**Regressed to Broken this pass:** "Graph construction via DI" and "Conditional routing" — both were marked done last pass on the strength of a live, end-to-end agent-turn proof. That proof no longer reproduces: `container.graph.manager()` still resolves, but any actual `.invoke()`/`.ainvoke()` call crashes as soon as it needs an LLM (which is every real turn), for the same root cause as the LangChain regression above. The routing/node code itself hasn't changed — only its ability to actually run has.
 
 ### Session management
 | Item | Evidence |
 |---|---|
-| Chat sessions | `packages/conversation/manager.py`'s `ConversationManager` — DB-backed persistence proven live end to end through `POST /api/v1/chat` |
-| No more duplicate user message | `ConversationManager` no longer double-appends the user's `HumanMessage` after `ConversationContextBuilder.build()` already loaded it from the DB via `MessageRepository` — previously the same message was sent to the LLM twice per turn |
+| No more duplicate user message (fix retained) | `ConversationManager` still does not double-append the user's `HumanMessage` — this earlier fix wasn't touched by this pass's changes |
+
+**Regressed to Broken this pass:** "Chat sessions" (live end-to-end proof) — `POST /api/v1/chat` no longer completes a real turn; it crashes during dependency-injection of `agent_runtime`/`ai.manager` before `ConversationManager.chat()` even runs. The DB-persistence code itself is presumed unchanged and likely still correct in isolation, but it can no longer be proven live through the real HTTP path this pass — see Broken section.
 
 ### Tools
 | Item | Evidence |
@@ -112,15 +113,18 @@ A quick way to read this: **51% of the roadmap hasn't been started at all**, ano
 
 | Item | File(s) | What's wrong |
 |---|---|---|
-| Exception handler leaks tracebacks | `packages/api/exception_handlers.py:41-49` | `unhandled_exception_handler` builds `message=f"Internal server error. Traceback: {tb}"` and returns it verbatim in the 500 response body. This is now **committed** (part of `d48ce50`), not just a working-tree draft — an information-disclosure risk that should be gated behind a debug flag before any external exposure. |
-| Weather tool functionally broken | `packages/tools/builtin/weather.py:55-70`, `.env:118` | `OPENWEATHER_BASE_URL=https://api.openweathermap.org/data/2.5` is missing the `/weather` path segment, so `url = os.getenv("OPENWEATHER_BASE_URL")` is called directly with no endpoint appended. Every real call 404s, and the `except httpx.HTTPStatusError` branch (line 84-85) silently reports this as `"City '<x>' not found."` instead of surfacing the real config error. Confirmed live: agent tried the tool twice, got "not found" both times, then correctly fell back to `get_google_search`. |
-| Dead orphaned provider factory | `packages/infrastructure/ai/factory.py` | Imports `AnthropicProvider`, `GoogleProvider`, `GroqProvider`, `OpenAIProvider` from `.registry`, but `registry.py` was refactored to the static `LLMRegistry` and no longer defines those classes → `ImportError` on import. Confirmed unused anywhere else in the app via grep — should be deleted rather than fixed. |
-| Stale `AgentState` import | `packages/conversation/store.py`, `packages/conversation/memory_store.py`, `packages/application/application.py` | All three still `from packages.graph.state import AgentState`, which was renamed to `GraphState` during the LangGraph rewrite. Not on the live chat path (dead code), but will raise `ImportError` if anything ever imports them. |
-| Upload SDK wrong import | `sdk/upload/client.py:5` | `from packages.config.upload import UploadSettings` — the real file is `packages/config/upload_service.py`, the real class is `UploadServiceSettings`. Breaks 8 modules under `sdk/upload/`. |
+| **`AISettings` missing `top_p`/`top_k` — breaks every chat request** | `packages/infrastructure/ai/config.py:38-39`, `packages/config/ai.py`, `packages/infrastructure/ai/manager.py:24` | New this pass, and the single highest-priority bug in the repo. `get_default_llm_config()` reads `settings.ai.top_p` and `settings.ai.top_k` — but `AISettings` defines no such fields. `LLMManager.__init__` calls this at construction time, so **any** resolution of the `ai`/`graph`/`memory` container branches now raises `AttributeError: 'AISettings' object has no attribute 'top_p'`. Confirmed live: `POST /api/v1/chat` crashes with this exact error during dependency-injection, before the route handler runs. This is the same class of container-construction crash fixed twice before (the `LLMRegistry()` mismatch, then the `top_p`-less `AISettings`) — a one-line fix (add the two fields to `AISettings`), but as committed today it undoes essentially all of the previous pass's live-verified proof that chat/graph/tools work end to end. |
+| Repository writes no longer commit — regression | `packages/infrastructure/repositories/base.py` | Commit `6fe7723` ("pagination/filters/ordering") silently **removed** the `await self.session.commit()` calls that `d48ce50` had explicitly added to `create()`/`update()`/`delete()`/`delete_by_id()` one pass ago (confirmed via `git log -p` showing the added-then-removed lines). All four write methods now only `flush()`. Combined with the still-unfixed gap #5 (no per-request session close), this means chat writes on the live path are flushed into the transaction but never durably committed unless something else calls `commit()` — a real regression, not a new discovery. |
+| Orphaned `packages/application/` service layer — unwired, and broken on its own terms | `packages/application/services/{chat_service,conversation_service,message_service,runtime_service,history_services}.py` | A large new parallel implementation of chat/conversation logic (DTOs, mappers, validators, services) that **nothing outside `packages/application/` imports** — not the DI container, not any router. It's also broken internally: `ChatService._execute_runtime()` is hardcoded to return `"Hello! AI Runtime is not connected yet."` and never calls the runtime at all; `ChatService.touch()`/`ConversationService.close()` call `datetime.utcnow()`/`datetime.now(datetime.UTC)` with only `import datetime` (the module, not the class) imported, a guaranteed `AttributeError` if ever executed; and `history_services.py` imports `from packages.domain.repositories.message import MessageRepository`, but `packages/domain/repositories/` **does not exist** (the real `MessageRepository` lives at `packages/infrastructure/repositories/message.py`) — confirmed `ModuleNotFoundError` in the import sweep. Same pattern as the old dead `infrastructure/ai/factory.py`: real-looking code that is never actually reached. |
+| Exception handler — traceback leak closed, but replaced by a worse bug (uncommitted, in progress) | `packages/api/exception_handlers.py` | An in-progress fix now gates the traceback behind `if settings.app.debug:` — a real improvement in intent. But `from packages.config import settings` imports the **`packages/config/settings.py` submodule**, not the actual settings instance (`packages.config.loader.settings`) — so `settings.app.debug` raises `AttributeError: module 'packages.config.settings' has no attribute 'app'` unconditionally, regardless of the real `DEBUG` value. Worse: it never even reaches that line — `logger.exception(...)` itself crashes first with a live-confirmed `UnicodeEncodeError` (Rich/structlog writing a character Windows' cp1252 console can't encode — the same class of bug as the earlier `GraphVisualizer` ✅-emoji crash). Confirmed live with `raise_server_exceptions=True`: the exception that actually propagates out of a request is this `UnicodeEncodeError`, not whatever originally triggered the 500. **Net effect: every 500 response now returns a completely empty body** — no JSON envelope, no error code, nothing — which is arguably worse for API consumers than the traceback leak it replaced, even though it closes the info-disclosure risk. Also stray leftover imports in the diff: `from docx import settings` (immediately shadowed, harmless but bizarre) and `from fastapi import ... logger` (also shadowed two lines later). |
+| Weather tool functionally broken | `packages/tools/builtin/weather.py:55-70`, `.env:118` | `OPENWEATHER_BASE_URL=https://api.openweathermap.org/data/2.5` is missing the `/weather` path segment (note: fixed in `.env.example`, but the real `.env` was deliberately left unchanged per an earlier sync-only request), so every real call 404s. The `except httpx.HTTPStatusError` branch silently reports this as `"City '<x>' not found."` instead of surfacing the real config error. |
+| Dead orphaned provider factory (old) | `packages/infrastructure/ai/factory.py` | Still imports `AnthropicProvider`/`GoogleProvider`/`GroqProvider`/`OpenAIProvider` from `.registry`, which no longer defines those names → `ImportError` on import. **Note:** a *different*, real replacement now exists at `packages/infrastructure/ai/providers/factory.py` (see LangChain section) — this old file at `infrastructure/ai/factory.py` is pure leftover cruft and should just be deleted. `registry.py`'s `LLMRegistry` is also now dead weight: `container/ai.py` still instantiates it as an unused `registry` Singleton that nothing calls, since `manager.py` switched to the new `providers/factory.py` path. |
+| Stale `AgentState` import | `packages/conversation/store.py`, `packages/conversation/memory_store.py`, `packages/application/application.py` | All three still `from packages.graph.state import AgentState`, which was renamed to `GraphState`. Not on the live chat path, but will raise `ImportError` if anything ever imports them. |
+| Upload SDK wrong import | `sdk/upload/client.py:5` | `from packages.config.upload import UploadSettings` — the real file is `packages/config/upload_service.py`, the real class is `UploadServiceSettings`. Breaks 8 modules. |
 | Notification SDK missing dependency | `sdk/notification/` (5 modules) | Requires the `email-validator` extra, which isn't installed in the venv. |
-| `sdk/common/models.py` | `sdk/common/models.py` | `NameError: name 'Pagination' is not defined` — the file declares bare names (`Pagination`, `Page`, `Metadata`, `ErrorResponse`, `HealthResponse`) with no actual class definitions behind them. |
+| `sdk/common/models.py` | `sdk/common/models.py` | `NameError: name 'Pagination' is not defined` — bare names declared with no class definitions behind them. |
 
-**Previously broken, now fixed:** the `GraphVisualizer.save_png()` regression (uncommented network call to mermaid.ink + Windows console crash) that briefly reintroduced a 500 on `POST /api/v1/chat` has been **re-commented out** in `packages/graph/manager.py:16` (currently an uncommitted one-line change — remember to commit it). The correct long-term pattern already exists in `packages/api/lifespan.py:34-39`, which wraps the same call in a `try/except` with the comment *"Rendering uses the remote mermaid.ink API — never block startup on it"* — but that call is also commented out there, so nothing currently generates `graph.png` automatically, which is the safe default.
+**Previously broken, now fixed:** the `GraphVisualizer.save_png()` regression (network call to mermaid.ink + Windows console crash) is properly committed and gone — `packages/graph/manager.py:16` is committed with the call commented out (`8e64b11`).
 
 ---
 
@@ -141,7 +145,7 @@ A quick way to read this: **51% of the roadmap hasn't been started at all**, ano
 ### Database (Phase 3)
 | Item | Status |
 |---|---|
-| Migrations | `packages/infrastructure/migrations/` is a **completely empty directory** (no files, not even `__init__.py`). `alembic>=1.18.5` is a declared dependency but there's no `alembic.ini` or `alembic/` directory anywhere. Schema is created only via `Base.metadata.create_all` in `lifespan.py:46` |
+| Migrations — upgraded, but still not a real migration story | Real `alembic.ini` + `alembic/env.py` + one version file (`44b52e61b180_initial_schema.py`) now exist (`0615b25`). `alembic/env.py` correctly wires `Base` metadata and `settings.database.url`; `alembic history` runs and reports a valid single revision. **But the "Initial schema" migration contains no `create_table` calls at all** — its entire body is one `op.alter_column('model_profiles', 'embedding_dimensions', ...)`. It was clearly autogenerated against a DB that already had every table (from `create_all`), so running `alembic upgrade head` against a genuinely empty database would fail immediately rather than create the schema. `packages/api/lifespan.py:41-49` still runs `Base.metadata.create_all` on every startup — Alembic exists as a fully separate, disconnected mechanism, not yet the actual source of truth for schema. |
 | Document Versions, Upload Jobs, AI Responses, Feedback tables | Don't exist as models yet |
 
 ### LangChain (Phase 4)
@@ -208,7 +212,7 @@ This is still the phase furthest from its own ambition in the roadmap — the st
 ### Background Jobs (Phase 12)
 | Item | Status |
 |---|---|
-| Queue | `arq` is a declared dependency; `packages/infrastructure/queue/__init__.py` is a **1-line stub** |
+| Queue — upgraded, but still a heartbeat, not a worker | A real `packages/worker/` process now exists (`0615b25`): `main.py` logs `"Worker started."` then loops `logger.info("Worker heartbeat..."); time.sleep(30)` forever. `docker/Dockerfile.worker`'s `CMD ["python","-m","packages.worker.main"]` correctly matches this module's entrypoint — the *deployment wiring* is right. But there is no `arq`/Celery/RQ integration at all despite `arq>=0.28.0` being a declared dependency — it's a process that stays alive, not a job queue that does anything. |
 | Document indexing, embedding generation, OCR jobs | None exist yet — nothing to queue anyway until Phase 8/9 retrieval work lands |
 
 ### Production hardening (Phase 13)
@@ -259,19 +263,25 @@ Each of the 7 unregistered router files (including `conversations.py`, which is 
 | `packages/api/routers/search.py` | `# Router search` |
 | `packages/api/routers/tools.py` | `# Router tools` |
 
-**Practical impact:** the entire HTTP-reachable chat surface is one endpoint — send a message into an existing conversation, non-streaming, with no way to create that conversation, list its history, or delete it over HTTP. The testing CLI added in commit `72f2b8f` works around the missing creation route with a hardcoded dummy conversation UUID and a comment admitting "you may need to seed the database with this conversation ID manually."
+**Practical impact:** the entire HTTP-reachable chat surface is one endpoint — send a message into an existing conversation, non-streaming, with no way to create that conversation, list its history, or delete it over HTTP. **And that one endpoint is currently broken anyway** — see Broken → `AISettings.top_p`/`top_k` — so as of this pass, the live-reachable API surface is effectively just `GET /api/v1/health`.
 
 ### Testing (Phase 15)
 | Item | Status |
 |---|---|
-| Unit / integration / LangGraph workflow / API tests | `tests/` contains only `__init__.py` and `test_llm.py` (24 lines). `test_llm.py` is a manual `asyncio.run(...)` + `print(...)` smoke script — **zero `assert` statements in the entire repo**, despite `pytest`, `pytest-asyncio`, and `pytest-cov` all being declared dependencies in `pyproject.toml` |
+| Unit / integration / LangGraph workflow / API tests | `tests/` contains only `__init__.py` and `test_llm.py` (24 lines). `test_llm.py` is a manual `asyncio.run(...)` + `print(...)` smoke script — **zero `assert` statements in the entire repo**, despite `pytest`, `pytest-asyncio`, and `pytest-cov` all being declared dependencies in `pyproject.toml`. Worth noting: a real pytest suite would have caught this pass's `AISettings.top_p` regression before it shipped. |
 
-### Deployment (Phase 16)
+### Deployment (Phase 16) — upgraded from nothing to real-but-buggy
+Real Docker/Compose/scripts infrastructure landed in `0615b25` — a genuine jump from "doesn't exist" — but every piece has at least one concrete bug keeping it from counting as done:
+
 | Item | Status |
 |---|---|
-| Dockerfile | Does not exist anywhere in the repo |
-| docker-compose.yml | Exists but is **0 bytes** |
-| Production configuration | Not implemented |
+| `docker/Dockerfile` | Real two-stage build, `uv sync --locked --no-dev`, correctly `COPY`s the project and runs `uvicorn packages.api.app:app` (a real, matching entrypoint). **But** its `HEALTHCHECK` probes `http://localhost:8000/health` — the real route is `/api/v1/health` (mounted under the `/api/v1` prefix) — so the container's own healthcheck 404s forever and would report unhealthy indefinitely. |
+| `docker/Dockerfile.worker` | Correctly targets `python -m packages.worker.main`, matching the real (if stub) worker entrypoint — no bugs found here. |
+| `docker-compose.yml` / `docker-compose.prod.yml` | Real, substantial files (118 and 83 lines) — not evaluated line-by-line for correctness this pass, but present and non-trivial. |
+| `docker-compose.dev.yml` | Still effectively empty — its entire content is one line, `# Empty file`. `make dev` would have nothing to compose. |
+| `Makefile` | References `docker/compose/docker-compose.dev.yml` and `docker/compose/docker-compose.prod.yml` — **no `docker/compose/` directory exists**; both files actually live at the repo root. `docker-compose.prod.yml`'s own `env_file: ../../.env` only makes sense from that never-created nested location, so even fixing the Makefile path would leave a second broken relative path. |
+| `docker/scripts/wait-for-db.py` | Despite the `.py` name it's a `#!/bin/sh` script, and it's corrupted: the `echo` command and its quoted message are split across two separate lines (as are `exec`/`"$@"`), so under `set -e` it errors out immediately rather than ever reaching the `pg_isready` wait loop. |
+| Production configuration | `docker-compose.prod.yml` exists with real content — not yet verified as correct/complete, but no longer "not implemented." |
 
 ---
 
@@ -291,11 +301,11 @@ Local `.env` holds live-looking keys (OpenAI, Google, Groq, Serper, Tavily, Open
 ### 4. Input validation — better than expected, but narrow
 `packages/api/schemas/chat.py:8-27`'s `ChatRequestSchema` does enforce `message: str = Field(min_length=1, max_length=10000)` and `ConfigDict(extra="forbid")` — so basic length limiting exists. There is no prompt-injection-specific filtering (length limiting is the only defense), and there's nothing to check on the upload side since `packages/api/schemas/document.py` and `routers/documents.py` are still one-line stubs (see Phase 14).
 
-### 5. Async session handling — no per-request close, no rollback on failure
-This is the one most likely to cause a real production incident:
-- `packages/infrastructure/container/database.py:25-28` wires `session = providers.Factory(create_session, ...)`, and `packages/api/dependencies.py`'s `get_db_session` (lines 31-35) just returns that session directly — `Factory` providers have no teardown hook, so **there is no code path that closes a request's DB session** after the request finishes.
-- `packages/infrastructure/repositories/base.py`'s `create()` (30-38), `update()` (92-99), and `delete()` (105-110) call `session.flush()`/`commit()` with **no `try/except`** — if a write raises (e.g. `IntegrityError`), the session is left in a failed-transaction state and, per the point above, is never closed either.
-- The codebase already has the correct pattern: `packages/infrastructure/database/transaction.py`'s `UnitOfWork.__aexit__` (lines 17-27) does rollback-on-exception and always closes the session — but it's wired as a separate, unused `uow` provider (`database.py:30-33`). The live chat path goes through `get_db_session`/repositories directly, not `UnitOfWork`, so the safe pattern exists in the codebase but isn't actually used where it matters.
+### 5. Async session handling — partially fixed this pass (uncommitted, in progress)
+- **Fixed:** `packages/api/dependencies.py`'s `get_db_session` is now an async generator — `try: yield session / finally: await session.close()` — so the per-request session actually closes now. Confirmed by re-running the import sweep and a live request; no regressions found from this specific change.
+- **Fixed:** `packages/infrastructure/repositories/unit_of_work.py`'s `UnitOfWork.__aexit__` now correctly does `rollback()` on exception / `commit()` otherwise, always `close()`s in a `finally` block. Still not used on the live chat path (see below), but the pattern itself is now sound where it previously had a bug of its own.
+- **Still open:** `packages/infrastructure/repositories/base.py`'s `create()`/`update()`/`delete()` still call only `flush()`, no `commit()` (see Broken → "Repository writes no longer commit") and still no `try/except` around it — a write that raises leaves the session in a failed-transaction state, which now at least gets `close()`d afterward (via the `get_db_session` fix above) rather than leaking, but still isn't rolled back cleanly mid-request.
+- **Still open:** the live chat path still goes through `get_db_session`/repositories directly, not `UnitOfWork` — the now-correct `UnitOfWork` pattern exists in the codebase but isn't the thing actually protecting the chat write path.
 
 ### 6. Logging — no PII/body leakage, but no request-id correlation across the pipeline
 No full request/response body logging was found (`packages/api/middleware/logging.py`'s `LoggingMiddleware.dispatch`, lines 28-63, only logs method/path/status/duration/request_id/client_ip/user_agent). But that request ID goes nowhere else: `packages/shared/logging.py:23` configures `structlog.contextvars.merge_contextvars`, yet **nothing in the codebase ever calls `structlog.contextvars.bind_contextvars(request_id=...)`**, so the graph/conversation/tools/LLM-manager log lines never carry it. In practice you cannot trace a single chat request across the logs beyond the one "HTTP Request" line the middleware emits.
@@ -318,45 +328,35 @@ Contrary to what you might expect from the rest of this audit, the core domain m
 ### 12. The new CLI script (`cli.py`, commit `72f2b8f`) is a smoke-test client, not a real CLI
 `cli.py` (81 lines, repo root, not under `packages/`) is a standalone Rich-based interactive tester: it checks `GET /health`, then talks to a **hardcoded dummy conversation UUID** (`ensure_conversation()`, lines 17-22, literally returns `"3fa85f64-5717-4562-b3fc-2c963f66afa6"` with a comment admitting the real `/conversations` endpoint "isn't wired up yet"), sends `POST /chat` with `stream: false` always (no streaming support despite the flag existing), and generates a **fresh random `X-Tenant-Id` on every run** (line 11) that won't match whatever tenant the dummy conversation was actually seeded under. If the conversation doesn't exist, it just prints a message telling you to seed the DB by hand. This satisfies "a CLI exists" but not "a CLI you can onboard someone with."
 
-### 13. `.env` / `.env.example` are largely a stale template from a different project
-Checked every `Field(alias=...)` in `packages/config/*.py` against both `.env` and `.env.example`. Verdict: **`.env.example` is a near-verbatim copy of `langgraph-cli-chat-agent`'s env template** (SQLite paths, a single `LLM_PROVIDER` switch, `CLI_THEME`, `AGENT_MAX_ITERATIONS` — none of which correspond to anything in this project's actual settings classes) — it does not reflect this codebase and would actively mislead anyone onboarding from it. The real `.env` is the same stale template with a handful of genuinely-used keys appended at the bottom.
+### 13. `.env` / `.env.example` — FIXED this pass, confirmed still intact
+Previously (see git history of this doc) `.env.example` was a near-verbatim copy of a *different* project's env template. Both files were rewritten from scratch against `packages/config/*.py`'s actual `Field(alias=...)` declarations: dead legacy vars removed, name mismatches fixed (`VECTOR_STORE`→`VECTOR_STORE_BACKEND`, the `ENABLE_*_TOOL` flags renamed to match `FeatureSettings`), organized by settings module with "Required" call-outs. Re-verified this pass: `.env.example` on disk exactly matches that rewrite, committed in `0615b25` with no conflicting overwrite. `.env` was synced to the same key names with all real secret values preserved unchanged.
 
-**Wrong value:**
-- `UPLOAD_SERVICE_URL=https://api.smith.langchain.com` (`.env:174`) — this is LangSmith's endpoint, not a real upload service. Looks like a copy-paste error; `UploadServiceSettings.base_url` (`packages/config/upload_service.py:15-18`) has no default, so it happily accepts this as "valid" (it's a well-formed URL) and would call the wrong host if the Upload SDK is ever exercised.
+**Two bugs were deliberately left as-is in the real `.env`** (per an explicit "sync only, don't fix values" request), both still present:
+- `OPENWEATHER_BASE_URL=https://api.openweathermap.org/data/2.5` — still missing the `/weather` path segment (fixed in `.env.example`'s template, not in the real `.env`).
+- `UPLOAD_SERVICE_URL=https://api.smith.langchain.com` — still LangSmith's URL, not a real upload service.
 
-**Name mismatches — value in `.env` is silently ignored, setting falls back to its Python default:**
-| `.env` has | Settings class expects | File |
-|---|---|---|
-| `VECTOR_STORE` | `VECTOR_STORE_BACKEND` | `packages/config/rag.py:17` |
-| `ENABLE_SEARCH_TOOL`, `ENABLE_WEATHER_TOOL`, `ENABLE_NEWS_TOOL`, `ENABLE_CALCULATOR_TOOL` | `ENABLE_WEB_SEARCH`, `ENABLE_WEATHER`, `ENABLE_NEWS`, `ENABLE_CALCULATOR` (plus `ENABLE_TOOLS`, `ENABLE_MEMORY`, `ENABLE_STREAMING`, `ENABLE_RERANKING`, `ENABLE_QUERY_REWRITE`, none of which are set in `.env` at all) | `packages/config/features.py` |
-| `UPLOAD_DIR` | `StorageSettings` has no matching alias at all (its fields are unaliased, matched by bare name — `UPLOAD_DIRECTORY`, `TEMP_DIRECTORY`, `MAX_FILE_SIZE`) | `packages/config/storage.py` |
-| `LOG_FORMAT` | Not read anywhere — `LoggingSettings` only defines `LOG_LEVEL`/`LOG_JSON` | `packages/config/logging.py` |
+**A startup-crash risk, unchanged:** `packages/config/loader.py`'s `get_settings()` still eagerly instantiates `IAMSettings()` at import time, which requires `IAM_BASE_URL`/`IAM_CLIENT_ID`/`IAM_CLIENT_SECRET`/`IAM_INTROSPECTION_API_KEY` with no defaults — still present in `.env` today, but removing any of them would crash the app at import time, not just on first use.
 
-**Practical impact:** every feature flag (`ENABLE_*`) is currently unconfigurable via `.env` — they're all silently pinned to their hardcoded Python defaults (mostly `True`) no matter what the file says. Same for the vector store backend selection.
-
-**Placeholder secrets that would fail if actually used:**
-- `IAM_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxx` and `IAM_INTROSPECTION_API_KEY=xxxxxxxxxxxxxxxxxxxx` (`.env:182,185`) — harmless today only because nothing calls the IAM SDK yet (see Phase 2). Worth replacing before JWT validation is wired up.
-
-**A real startup-crash risk if this ever regresses:** `packages/config/loader.py:19-34`'s `get_settings()` eagerly instantiates `IAMSettings()` at **import time** (`settings = get_settings()` runs on module load). `IAMSettings` (`packages/config/iam.py`) requires `IAM_BASE_URL`/`IAM_CLIENT_ID`/`IAM_CLIENT_SECRET`/`IAM_INTROSPECTION_API_KEY` with **no defaults** — if any of those four were ever removed from `.env`, the entire app would fail to import before it even starts, not just fail on first use.
-
-**Roughly half the file (~50 lines) is pure dead weight**, unused by any current settings class: `LLM_MODEL`, `TOP_P`/`TOP_K`, `OLLAMA_BASE_URL`, `CHECKPOINT_DB_PATH`/`SESSION_DB_PATH`/`SUMMARY_DB_PATH`, `CHROMA_PERSIST_DIR`, `FAISS_INDEX_PATH`, `QDRANT_URL`/`QDRANT_API_KEY`, `POSTGRES_HOST`/`PORT`/`DB`/`USER`/`PASSWORD` (dead since `DATABASE_URL` is the one connection string actually used), `RETRIEVAL_TOP_K`/`RETRIEVAL_STRATEGY`, `SEARCH_PROVIDER`, `HTTP_TIMEOUT`/`MAX_RETRIES`/`RETRY_DELAY`/`USER_AGENT`, `CLI_THEME`/`CLI_STREAMING`/`CLI_SHOW_TOOL_CALLS`/`CLI_SHOW_THINKING`, `LANGCHAIN_TRACING_V2`/`LANGCHAIN_ENDPOINT`/`LANGCHAIN_API_KEY`/`LANGCHAIN_PROJECT`, `SESSION_TTL_HOURS`/`MAX_SESSIONS`, `AGENT_MAX_ITERATIONS`/`AGENT_MAX_TOOL_CALLS`/`AGENT_TIMEOUT`.
-
-**What is genuinely correct and matches:** `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `QUEUE_PREFIX`, `GOOGLE_API_KEY`/`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`GROQ_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`, `CHUNK_SIZE`/`CHUNK_OVERLAP`, `SERPER_API_KEY`/`TAVILY_API_KEY`/`NEWSAPI_API_KEY`, `OPENWEATHER_API_KEY` (though its `_BASE_URL` sibling has the separate `/weather`-path bug from gap #2 above), and all seven `IAM_*` vars (present, two are placeholders).
+### 14. `PromptContext` reshaped (uncommitted) — richer fields added, but still entirely ignored
+Uncommitted changes to `packages/infrastructure/ai/prompts/context.py` drop the old `tools: list[str] | None` field, convert `history`/`memories`/`documents` to `field(default_factory=list)`, and add a new `system_prompt: str | None`. This doesn't break anything — `packages/infrastructure/ai/prompts/builder.py`'s `PromptBuilder.build()` never read `context.tools` or any of the other fields to begin with; it hardcodes a system message plus the raw user message only. But it does underscore that `PromptContext`'s richer fields (history, memories, documents, system_prompt) are populated by whatever calls into it and then **entirely discarded** — conversation history and retrieved documents never actually reach the LLM prompt today, regardless of how much of the pipeline in front of them works.
 
 ---
 
 ## Suggested next priorities (roughly in order)
 
-1. **Commit the `GraphVisualizer` fix** in `packages/graph/manager.py` — it's currently just an uncommitted working-tree change.
-2. **Gate the exception-handler traceback leak** behind a debug flag (`packages/api/exception_handlers.py:48`) — this is committed and currently ships raw tracebacks to any caller who triggers a 500, including from the missing-API-key failure mode in gap #9 below.
-3. **Fix the DB session lifecycle** (gap #5) — either switch the live chat path to `UnitOfWork`, or add explicit close/rollback to `get_db_session`. This is the highest-severity gap found this pass: unbounded session leakage under any sustained load.
-4. **Fix `OPENWEATHER_BASE_URL`** in `.env` — append `/weather` (or the correct OpenWeatherMap endpoint path).
-5. **Wire real JWT validation** behind the existing tenant-context middleware, and add CORS middleware (gap #2) — right now tenant identity is trusted, not verified, and there's no CORS policy or docs-exposure gating at all.
-6. **Generate an initial Alembic migration** from the existing 15+ ORM models — schema currently only exists via `create_all`, with no upgrade/rollback story.
-7. **Wire up at least the Conversations router** — right now there's no HTTP-reachable way to create a conversation; everything downstream of chat depends on a hand-seeded UUID.
-8. **Write an actual pytest suite** — there is currently zero automated regression protection anywhere in the repo.
-9. **Fix the vectorstore backend env-var mismatch and add an explicit error for unimplemented backends** (gap #8) — `VECTOR_STORE` vs `VECTOR_STORE_BACKEND`, and the silent-`None` fallthrough for faiss/qdrant.
-10. **Write a real README** — setup steps, required env vars, and how to run the server locally.
-11. **Rewrite `.env.example` from scratch against the actual `packages/config/*.py` settings classes** (gap #13) — the current one is a different project's template and will actively mislead anyone onboarding from it. Fix the `ENABLE_*` feature-flag name mismatches and `UPLOAD_SERVICE_URL` while at it.
-12. **Delete the dead code**: `infrastructure/ai/factory.py` (orphaned `LLMFactory`), and the stale `AgentState` imports in `conversation/store.py` / `memory_store.py` / `application/application.py`.
-13. **Close the weather tool's `httpx.AsyncClient`** on shutdown, or switch it to the same per-call pattern `news.py`/`search.py` already use.
+1. **Fix `AISettings` missing `top_p`/`top_k`** (`packages/config/ai.py`) — still the single highest-priority item in the repo. Two-line fix (add `top_p: float = Field(default=0.95, alias="TOP_P")` and `top_k: int = Field(default=40, alias="TOP_K")`, matching values already sitting unused in `.env`), and it currently blocks *every* chat request.
+2. **Fix the exception handler's wrong import** (`packages/api/exception_handlers.py`) — change `from packages.config import settings` to `from packages.config.loader import settings`, matching how every other module in the codebase imports it. As written, `settings.app.debug` always raises `AttributeError`, and a separate `UnicodeEncodeError` in the `logger.exception(...)` call fires even before that — together they mean every 500 currently returns a completely empty body. This is close to right in intent; it just needs the import fixed and the logging call made encoding-safe (or wrapped in its own `try/except` so a logging failure can never mask the real error).
+3. **Restore the commit() calls removed from `packages/infrastructure/repositories/base.py`** — `6fe7723` silently reverted a fix from two passes ago; writes on the live chat path are flushed but never durably committed.
+4. **Finish and commit the `get_db_session`/`UnitOfWork` session fixes** — both are genuine, correct fixes found uncommitted this pass. Worth committing as-is; consider also wrapping `base.py`'s write methods in `try/except` with rollback, now that the session actually gets closed afterward.
+5. **Decide the fate of `packages/application/`** — either wire it into the DI container and routers for real, or delete it. ~1,000 lines of unreachable code with at least three independent bugs of its own (hardcoded fake response, wrong import path, `datetime` module/class confusion).
+6. **Delete `infrastructure/ai/factory.py` and the unused `LLMRegistry`** — both superseded by the new `infrastructure/ai/providers/` architecture; neither is referenced by anything real anymore.
+7. **Fix the Docker healthcheck path** (`/health` → `/api/v1/health`) and either populate `docker-compose.dev.yml` or remove the `make dev` target that expects it.
+8. **Fix the Makefile's `docker/compose/` paths** — that directory doesn't exist; the real compose files are at the repo root.
+9. **Fix `docker/scripts/wait-for-db.py`'s corrupted `echo`/`exec` lines** before it's ever actually invoked.
+10. **Wire real JWT validation** behind the existing tenant-context middleware, and add CORS middleware (gap #2).
+11. **Regenerate the Alembic "initial schema" migration properly** — the current one only does an `alter_column` and would fail against a genuinely empty database; it needs real `create_table` calls for all 15+ domain models, or should stop being called "Initial schema."
+12. **Wire up at least the Conversations router** — there's still no HTTP-reachable way to create a conversation.
+13. **Write an actual pytest suite** — zero automated regression protection anywhere in the repo; this pass's regressions (items 1–3 above) are exactly the kind a CI test suite exists to catch.
+14. **Fix the vectorstore backend silent-`None` fallthrough** for faiss/qdrant (gap #8).
+15. **Write a real README** — setup steps, required env vars, how to run the server locally.
+16. **Close the weather tool's `httpx.AsyncClient`** on shutdown (or switch to the per-call pattern `news.py`/`search.py` already use), and fix `OPENWEATHER_BASE_URL`/`UPLOAD_SERVICE_URL` in the real `.env` now that `.env.example` documents the correct values.

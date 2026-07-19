@@ -1,12 +1,18 @@
 # API exception handlers
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+from docx import settings
+from fastapi import FastAPI, Request, logger
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+import traceback
 from starlette.exceptions import HTTPException
 
+from packages.config.loader import settings
 from packages.api.responses import ErrorResponse
+from packages.logging.logger import get_logger
+
+logger = get_logger(__name__)
 
 async def validation_exception_handler(
     request: Request,
@@ -22,6 +28,8 @@ async def validation_exception_handler(
             },
         ).model_dump(mode="json"),
     )
+
+
 async def http_exception_handler(
     request: Request,
     exc: HTTPException,
@@ -34,20 +42,33 @@ async def http_exception_handler(
         ).model_dump(mode="json"),
     )
 
+
 async def unhandled_exception_handler(
     request: Request,
     exc: Exception,
 ) -> JSONResponse:
-    import traceback
-    tb = traceback.format_exc()
-    traceback.print_exc()
+    logger.exception(
+        "Unhandled exception",
+        exc_info=exc,
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+        },
+    )
+
+    message = "An unexpected internal server error occurred."
+
+    if settings.app.debug:
+        message = traceback.format_exc()
+
     return JSONResponse(
         status_code=500,
         content=ErrorResponse(
-            error=exc.__class__.__name__,
-            message=f"Internal server error. Traceback: {tb}",
+            error="InternalServerError",
+            message=message,
         ).model_dump(mode="json"),
     )
+
 
 def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(

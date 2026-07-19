@@ -28,11 +28,15 @@ def get_container(
 ) -> ApplicationContainer:
     return container
 
+
 @inject
-def get_db_session(
+async def get_db_session(
     session: AsyncSession = Depends(Provide[ApplicationContainer.database.session]),
-) -> AsyncSession:
-    return session
+):
+    try:
+        yield session
+    finally:
+        await session.close()
 
 
 #

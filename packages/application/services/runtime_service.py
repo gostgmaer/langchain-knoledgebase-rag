@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, BaseMessage
 
+from packages.application.services.history_services import HistoryService
 from packages.domain.models.conversation import Conversation
 from packages.domain.models.message import Message
 from packages.infrastructure.ai.manager import LLMManager
@@ -25,9 +26,11 @@ class RuntimeService:
         self,
         llm: LLMManager,
         prompt_builder: PromptBuilder,
+        history_service: HistoryService,
     ) -> None:
         self._llm = llm
         self._prompt_builder = prompt_builder
+        self._history_service = history_service
 
     async def run(
         self,

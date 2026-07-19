@@ -35,12 +35,13 @@ class UnitOfWork:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        if exc:
-            await self.rollback()
-        else:
-            await self.commit()
-
-        await self.close()
+        try:
+            if exc_type:
+                await self.session.rollback()
+            else:
+                await self.session.commit()
+        finally:
+            await self.session.close()
 
     # ---------------------------------------------------------
     # Transaction
