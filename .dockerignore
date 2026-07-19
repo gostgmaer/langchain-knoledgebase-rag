@@ -1,0 +1,79 @@
+# Empty file
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual Environments
+.venv/
+venv/
+env/
+
+# Python Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build Artifacts
+build/
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Documentation
+docs/
+
+# Tests
+tests/
+**/tests/
+
+# Local Database
+*.db
+*.sqlite
+*.sqlite3
+/data
+
+# Node (if any frontend exists later)
+node_modules/
+
+# Temporary Files
+tmp/
+temp/
+
+# Cache
+.cache/
+
+# Misc
+*.bak
+*.old

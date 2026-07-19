@@ -318,6 +318,31 @@ Contrary to what you might expect from the rest of this audit, the core domain m
 ### 12. The new CLI script (`cli.py`, commit `72f2b8f`) is a smoke-test client, not a real CLI
 `cli.py` (81 lines, repo root, not under `packages/`) is a standalone Rich-based interactive tester: it checks `GET /health`, then talks to a **hardcoded dummy conversation UUID** (`ensure_conversation()`, lines 17-22, literally returns `"3fa85f64-5717-4562-b3fc-2c963f66afa6"` with a comment admitting the real `/conversations` endpoint "isn't wired up yet"), sends `POST /chat` with `stream: false` always (no streaming support despite the flag existing), and generates a **fresh random `X-Tenant-Id` on every run** (line 11) that won't match whatever tenant the dummy conversation was actually seeded under. If the conversation doesn't exist, it just prints a message telling you to seed the DB by hand. This satisfies "a CLI exists" but not "a CLI you can onboard someone with."
 
+### 13. `.env` / `.env.example` are largely a stale template from a different project
+Checked every `Field(alias=...)` in `packages/config/*.py` against both `.env` and `.env.example`. Verdict: **`.env.example` is a near-verbatim copy of `langgraph-cli-chat-agent`'s env template** (SQLite paths, a single `LLM_PROVIDER` switch, `CLI_THEME`, `AGENT_MAX_ITERATIONS` — none of which correspond to anything in this project's actual settings classes) — it does not reflect this codebase and would actively mislead anyone onboarding from it. The real `.env` is the same stale template with a handful of genuinely-used keys appended at the bottom.
+
+**Wrong value:**
+- `UPLOAD_SERVICE_URL=https://api.smith.langchain.com` (`.env:174`) — this is LangSmith's endpoint, not a real upload service. Looks like a copy-paste error; `UploadServiceSettings.base_url` (`packages/config/upload_service.py:15-18`) has no default, so it happily accepts this as "valid" (it's a well-formed URL) and would call the wrong host if the Upload SDK is ever exercised.
+
+**Name mismatches — value in `.env` is silently ignored, setting falls back to its Python default:**
+| `.env` has | Settings class expects | File |
+|---|---|---|
+| `VECTOR_STORE` | `VECTOR_STORE_BACKEND` | `packages/config/rag.py:17` |
+| `ENABLE_SEARCH_TOOL`, `ENABLE_WEATHER_TOOL`, `ENABLE_NEWS_TOOL`, `ENABLE_CALCULATOR_TOOL` | `ENABLE_WEB_SEARCH`, `ENABLE_WEATHER`, `ENABLE_NEWS`, `ENABLE_CALCULATOR` (plus `ENABLE_TOOLS`, `ENABLE_MEMORY`, `ENABLE_STREAMING`, `ENABLE_RERANKING`, `ENABLE_QUERY_REWRITE`, none of which are set in `.env` at all) | `packages/config/features.py` |
+| `UPLOAD_DIR` | `StorageSettings` has no matching alias at all (its fields are unaliased, matched by bare name — `UPLOAD_DIRECTORY`, `TEMP_DIRECTORY`, `MAX_FILE_SIZE`) | `packages/config/storage.py` |
+| `LOG_FORMAT` | Not read anywhere — `LoggingSettings` only defines `LOG_LEVEL`/`LOG_JSON` | `packages/config/logging.py` |
+
+**Practical impact:** every feature flag (`ENABLE_*`) is currently unconfigurable via `.env` — they're all silently pinned to their hardcoded Python defaults (mostly `True`) no matter what the file says. Same for the vector store backend selection.
+
+**Placeholder secrets that would fail if actually used:**
+- `IAM_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxx` and `IAM_INTROSPECTION_API_KEY=xxxxxxxxxxxxxxxxxxxx` (`.env:182,185`) — harmless today only because nothing calls the IAM SDK yet (see Phase 2). Worth replacing before JWT validation is wired up.
+
+**A real startup-crash risk if this ever regresses:** `packages/config/loader.py:19-34`'s `get_settings()` eagerly instantiates `IAMSettings()` at **import time** (`settings = get_settings()` runs on module load). `IAMSettings` (`packages/config/iam.py`) requires `IAM_BASE_URL`/`IAM_CLIENT_ID`/`IAM_CLIENT_SECRET`/`IAM_INTROSPECTION_API_KEY` with **no defaults** — if any of those four were ever removed from `.env`, the entire app would fail to import before it even starts, not just fail on first use.
+
+**Roughly half the file (~50 lines) is pure dead weight**, unused by any current settings class: `LLM_MODEL`, `TOP_P`/`TOP_K`, `OLLAMA_BASE_URL`, `CHECKPOINT_DB_PATH`/`SESSION_DB_PATH`/`SUMMARY_DB_PATH`, `CHROMA_PERSIST_DIR`, `FAISS_INDEX_PATH`, `QDRANT_URL`/`QDRANT_API_KEY`, `POSTGRES_HOST`/`PORT`/`DB`/`USER`/`PASSWORD` (dead since `DATABASE_URL` is the one connection string actually used), `RETRIEVAL_TOP_K`/`RETRIEVAL_STRATEGY`, `SEARCH_PROVIDER`, `HTTP_TIMEOUT`/`MAX_RETRIES`/`RETRY_DELAY`/`USER_AGENT`, `CLI_THEME`/`CLI_STREAMING`/`CLI_SHOW_TOOL_CALLS`/`CLI_SHOW_THINKING`, `LANGCHAIN_TRACING_V2`/`LANGCHAIN_ENDPOINT`/`LANGCHAIN_API_KEY`/`LANGCHAIN_PROJECT`, `SESSION_TTL_HOURS`/`MAX_SESSIONS`, `AGENT_MAX_ITERATIONS`/`AGENT_MAX_TOOL_CALLS`/`AGENT_TIMEOUT`.
+
+**What is genuinely correct and matches:** `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `QUEUE_PREFIX`, `GOOGLE_API_KEY`/`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`GROQ_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`, `CHUNK_SIZE`/`CHUNK_OVERLAP`, `SERPER_API_KEY`/`TAVILY_API_KEY`/`NEWSAPI_API_KEY`, `OPENWEATHER_API_KEY` (though its `_BASE_URL` sibling has the separate `/weather`-path bug from gap #2 above), and all seven `IAM_*` vars (present, two are placeholders).
+
 ---
 
 ## Suggested next priorities (roughly in order)
@@ -332,5 +357,6 @@ Contrary to what you might expect from the rest of this audit, the core domain m
 8. **Write an actual pytest suite** — there is currently zero automated regression protection anywhere in the repo.
 9. **Fix the vectorstore backend env-var mismatch and add an explicit error for unimplemented backends** (gap #8) — `VECTOR_STORE` vs `VECTOR_STORE_BACKEND`, and the silent-`None` fallthrough for faiss/qdrant.
 10. **Write a real README** — setup steps, required env vars, and how to run the server locally.
-11. **Delete the dead code**: `infrastructure/ai/factory.py` (orphaned `LLMFactory`), and the stale `AgentState` imports in `conversation/store.py` / `memory_store.py` / `application/application.py`.
-12. **Close the weather tool's `httpx.AsyncClient`** on shutdown, or switch it to the same per-call pattern `news.py`/`search.py` already use.
+11. **Rewrite `.env.example` from scratch against the actual `packages/config/*.py` settings classes** (gap #13) — the current one is a different project's template and will actively mislead anyone onboarding from it. Fix the `ENABLE_*` feature-flag name mismatches and `UPLOAD_SERVICE_URL` while at it.
+12. **Delete the dead code**: `infrastructure/ai/factory.py` (orphaned `LLMFactory`), and the stale `AgentState` imports in `conversation/store.py` / `memory_store.py` / `application/application.py`.
+13. **Close the weather tool's `httpx.AsyncClient`** on shutdown, or switch it to the same per-call pattern `news.py`/`search.py` already use.
