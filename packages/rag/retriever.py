@@ -1,37 +1,41 @@
-# Retriever
+"""
+RAG retrieval pipeline.
+"""
+
 from __future__ import annotations
 
-from langchain_core.documents import Document
-from langchain_core.retrievers import BaseRetriever
+from packages.knowledge.manager import KnowledgeManager
+from packages.knowledge.retrievers.schemas import SearchRequest
+from packages.knowledge.retrievers.schemas import SearchResult
+from packages.rag.schemas import RAGRequest
 
-from packages.rag.vectorstore import VectorStoreManager
 
-
-class RAGRetriever:
-    """High-level retrieval wrapper."""
+class RetrievalPipeline:
+    """
+    Executes the retrieval stage of the RAG pipeline.
+    """
 
     def __init__(
         self,
-        vectorstore: VectorStoreManager,
+        knowledge_manager: KnowledgeManager,
     ) -> None:
-        self.vectorstore = vectorstore
+        self._knowledge_manager = knowledge_manager
 
     async def retrieve(
         self,
-        query: str,
-        *,
-        k: int = 5,
-    ) -> list[Document]:
-        return await self.vectorstore.similarity_search(
-            query=query,
-            k=k,
+        request: RAGRequest,
+    ) -> list[SearchResult]:
+        """
+        Retrieve relevant knowledge for a user query.
+        """
+
+        search_request = SearchRequest(
+            tenant_id=request.tenant_id,
+            model_profile_id=request.model_profile_id,
+            query=request.query,
+            metadata=request.metadata,
         )
 
-    def as_retriever(
-        self,
-        *,
-        k: int = 5,
-    ) -> BaseRetriever:
-        return self.vectorstore.client.as_retriever(
-            search_kwargs={"k": k},
+        return await self._knowledge_manager.search(
+            search_request,
         )

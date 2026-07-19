@@ -1,26 +1,41 @@
-class RAGException(Exception):
-    """Base exception for RAG."""
+"""
+RAG exceptions.
+"""
+
+from __future__ import annotations
 
 
-class LoaderException(RAGException):
-    """Raised when document loading fails."""
+class RAGError(Exception):
+    """
+    Base exception for the RAG package.
+    """
 
 
-class SplitterException(RAGException):
-    """Raised when document splitting fails."""
+class RetrievalError(RAGError):
+    """
+    Raised when retrieval fails.
+    """
 
 
-class EmbeddingException(RAGException):
-    """Raised when embedding generation fails."""
+class ContextBuildError(RAGError):
+    """
+    Raised when context construction fails.
+    """
 
 
-class VectorStoreException(RAGException):
-    """Raised when vector store operations fail."""
+class PromptBuildError(RAGError):
+    """
+    Raised when prompt construction fails.
+    """
 
 
-class RetrievalException(RAGException):
-    """Raised when retrieval fails."""
+class CitationBuildError(RAGError):
+    """
+    Raised when citation generation fails.
+    """
 
 
-class IndexingException(RAGException):
-    """Raised when indexing fails."""
+class ResponseGenerationError(RAGError):
+    """
+    Raised when the language model fails to generate a response.
+    """

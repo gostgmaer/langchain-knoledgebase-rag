@@ -1,56 +1,68 @@
-# RAG manager
+"""
+RAG manager.
+"""
+
 from __future__ import annotations
 
-from pathlib import Path
-
-from langchain_core.documents import Document
-
-from packages.rag.embeddings import EmbeddingManager
-from packages.rag.indexer import DocumentIndexer
-from packages.rag.loader import DocumentLoader
-from packages.rag.pipeline import RAGPipeline
-from packages.rag.retriever import RAGRetriever
-from packages.rag.splitter import DocumentSplitter
-from packages.rag.vectorstore import VectorStoreManager
+from packages.ai.chat.service import ChatService
+from packages.rag.builders.citation import CitationBuilder
+from packages.rag.builders.context import ContextBuilder
+from packages.rag.builders.prompt import PromptBuilder
+from packages.rag.pipelines.retrieval import RetrievalPipeline
+from packages.rag.schemas import RAGRequest
+from packages.rag.schemas import RAGResponse
 
 
 class RAGManager:
-    """Facade for the complete RAG subsystem."""
+    """
+    Public facade for Retrieval-Augmented Generation.
+    """
 
     def __init__(
         self,
-        embeddings: EmbeddingManager,
-        vectorstore: VectorStoreManager,
-        loader: DocumentLoader,
-        splitter: DocumentSplitter,
-        indexer: DocumentIndexer,
-        retriever: RAGRetriever,
-        pipeline: RAGPipeline,
+        retrieval_pipeline: RetrievalPipeline,
+        context_builder: ContextBuilder,
+        prompt_builder: PromptBuilder,
+        citation_builder: CitationBuilder,
+        chat_service: ChatService,
     ) -> None:
-        self.embeddings = embeddings
-        self.vectorstore = vectorstore
-        self.loader = loader
-        self.splitter = splitter
-        self.indexer = indexer
-        self.retriever = retriever
-        self.pipeline = pipeline
+        self._retrieval_pipeline = retrieval_pipeline
+        self._context_builder = context_builder
+        self._prompt_builder = prompt_builder
+        self._citation_builder = citation_builder
+        self._chat_service = chat_service
 
-    async def index(
+    async def answer(
         self,
-        file_path: str | Path,
-    ) -> list[Document]:
-        return await self.pipeline.index(file_path)
+        request: RAGRequest,
+    ) -> RAGResponse:
+        """
+        Generate an answer using Retrieval-Augmented Generation.
+        """
 
-    async def retrieve(
-        self,
-        query: str,
-        *,
-        k: int = 5,
-    ) -> list[Document]:
-        return await self.pipeline.search(
-            query=query,
-            k=k,
+        search_results = await self._retrieval_pipeline.retrieve(
+            request,
         )
 
-    def get_retriever(self):
-        return self.retriever.as_retriever()
+        context = self._context_builder.build(
+            search_results,
+        )
+
+        prompt = self._prompt_builder.build(
+            request,
+            context,
+        )
+
+        answer = await self._chat_service.chat(
+            prompt,
+        )
+
+        citations = self._citation_builder.build(
+            search_results,
+        )
+
+        return RAGResponse(
+            answer=answer,
+            context=context,
+            citations=citations,
+        )
