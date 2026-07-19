@@ -6,6 +6,7 @@ from sqlalchemy import Select, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.domain.models.base import BaseModel
+from packages.infrastructure.repositories.pagination import Page, Pagination
 
 ModelType = TypeVar("ModelType", bound=BaseModel)
 
@@ -33,7 +34,6 @@ class BaseRepository(Generic[ModelType]):
     ) -> ModelType:
         self.session.add(entity)
         await self.session.flush()
-        await self.session.commit()
         await self.session.refresh(entity)
         return entity
 
@@ -94,7 +94,6 @@ class BaseRepository(Generic[ModelType]):
         entity: ModelType,
     ) -> ModelType:
         await self.session.flush()
-        await self.session.commit()
         await self.session.refresh(entity)
         return entity
 
@@ -107,7 +106,7 @@ class BaseRepository(Generic[ModelType]):
         entity: ModelType,
     ) -> None:
         await self.session.delete(entity)
-        await self.session.commit()
+        await self.session.flush()
 
     async def delete_by_id(
         self,
@@ -119,7 +118,7 @@ class BaseRepository(Generic[ModelType]):
         )
 
         result = await self.session.execute(stmt)
-        await self.session.commit()
+        await self.session.flush()
 
         return result.rowcount > 0
 
@@ -140,3 +139,8 @@ class BaseRepository(Generic[ModelType]):
     ) -> list[ModelType]:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+    async def paginate(
+    self,
+    pagination: Pagination,
+) -> Page[ModelType]:
+        "---"
