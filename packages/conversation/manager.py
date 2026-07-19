@@ -17,9 +17,11 @@ from packages.conversation.service import (
 )
 from packages.domain.models.message import Message
 from packages.domain.enums.message_role import MessageRole
-from packages.graph.manager import GraphManager
 from packages.graph.state import GraphState
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from packages.graph.manager import GraphManager
 
 class ConversationManager:
     """

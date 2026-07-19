@@ -23,4 +23,4 @@ class AISettings(BaseSettings):
     max_tokens: int = Field(default=8192, alias="LLM_MAX_TOKENS")
     streaming: bool = Field(default=True, alias="LLM_STREAMING")
     top_p: float = Field(default=0.95, alias="LLM_TOP_P")
-    top_k: float = Field(default=0.9, alias="LLM_TOP_K")
+    top_k: int = Field(default=5, alias="LLM_TOP_K")
