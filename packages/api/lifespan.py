@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from packages.graph.visualizer import GraphVisualizer
 from packages.infrastructure.container import ApplicationContainer
 from packages.infrastructure.database.base import Base
 from sqlalchemy import text
@@ -32,7 +33,7 @@ async def lifespan(app: FastAPI):
 
     try:
         # Rendering uses the remote mermaid.ink API — never block startup on it.
-        # GraphVisualizer.save_png(container.graph.builder().build())
+        GraphVisualizer.save_png(container.graph.builder().build())
         pass
     except Exception as exc:
         logger.warning("Could not render graph.png: %s", exc)
