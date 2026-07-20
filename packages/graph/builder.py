@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from packages.graph.nodes import GraphNodes
 from packages.graph.router import GraphRouter
@@ -16,9 +18,9 @@ class GraphBuilder:
     ) -> None:
         self._nodes = nodes
         self._router = router
-        
+        self._checkpointer = MemorySaver()
 
-    def build(self):
+    def build(self) -> CompiledStateGraph:
 
         graph = StateGraph(GraphState)
 
@@ -26,34 +28,16 @@ class GraphBuilder:
         # Nodes
         #
 
-        graph.add_node(
-            "planner",
-            self._nodes.planner,
-        )
-
-        graph.add_node(
-            "retrieve",
-            self._nodes.retrieve,
-        )
-
-        graph.add_node(
-            "tool",
-            self._nodes.tool,
-        )
-
-        graph.add_node(
-            "llm",
-            self._nodes.llm,
-        )
+        graph.add_node("planner", self._nodes.planner)
+        graph.add_node("retrieve", self._nodes.retrieve)
+        graph.add_node("tool", self._nodes.tool)
+        graph.add_node("llm", self._nodes.llm)
 
         #
         # Start
         #
 
-        graph.add_edge(
-            START,
-            "planner",
-        )
+        graph.add_edge(START, "planner")
 
         #
         # Planner
@@ -73,19 +57,13 @@ class GraphBuilder:
         # Retrieval
         #
 
-        graph.add_edge(
-            "retrieve",
-            "llm",
-        )
+        graph.add_edge("retrieve", "llm")
 
         #
         # Tool
         #
 
-        graph.add_edge(
-            "tool",
-            "llm",
-        )
+        graph.add_edge("tool", "llm")
 
         #
         # LLM
@@ -99,5 +77,7 @@ class GraphBuilder:
                 END: END,
             },
         )
-        
-        return graph.compile()
+
+        return graph.compile(
+            checkpointer=self._checkpointer,
+        )

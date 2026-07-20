@@ -20,8 +20,10 @@ from packages.domain.enums.message_role import MessageRole
 from packages.graph.state import GraphState
 
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from packages.graph.manager import GraphManager
+
 
 class ConversationManager:
     """
@@ -94,18 +96,11 @@ class ConversationManager:
         # Build GraphState
         #
 
-        state: GraphState = {
-            "messages": history,
-            "conversation_id": str(request.conversation_id),
-            "tenant_id": str(conversation.tenant_id),
-            "model_profile_id": str(conversation.agent.model_profile_id),
-            "user_id": str(request.user_id),
-            "thread_id": str(request.conversation_id),
-            "documents": [],
-            "tool_results": [],
-            "next_node": None,
-            "system_prompt": request.system_prompt,
-        }
+        state = self._build_graph_state(
+            request,
+            conversation,
+            history,
+        )
 
         #
         # Execute graph
@@ -144,3 +139,60 @@ class ConversationManager:
             response=assistant_content,
             model="default",
         )
+
+    def _build_graph_state(
+        self,
+        request: ChatRequest,
+        conversation,
+        history,
+    ) -> GraphState:
+
+        return {
+            #
+            # Conversation
+            #
+            "messages": history,
+            "conversation_id": request.conversation_id,
+            "thread_id": request.conversation_id,
+            "tenant_id": conversation.tenant_id,
+            "user_id": request.user_id,
+            #
+            # AI
+            #
+            "model_profile_id": conversation.agent.model_profile_id,
+            "system_prompt": request.system_prompt,
+            "temperature": conversation.agent.temperature,
+            "max_tokens": conversation.agent.max_tokens,
+            #
+            # Runtime
+            #
+            "retrieval_enabled": True,
+            "tools_enabled": True,
+            "stream": False,
+            #
+            # RAG
+            #
+            "search_results": [],
+            "context": None,
+            "citations": [],
+            #
+            # Tools
+            #
+            "tool_calls": [],
+            "tool_results": [],
+            #
+            # Memory
+            #
+            "summary": "",
+            #
+            # Execution
+            #
+            "next_node": "",
+            "metadata": {},
+            "usage": {},
+            #
+            # Errors
+            #
+            "retry_count": 0,
+            "error": None,
+        }
