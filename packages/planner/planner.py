@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from packages.graph.state import GraphState
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from packages.graph.state import GraphState
 
 from .models import (
     Capability,
@@ -18,10 +21,10 @@ class GraphPlanner:
     without changing the graph.
     """
 
-    async def plan(
+    async def __call__(
         self,
         state: GraphState,
-    ) -> ExecutionPlan:
+    ) -> dict:
 
         message = state["messages"][-1].content.lower()
 
@@ -64,4 +67,4 @@ class GraphPlanner:
             )
         )
 
-        return plan
+        return {"execution_plan": plan}

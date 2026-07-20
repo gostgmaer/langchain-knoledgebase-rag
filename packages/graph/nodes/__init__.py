@@ -6,7 +6,7 @@ from langgraph.prebuilt import ToolNode
 from packages.graph.nodes.extract_memory import ExtractMemoryNode
 from packages.graph.nodes.llm import LLMNode
 from packages.graph.nodes.load_memory import LoadMemoryNode
-from packages.graph.nodes.planner import GraphPlanner
+from packages.planner.planner import GraphPlanner
 from packages.graph.nodes.retrieve import RetrieveNode
 
 # from .planner import GraphPlanner

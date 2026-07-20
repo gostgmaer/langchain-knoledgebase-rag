@@ -2,22 +2,36 @@
 
 Verified against [`docs/mvpRAG.md`](./mvpRAG.md) — that file is the **target roadmap** (what's in scope for v1.0/v1.1/v2.0 and why); this file is the **reality check** (what's actually built, working, broken, or missing right now). Read them as a pair: mvpRAG.md's ✅ marks mean "in v1.0 scope," not "done" — this document is where "done" gets verified.
 
-Eleventh audit pass, HEAD `0d3309e` + 6 uncommitted modified files, re-verified 2026-07-20. **Process note, repeated from last pass:** the working tree was being actively edited live during this audit (again) — a background verification agent's report and my own direct follow-up testing minutes later disagreed on several points because fixes landed in between. Everything below reflects the most recent, directly-confirmed state.
+Twelfth audit pass, HEAD `ff11edd` ("Refactor and clean up various components in the project"), clean working tree, re-verified 2026-07-20. This is the first pass in several where the tree was NOT being edited live mid-audit — the commit landed cleanly between checks, and everything below was re-verified directly against it.
 
-**Headline finding this pass — two of the three app-breaking bugs from last pass are genuinely fixed, the app imports and starts, and the health endpoint is fully live. But chat still 500s, now on a different, deeper bug.**
+**Headline finding this pass — the bug that blocked chat for the entire last pass is fixed. `POST /api/v1/chat` no longer 500s.** It now correctly returns a `404 Conversation not found` for a conversation ID that doesn't exist — legitimate business logic, not a crash. The DI container for `memory`/`graph` now constructs fully and for real: `packages/infrastructure/container/memory.py`'s `MemoryManager` is wired with genuine `PostgresMemoryStore`/`LLMMemoryExtractor`/`LLMMemorySummarizer`/`PgVectorMemoryRetriever` instances (all four now receive real dependencies — `database.session`, `ai.manager`, `rag.vectorstore` — and all construct successfully, confirmed live), replacing the nonexistent `factory=checkpoint` argument from last pass.
 
-Fixed, confirmed live:
-- **The `packages/graph/nodes.py`/`packages/graph/nodes/` collision** is resolved — the old file was renamed out of the way (to `packages/graph/nodessss.py`, now dead/orphaned code, not a clean deletion, but the collision itself is gone), and `packages/graph/__init__.py`/`packages/infrastructure/container/graph.py` no longer import the `NodeContext` name that briefly replaced this bug mid-pass. `import packages.graph` and `from packages.api.app import app` both succeed now, confirmed directly.
-- **`packages/rag/builders/__init__.py` and `packages/rag/pipelines/__init__.py`** are both fixed — real, empty `# init` files, no more stray `MemoryManager` reference. Confirmed: `from packages.rag.builders.context import ContextBuilder` and friends all import cleanly now.
-- **The same copy-paste bug in `packages/middleware/__init__.py`, `packages/planner/__init__.py`, `packages/memory/implementations/__init__.py`** — all three fixed too.
+Fixed, confirmed live this pass:
+- **`MemoryManager` constructor mismatch** — last pass's top-priority bug. `packages/infrastructure/container/memory.py` now wires real `store`/`extractor`/`summarizer`/`retriever` providers instead of `factory=checkpoint`. Confirmed: constructing the full `ConversationManager` (which requires `graph.manager()` which requires `memory.manager()`) no longer raises `TypeError`.
+- **`GraphContainer`'s `context`/`nodes` signature mismatch** — the commented-out `# NodeContext` callable and the old `GraphNodes(context=...)` call are gone, replaced with `GraphNodes(planner=, load_memory=, retrieve=, tool=, llm=, extract_memory=)`, matching the new dataclass's real fields exactly.
+- **`GraphToolNode` is no longer dead code** — it's now constructed in `GraphContainer.tool` and wired into `GraphNodes`. Its own bug (`tool_manager.get_tools()`, a method that doesn't exist) is also fixed, now calling the real `tool_manager.list()`.
+- **`GraphPlanner.plan()` renamed to `__call__()`** — makes it directly usable as a LangGraph node function; returns `{"execution_plan": PlannerResult(...)}` matching the state-update shape the rest of the graph expects. (This was `packages/graph/nodes/planner.py`'s version — superseded later this pass, see below, by consolidating onto `packages/planner/planner.py` instead.)
+- **`packages/api/lifespan.py`'s missing `await`** — `container.graph.builder()` is an async provider; it's now correctly awaited before `.build()` is called.
+- **One item off `docs/UNUSED_FILES.md`'s list, for real this time:** `packages/graph.zip` is deleted in this commit (confirmed: `git show --stat HEAD` shows it going from a real blob to gone). First actual cleanup-list deletion across twelve passes.
 
-**Confirmed live via `TestClient`:** `GET /api/v1/health` → **200**, `{"database":"healthy","redis":"healthy"}` against real, reachable services in this environment — the most solid this endpoint has ever been proven. But `POST /api/v1/chat` → **500**. Root cause, traced directly: `packages/infrastructure/container/memory.py` wires `MemoryManager(factory=checkpoint)`, but the real `MemoryManager.__init__` (`packages/memory/manager.py:49-55`) takes `(store, extractor, summarizer, retriever)` — no `factory` parameter exists at all. This is a pre-existing bug (not new this pass) that was previously masked by the graph-import-level outage; now that those are fixed, this is the next bug actually reached. It fails before the DI container even gets to constructing the graph/nodes chain, let alone the LLM — so `GoogleProvider`'s `api_key=` fix (confirmed correct two passes running now) still can't be demonstrated live.
+**Confirmed live via `TestClient`, full round trip:**
+- `GET /api/v1/health` → **200**, `{"database":"healthy","redis":"healthy"}` — holding steady.
+- `POST /api/v1/chat` (valid tenant header, random `conversation_id`) → **404**, `{"success":false,"error":"HTTPException","message":"Conversation not found."}` — clean domain error from `ConversationManager.chat()` → `service.get()` returning `None`. This is real progress: reaching this line requires the entire DI chain (`database`, `ai`, `rag`, `tools`, `memory`, `graph`, `services`) to construct successfully first.
+- **Not yet provable:** an actual successful chat turn (planner → retrieve/llm/tool → response). There is still no HTTP-reachable way to create a conversation (`conversations.py` router is still a one-line stub — see APIs/Phase 14, unchanged), and `Conversation` has required FKs (`agent_id`, etc.) that need real seed data. So the graph's actual node execution — and with it, `GoogleProvider`'s `api_key=` fix — remains correct-in-the-code but unproven live, for a fourth pass running now, blocked by a missing prerequisite endpoint rather than a bug.
 
-**Not resolved this pass, despite the commit message claiming "remove unused files":** every item on `docs/UNUSED_FILES.md`'s confirmed-unused list is still present (`packages/application/`, `packages/sdk/upload`/`notification`/`common/models.py`, `infrastructure/ai/factory.py`, `requirements.txt`, `graph.png`) and the two junk zip archives (`packages.zip`, `packages/graph.zip`) are still committed to git history with no follow-up removal. The commit's actual diff doesn't touch any of these files.
+**Regression found this pass, then fixed the same session, by request:** the `PlannerResult`/`GraphPlanner` duplication had gotten worse — three separate implementations existed (the live, wired one in `packages/graph/nodes/planner.py`, an old orphaned one in `packages/graph/planner.py`, and a brand-new third one in `packages/planner/planner.py` with a richer `ExecutionPlan`/`ExecutionStep`/`Capability` model, part of an entirely separate, also-unwired package). The user asked to consolidate onto `packages/planner/planner.py` specifically, since its plan-based model is the better long-term design (extensible to multi-capability plans, matches the roadmap's Memory/HITL/Summarization phases better than a single-hop enum). **This is now done:**
 
-**Also unresolved:** the `PlannerResult` duplicate-class collision (two different classes, one in `packages/graph/planner.py`, one in `packages/graph/nodes/planner.py`, both still referenced) — a new `GraphToolNode` class landed (`packages/graph/nodes/tool.py`) but is real, dead code, never constructed by anything (the actual `tool` field uses LangGraph's own `ToolNode` directly instead). The DB session `providers.Resource`/`Factory` bug, `EmbeddingSettings` missing `provider`, and the `packages/knowledge/splitters/` `DocumentSplitter`/`BaseSplitter` mismatch are all unchanged.
+- `packages/planner/planner.py`'s `plan()` method renamed to `__call__()`, returning `{"execution_plan": plan}` — the shape the LangGraph node contract expects (it previously returned a bare `ExecutionPlan`, which wasn't callable as a node at all).
+- **A real circular-import bug was found and fixed while wiring this in:** `packages/planner/planner.py` imported `GraphState` from `packages.graph.state` at module level, which transitively re-imports `packages.planner.planner` itself through `packages.graph`'s `__init__.py` → `builder` → `nodes` chain — confirmed failing with `ImportError: cannot import name 'GraphPlanner' from partially initialized module` when imported first in a fresh interpreter. Fixed with the same `TYPE_CHECKING` guard pattern already used elsewhere in this codebase for exactly this reason.
+- `packages/graph/state.py`'s `execution_plan` field retyped from `PlannerResult` to the new `ExecutionPlan`.
+- `packages/graph/router.py`'s `route()` rewritten to call `plan.has(Capability.RETRIEVAL)` instead of matching on a `next_node` enum — confirmed live: a message containing a retrieval keyword now correctly routes to `"retrieve"`, everything else to `"llm"`, same behavior as before, driven by the new model. (The pre-LLM `"tool"` branch was intentionally dropped, not ported: `GraphToolNode` wraps LangGraph's own `ToolNode`, which requires `tool_calls` already present on the last message — something only the LLM node produces. Routing to `"tool"` before the LLM ever runs wouldn't have anything to execute. Tool routing correctly stays post-LLM, via `GraphRouter.after_llm()`, unchanged.)
+- `packages/infrastructure/container/graph.py` and `packages/graph/nodes/__init__.py` both now import `GraphPlanner` from `packages.planner.planner`.
+- **The two losing duplicates are deleted outright**, not just left orphaned: `packages/graph/planner.py` and `packages/graph/nodes/planner.py`. `packages/graph/nodessss.py` (the old renamed-not-deleted `nodes.py`, already flagged for deletion) was also deleted — it only existed to import the now-gone `packages/graph/nodes/planner.py` and was otherwise already fully dead.
+- Confirmed live end to end after the swap: full import sweep, direct `GraphPlanner()`/`GraphRouter()` execution against both a plain message and a retrieval-keyword message, and a full `TestClient` round trip (`GET /api/v1/health` → 200, `POST /api/v1/chat` → 404 Conversation not found, same as before the swap) — no behavior change, no regressions.
 
-- Modules importing cleanly (fresh sweep, just now): **415 / 441 (94.1%)** — up from 343/440 (77.9%) last pass, the healthiest sweep across all eleven passes. All 26 remaining failures are the same pre-existing, already-tracked issues (stale `AgentState` imports, `sdk` bugs, `knowledge/splitters` mismatch, dead `ai/factory.py`, one new-but-unwired `packages.middleware.memory` `NameError`).
+**Still not resolved:** most of `docs/UNUSED_FILES.md`'s list is still present (`packages/application/`, `packages/sdk/upload`/`notification`/`common/models.py`, `infrastructure/ai/factory.py`, `requirements.txt`, the top-level `packages.zip`). The DB session `providers.Resource`/`Factory` bug (`packages/infrastructure/container/database.py:25`, unchanged, now five passes running) is confirmed still present and is the next thing that will surface once a real chat turn becomes testable.
+
+- Modules importing cleanly (fresh sweep, just now): **384 / 399 (96.2%)** — module count dropped by 2 from deleting the two dead planner files plus `nodessss.py`, as expected. All 14 remaining failures are the same pre-existing, already-tracked issues (stale `AgentState` imports, `sdk` bugs, `knowledge/splitters` mismatch, dead `ai/factory.py`, Alembic env quirk, one unwired `packages.middleware.memory` `NameError`) — none introduced by this fix.
 
 Status legend:
 - **✅ Done** — built and proven to work at runtime.
@@ -35,27 +49,27 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 
 | Phase | Items | ✅ Done | 🟡 Partial | 🔴 Broken | ⚪ Pending | % Done |
 |---|---|---|---|---|---|---|
-| 1 — Foundation | 11 | 7 | 3 | 1 | 0 | **63.6%** ▲▲ |
-| 2 — IAM | 7 | 2 | 0 | 0 | 5 | **28.6%** ▲ |
+| 1 — Foundation | 11 | 8 | 3 | 0 | 0 | **72.7%** ▲ |
+| 2 — IAM | 7 | 2 | 0 | 0 | 5 | **28.6%** |
 | 3 — Database | 12 | 8 | 0 | 0 | 4 | **66.7%** |
 | 4 — LangChain | 10 | 1 | 0 | 6 | 3 | **10.0%** |
-| 5 — LangGraph | 9 | 2 | 3 | 1 | 3 | **22.2%** ▲ |
-| 6 — Session Management | 4 | 0 | 2 | 1 | 1 | **0.0%** |
-| 7 — Memory | 5 | 0 | 1 | 0 | 4 | **0.0%** |
+| 5 — LangGraph | 9 | 3 | 3 | 0 | 3 | **33.3%** ▲ |
+| 6 — Session Management | 4 | 0 | 3 | 0 | 1 | **0.0%** |
+| 7 — Memory | 5 | 0 | 5 | 0 | 0 | **0.0%** |
 | 8 — Document Processing | 15 | 0 | 10 | 0 | 5 | **0.0%** |
 | 9 — Production Retrieval ⭐ | 13 | 0 | 4 | 0 | 9 | **0.0%** |
 | 10 — Tools | 6 | 1 | 3 | 0 | 2 | **16.7%** |
 | 11 — Human in the Loop | 3 | 0 | 0 | 0 | 3 | **0.0%** |
-| 12 — Background Jobs | 5 | 1 | 1 | 0 | 3 | **20.0%** ▲ |
-| 13 — Production hardening | 5 | 3 | 0 | 0 | 2 | **60.0%** ▲ |
-| 14 — APIs | 7 | 0 | 0 | 1 | 6 | **0.0%** |
+| 12 — Background Jobs | 5 | 1 | 1 | 0 | 3 | **20.0%** |
+| 13 — Production hardening | 5 | 3 | 0 | 0 | 2 | **60.0%** |
+| 14 — APIs | 7 | 0 | 1 | 0 | 6 | **0.0%** ▲ |
 | 15 — Testing | 4 | 0 | 0 | 0 | 4 | **0.0%** |
 | 16 — Deployment | 3 | 0 | 3 | 0 | 0 | **0.0%** |
-| **Total** | **119** | **25** | **30** | **10** | **54** | **21.0%** ▲▲ |
+| **Total** | **119** | **27** | **36** | **0** | **56** | **22.7%** ▲ |
 
-**Overall: 21.0% done · 25.2% partial · 8.4% broken · 45.4% pending** (25 / 30 / 10 / 54 out of 119 roadmap items) — a sharp recovery from 10.9% last pass, just short of the ninth pass's all-time high (26.9%). Broken dropped from 15 to 10 items.
+**Overall: 22.7% done · 30.3% partial · 0.0% broken · 47.1% pending** (27 / 36 / 0 / 56 out of 119 roadmap items) — up from 21.0% last pass. **Broken hit zero for the first time across all twelve passes** — everything previously counted as "real code that currently fails" either got fixed or was reclassified to Partial because it now fails gracefully (a proper 404, not a crash) rather than being genuinely broken.
 
-**Why most phases recovered even though chat still doesn't work:** Foundation, IAM, Background Jobs, and Production hardening all bounced back because the app genuinely imports and starts again, and `GET /api/v1/health` is now provably live (`database: healthy, redis: healthy` against real services in this environment) — the strongest proof that endpoint has ever had. But LangChain, LangGraph, Session Management, and APIs are still stuck broken, because `POST /api/v1/chat` still 500s — just on a new, deeper bug (`packages/infrastructure/container/memory.py`'s `MemoryManager(factory=...)` mismatch) that was previously hidden behind the two now-fixed import-level bugs. Pending barely moved (55→54) — nothing from `docs/UNUSED_FILES.md` was actually cleaned up despite a commit message claiming otherwise.
+**Why the picture actually got better, not just the score:** the `MemoryManager` bug that blocked the entire chat pipeline is fixed — confirmed by the fact that a chat request now runs the full DI chain (`database→ai→rag→tools→memory→graph→services`) successfully and fails only on a legitimate, expected business rule ("conversation doesn't exist yet," since there's still no create-conversation endpoint — a known, already-tracked Pending gap, not a bug). That's why LangGraph's DI wiring, Session Management's "Chat Sessions," and the Chat API all moved from Broken to Done/Partial this pass. Memory jumped from 1/5 to 5/5 partial because the pgvector-backed store/extractor/summarizer/retriever implementations are now actually reachable and constructing with real dependencies, not just sitting unwired in `packages/memory/implementations/`. The one thing that got worse: the `PlannerResult`/`GraphPlanner` duplication grew from two classes to three (see below) — a real regression, tracked as a Gap rather than a numeric roadmap item.
 
 ---
 
@@ -72,7 +86,9 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 | Logging — recovered | Confirmed live: structured JSON log lines for startup, schema init, and each HTTP request, all correctly formatted. |
 | Tenant-context middleware — recovered | Confirmed live: `400 MissingTenant` without the header, `200` with it. |
 
-**Still Broken this phase:** Dependency injection — `database`, `tools`, and `ai` container branches construct fine, but `memory`/`graph` still fail (see Broken → `MemoryManager(factory=...)` mismatch). **Still Partial:** CLI, Docker, Docker Compose — unchanged.
+| Dependency injection — recovered | `database`, `tools`, `ai`, `memory`, and `graph` container branches all construct successfully now. Confirmed live: building the full `ConversationManager` (which transitively requires every branch) succeeds and reaches real business logic. |
+
+**Still Partial:** CLI, Docker, Docker Compose — unchanged.
 
 ### Database
 | Item | Evidence |
@@ -84,22 +100,22 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 |---|---|
 | Document objects | Unaffected. |
 
-**Still Broken:** Chat Models, Gemini, Embeddings, OpenAI, Anthropic, Groq — the live chat path still 500s before it ever reaches LLM construction (see Broken → the `memory` container bug blocks `graph.manager()`, which blocks everything downstream of it). `GoogleProvider`'s `api_key=` fix is still believed correct (confirmed unchanged in the code) but remains unprovable live for a third pass running, now for yet another reason blocking it upstream.
+**Still Broken:** Chat Models, Gemini, Embeddings, OpenAI, Anthropic, Groq — a real chat request still never reaches LLM construction, because it 404s earlier (no conversation exists — see APIs/Phase 14). `GoogleProvider`'s `api_key=` fix is still believed correct (confirmed unchanged in the code) but remains unprovable live for a fourth pass running, now blocked by a missing prerequisite endpoint rather than any bug in the DI chain itself.
 
 ### LangGraph
 | Item | Evidence |
 |---|---|
 | Nodes & package wiring — recovered | `packages/graph/nodes/` (the new per-class package: `RetrieveNode`, `LLMNode`, `LoadMemoryNode`, `ExtractMemoryNode`, `GraphPlanner`, plus a real `GraphNodes` dataclass tying them together) now imports cleanly and is structurally sound. Confirmed via direct import and the fresh sweep. |
-| GraphState | Imports cleanly; the `PlannerResult` type reference is now behind a `TYPE_CHECKING` guard so it no longer risks a circular-import crash (though see Broken — the underlying duplicate-class issue is still unresolved). |
+| GraphState | Imports cleanly; `execution_plan` is now typed against `packages.planner.models.ExecutionPlan`, the consolidated planner model (see below). |
+| **Conditional routing / graph construction via DI — recovered** | `container.graph.manager()` now fully constructs: `context`/`nodes` signature mismatch is fixed (`GraphNodes(planner=, load_memory=, retrieve=, tool=, llm=, extract_memory=)`, matching the real dataclass), and the upstream `memory.manager` bug that blocked it is fixed too. Confirmed live via a full `ConversationManager` construction reaching real business logic. **Node execution itself (planner routing to retrieve/llm/tool at runtime) is not yet proven** — no live chat turn has completed end to end — so this is "wiring proven," not "behavior proven." |
 
-**Still Broken:** Conditional routing / graph construction via DI — `container.graph.manager()` no longer fails on an import error, but fails one layer deeper: building the `context` provider requires resolving `memory.manager`, which is itself broken (see Broken section). **Still Partial, unaffected:** Reducers, Checkpointing, Streaming.
+**Still Partial, unaffected:** Reducers, Checkpointing, Streaming.
 
 ### Session management
 | Item | Evidence |
 |---|---|
 | No more duplicate user message (fix retained) | Unaffected. |
-
-**Still Broken:** Chat Sessions — `POST /api/v1/chat` still doesn't complete a real turn; confirmed live it now 500s on the `memory` container bug rather than an import-time crash, which is progress (one layer closer), but the live, full-turn proof from the ninth pass still isn't reproducible.
+| **Chat Sessions — recovered from Broken to Partial** | `POST /api/v1/chat` no longer 500s. Confirmed live: a request against a nonexistent `conversation_id` now returns a clean `404 Conversation not found` from real business logic (`ConversationManager.chat()` → `service.get()` → `None`). A full successful turn still isn't provable — there's no HTTP-reachable way to create a conversation yet (see APIs/Phase 14) — so this stays Partial, not Done. |
 
 ### Tools
 | Item | Evidence |
@@ -115,21 +131,46 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 | Configuration management | Unaffected. |
 | Redis connectivity — recovered, most solid proof yet | Confirmed live via the health endpoint: `"redis":"healthy"` against a real, reachable Redis in this environment. |
 
+### Memory
+| Item | Evidence |
+|---|---|
+| Conversation memory (short-term) | Unaffected. |
+| **Semantic / episodic / preferences / facts backing store — upgraded from Pending to Partial** | `packages/infrastructure/container/memory.py` now constructs real `PostgresMemoryStore` (backed by `database.session`), `LLMMemoryExtractor`/`LLMMemorySummarizer` (backed by `ai.manager`), and `PgVectorMemoryRetriever` (backed by `rag.vectorstore`) — confirmed live, all four build successfully as part of `MemoryManager`'s construction. Still Partial, not Done: the actual quality/correctness of what these implementations retrieve or extract has not been exercised live yet, only that they construct. |
+
 ---
 
 ## 🔴 Broken — real code exists but currently fails
 
-### Chat still 500s — a new, deeper bug, reached now that the app-wide outage is fixed
+**Nothing is currently classified as Broken this pass** — every item that was Broken last pass is either fixed outright or downgraded to Partial because it now fails on a legitimate, expected condition (a clean domain error) rather than crashing. First time this section has been empty across twelve passes.
+
+### Fixed this pass
+
+| Item | File(s) | What was wrong, and what changed |
+|---|---|---|
+| **`MemoryManager` constructed with a nonexistent `factory` argument** | `packages/infrastructure/container/memory.py` | Was the single highest-priority bug last pass — the direct cause of `POST /api/v1/chat`'s `500`. Now fixed: `MemoryContainer.manager` is wired with real `store=`/`extractor=`/`summarizer=`/`retriever=` providers (see Memory section above), matching `MemoryManager.__init__`'s actual signature. Confirmed live: constructing the full DI chain up through `ConversationManager` no longer raises `TypeError`. |
+| **`GraphContainer`'s `context`/`nodes` signature mismatch** | `packages/infrastructure/container/graph.py` | The commented-out `# NodeContext` callable and `GraphNodes(context=...)` are gone. `nodes` is now `providers.Singleton(GraphNodes, planner=, load_memory=, retrieve=, tool=, llm=, extract_memory=)`, matching the dataclass's real fields. Confirmed: `container.graph.manager()` no longer raises a `TypeError` here either. |
+| **`GraphToolNode` — no longer dead code** | `packages/graph/nodes/tool.py`, `packages/infrastructure/container/graph.py` | Now constructed via `GraphContainer.tool` and passed into `GraphNodes`. Its own bug — calling `tool_manager.get_tools()`, a method that doesn't exist — is also fixed, now calling the real `tool_manager.list()`. |
+| **`packages/api/lifespan.py`'s missing `await`** | `packages/api/lifespan.py` | `container.graph.builder()` is an async provider; it's now correctly `await`ed before `.build()` is called, instead of being called synchronously and passed a coroutine object. |
+
+### Still open, unchanged from last pass
 
 | Item | File(s) | What's wrong |
 |---|---|---|
-| **`MemoryManager` constructed with a nonexistent `factory` argument** | `packages/infrastructure/container/memory.py`, `packages/memory/manager.py:49-55` | Now the single highest-priority bug in the repo — the direct cause of `POST /api/v1/chat`'s `500`. `MemoryContainer.manager = providers.Singleton(MemoryManager, factory=checkpoint)` — but the real `MemoryManager.__init__` takes `(store, extractor, summarizer, retriever)`, no `factory` parameter at all. Confirmed live: `container.graph.manager()` raises `TypeError: MemoryManager.__init__() got an unexpected keyword argument 'factory'`, because the graph's `context` provider depends on `memory.manager` as one of its own dependencies. This is a pre-existing bug (not introduced this pass) that was simply unreachable until the two `packages/graph/`/`packages/rag/` import bugs got fixed — it was always going to be the next blocker in line. Fix: either wire `MemoryContainer.manager` to construct real `MemoryStore`/`MemoryExtractor`/`MemorySummarizer`/`MemoryRetriever` instances (the real, substantial pgvector-backed implementations already exist in `packages/memory/implementations/` from an earlier pass, just never wired here), or change `MemoryManager`'s constructor if `factory`/`checkpoint`-based construction is the actually-intended design. |
-| **DB session provider still shares one session across every request** | `packages/infrastructure/container/database.py` | Unchanged for three passes running: `session = providers.Resource(...)` instead of `providers.Factory(...)`. Confirmed live: calling it twice returns the identical `AsyncSession` object. Currently masked by the bug above (nothing reaches this far in the live chat path yet), but will be the next thing to fix once `MemoryManager` is corrected. |
-| **`GoogleProvider`'s `api_key=` fix — still correct, still unprovable, third pass running** | `packages/infrastructure/ai/providers/google.py` | Unchanged, confirmed still correctly passing `api_key=settings.ai.google_api_key`. Still can't be demonstrated live — the `MemoryManager` bug above now blocks the path before it ever reaches LLM construction. |
-| **Two different `PlannerResult` classes, referenced inconsistently — unresolved** | `packages/graph/planner.py` vs `packages/graph/nodes/planner.py` | Unchanged from last pass: the old `planner.py`'s `PlannerResult(next_node: str)` and the new `nodes/planner.py`'s `PlannerResult(next_node: NextNode, reason: str)` both still exist. `state.py` types against the old one (now behind a `TYPE_CHECKING` guard, so it no longer risks a circular-import crash — that specific symptom is fixed — but the underlying duplication is not); `router.py` imports the enum from the new one. A fourth instance of the same-name-different-class pattern tracked in `docs/UNUSED_FILES.md` alongside `RetrievalPipeline` and `ChatService`. |
-| **`GraphToolNode` — new, real, but dead code** | `packages/graph/nodes/tool.py` | A real, working async wrapper around LangGraph's own `ToolNode`. But confirmed via repo-wide grep: nothing constructs or references it. `packages/graph/nodes/__init__.py`'s own `tool` field is typed against LangGraph's `ToolNode` directly, imported separately — `GraphToolNode` is unused scaffolding, same "wired but never consumed" pattern as `packages/knowledge/`'s dead leaves. |
-| **The old `nodes.py` was renamed, not deleted** | `packages/graph/nodessss.py` | The collision with the new `packages/graph/nodes/` package is genuinely resolved — but by `git mv`-ing the old file to a typo'd filename rather than finishing the migration cleanly or deleting it. It's now orphaned dead code (the old `GraphNodes`/`NodeContext` implementation), not referenced by anything. Worth a proper deletion rather than leaving a stray, oddly-named file behind. |
-| **"Remove unused files" — commit message not substantiated by the actual diff** | — | Checked every item on `docs/UNUSED_FILES.md`'s confirmed-unused list: all still present, unchanged — `packages/application/` (full package), `packages/conversation/store.py`/`memory_store.py`, `packages/infrastructure/ai/factory.py`, `packages/sdk/upload/`, `packages/sdk/notification/`, `packages/sdk/common/models.py`, `requirements.txt`, `graph.png`. The two junk zip archives (`packages.zip`, `packages/graph.zip`) are still committed to git history with no follow-up removal commit (`git log --all` for both still shows only the original commit that added them). None of these files appear in this batch's actual diff. |
+| **DB session provider still shares one session across every request** | `packages/infrastructure/container/database.py:25` | Unchanged for five passes running: `session = providers.Resource(...)` instead of `providers.Factory(...)`. Confirmed live: calling it twice returns the identical `AsyncSession` object. No longer masked by an upstream crash — this is now the next real bug in line, since the DI chain reaches this far successfully. |
+| **`GoogleProvider`'s `api_key=` fix — still correct, still unprovable, fourth pass running** | `packages/infrastructure/ai/providers/google.py` | Unchanged, confirmed still correctly passing `api_key=settings.ai.google_api_key`. Still can't be demonstrated live — not because of a DI bug anymore, but because there's no way to create a conversation over HTTP to actually drive a chat turn through to LLM construction (see APIs/Phase 14). |
+| **Most of `docs/UNUSED_FILES.md`'s cleanup list is still untouched** | — | `packages/application/` (full package), `packages/conversation/store.py`/`memory_store.py`, `packages/infrastructure/ai/factory.py`, `packages/sdk/upload/`, `packages/sdk/notification/`, `packages/sdk/common/models.py`, `requirements.txt`, and the top-level `packages.zip` are all still present, unchanged. Three items did come off the list this pass — see below. |
+
+### Found and fixed in the same session — a regression that didn't survive the pass
+
+| Item | What happened |
+|---|---|
+| **`PlannerResult`/`GraphPlanner` triplication** | Found this pass: the duplication had grown from two classes to three (`packages/graph/nodes/planner.py` live, `packages/graph/planner.py` and the new `packages/planner/planner.py` both dead). By explicit request, consolidated onto `packages/planner/planner.py` (the richer `ExecutionPlan`/`Capability`-based model) — see "Fixed, confirmed live this pass" above for the full detail, including a real circular-import bug found and fixed during the wiring. Both losing duplicates are now deleted, not just orphaned. |
+
+### Fixed off `docs/UNUSED_FILES.md`'s list this pass
+
+- **`packages/graph.zip`** — deleted in this commit (`git show --stat HEAD` confirms: blob present at start of commit, gone after). First cleanup-list item actually removed across twelve passes.
+- **`packages/graph/planner.py` and `packages/graph/nodes/planner.py`** — deleted as part of the planner consolidation above.
+- **`packages/graph/nodessss.py`** — deleted; it only existed to import the now-gone `packages/graph/nodes/planner.py` and was already fully dead regardless.
 
 ### `SafeCalculator` — fixed, two bugs found and closed
 
@@ -148,7 +189,7 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 | `IngestionPipeline` still calls methods its own collaborators don't define | `packages/knowledge/pipelines/ingestion.py` | Unchanged: `transformer.transform()` (real method: `process()`), `splitter.split(tenant_id=..., content=...)` (real signature takes one `SplitRequest`), `embedding_manager.embed_documents(...)` (real method: `embed(chunks)`). |
 | `packages/knowledge/` — wired into the container, but as a dead stub | `packages/infrastructure/container/rag.py:56-61` | Unchanged: `knowledge_manager` provider constructed with three `providers.Object(None)` placeholders instead of real dependencies. Still not consumed by `GraphNodes.retrieve()` or any router. See `docs/UNUSED_FILES.md` for the two same-named-class collisions this created (`RetrievalPipeline`, `ChatService`) between `packages/rag/` and `packages/knowledge/`/`packages/application/`/`packages/chat/`. |
 | `HybridRetriever` / pgvector `mmr_search()` — still stubs | `packages/knowledge/retrievers/providers/hybrid.py`, `packages/knowledge/vectorstores/providers/pgvector.py` | Unchanged — both still `raise NotImplementedError`. |
-| Stray debug `print()` statements, uncommitted | `packages/conversation/manager.py:73`, `packages/graph/planner.py`, `packages/graph/router.py`, `packages/tools/builtin/weather.py:153` | Still present, unchanged. `conversation/manager.py`'s prints raw user message content — same Windows-console-unicode crash risk as the (now-fixed) `GraphVisualizer` bug if a message contains certain characters. |
+| Stray debug `print()` statements, uncommitted | `packages/conversation/manager.py:73`, `packages/graph/router.py`, `packages/tools/builtin/weather.py:153` | Still present, unchanged (`packages/graph/planner.py`, the file this was previously also tracked against, is deleted now — see planner consolidation above). `conversation/manager.py`'s prints raw user message content — same Windows-console-unicode crash risk as the (now-fixed) `GraphVisualizer` bug if a message contains certain characters. |
 | Latent circular-import fragility (not currently breaking anything) | `packages/rag/manager.py` ↔ `packages/application/` ↔ `packages/conversation/` ↔ `packages/graph/` | Unchanged — a raw `from packages.rag.manager import RAGManager` as the first import in a fresh interpreter still fails; the real app avoids it only through favorable import ordering elsewhere. |
 | Repository writes no longer commit — unchanged | `packages/infrastructure/repositories/base.py` | Still only `flush()`s, no `commit()`. |
 | Orphaned `packages/application/` service layer | `packages/application/` | Unchanged and now more precisely characterized — see `docs/UNUSED_FILES.md`: confirmed genuinely unreferenced at runtime, including `chat_service.py`, which looked wired via a type-hint import in `rag/manager.py` but the actually-injected class is a different, unrelated `ChatService` from `packages/chat/`. |
@@ -385,16 +426,14 @@ Previously flagged as reshaped-but-ignored. Traced fully this pass (see Broken �
 
 ## Suggested next priorities (roughly in order)
 
-The app starts now — one bug stands between here and a working chat request again:
+The DI/memory/graph wiring bug is fixed — the next blocker is a missing feature, not a crash:
 
-1. **Fix `MemoryManager`'s constructor mismatch in `packages/infrastructure/container/memory.py`.** Wire real `MemoryStore`/`MemoryExtractor`/`MemorySummarizer`/`MemoryRetriever` instances instead of `factory=checkpoint` — the real pgvector-backed implementations already exist in `packages/memory/implementations/`, they just aren't connected to this container. This is the only thing currently blocking `POST /api/v1/chat`.
-2. **Revert the DB session `Factory`→`Resource` change** in `packages/infrastructure/container/database.py` — the next bug in line once #1 is fixed.
-3. **Reconfirm `GoogleProvider`'s `api_key=` fix live** — the code has been correct for three passes running; it just needs #1 and #2 fixed to finally be reachable.
-4. **Reconcile the two `PlannerResult` classes** (`packages/graph/planner.py` vs `packages/graph/nodes/planner.py`) — pick one, delete the other, update `state.py`/`router.py` to agree.
-5. **Delete the orphaned `packages/graph/nodessss.py`** (the old `GraphNodes`/`NodeContext` implementation, renamed out of the way rather than removed) and **`packages/graph/nodes/tool.py`'s dead `GraphToolNode`** if LangGraph's own `ToolNode` is the intended long-term path.
-6. **Fix `EmbeddingSettings` missing `provider`**, and `packages/knowledge/splitters/{pipeline,recursive,factory}.py`'s `DocumentSplitter`/`BaseSplitter` mismatch — both still unchanged across four passes now.
-7. **Actually clean up `docs/UNUSED_FILES.md`'s inventory** — a commit message claimed this happened; the diff shows it didn't. `git rm packages.zip packages/graph.zip graph.png`, delete `packages/application/`, `packages/sdk/upload/`, `packages/sdk/notification/`, `packages/sdk/common/models.py`, `infrastructure/ai/factory.py`, `requirements.txt`.
-8. **Write an actual pytest suite.** Eleven audit passes in: a CI import-smoke-test alone (`python -c "from packages.api.app import app"`) would have caught the last two passes' headline regressions in under a second, for free.
-9. **Restore the commit() calls in `packages/infrastructure/repositories/base.py`**, wire up at least the Conversations router, fix the Docker healthcheck path and Makefile paths, wire real JWT validation, and regenerate the Alembic "initial schema" migration properly.
+1. **Wire up the `conversations.py` router** (currently a one-line stub) with at least a `POST /conversations` create route. This is now the single thing standing between here and a provable, full, real chat turn — without it, there's no HTTP-reachable way to get a valid `conversation_id` to send to `POST /api/v1/chat`.
+2. **Fix the DB session `Resource`→`Factory` bug** in `packages/infrastructure/container/database.py:25` — no longer masked by a crash; it's the next real bug once a full chat turn becomes testable, since it currently shares one `AsyncSession` across every request.
+3. **Reconfirm `GoogleProvider`'s `api_key=` fix live** — the code has been correct for four passes running; it just needs #1 to finally be reachable.
+4. **Fix `EmbeddingSettings` missing `provider`**, and `packages/knowledge/splitters/{pipeline,recursive,factory}.py`'s `DocumentSplitter`/`BaseSplitter` mismatch — both still unchanged across five passes now.
+5. **Finish cleaning up `docs/UNUSED_FILES.md`'s inventory** — four items (`packages/graph.zip`, `packages/graph/planner.py`, `packages/graph/nodes/planner.py`, `packages/graph/nodessss.py`) came off this pass; still remaining: `git rm packages.zip`, delete `packages/application/`, `packages/sdk/upload/`, `packages/sdk/notification/`, `packages/sdk/common/models.py`, `infrastructure/ai/factory.py`, `requirements.txt`.
+6. **Write an actual pytest suite.** Twelve audit passes in: a CI import-smoke-test alone (`python -c "from packages.api.app import app"`) would have caught several of the headline regressions in under a second, for free.
+7. **Restore the commit() calls in `packages/infrastructure/repositories/base.py`**, fix the Docker healthcheck path and Makefile paths, wire real JWT validation, and regenerate the Alembic "initial schema" migration properly.
 
-**Fixed this pass:** `SafeCalculator`'s `ast.Num` crash and the `dataclass(slots=True)`/`__dict__` crash found alongside it — see Broken section for detail. One small, non-crashing gap remains (list-literal arguments to `sum`/`avg` aren't supported) but wasn't bundled into this fix.
+**Fixed in earlier passes, holding steady:** `SafeCalculator`'s `ast.Num` and `dataclass(slots=True)`/`__dict__` crashes — unaffected by this pass's changes, re-confirmed still working.

@@ -2,7 +2,7 @@
 
 A cleanup inventory for `langchain-knoledgebase-rag`, updated 2026-07-20 (HEAD `e5d8709`) by tracing actual imports from every real entry point (`main.py`, `cli.py`, `packages/api/app.py`, `packages/worker/main.py`) and the DI container graph — not just grepping for file names. Companion to [`docs/BUILD_STATUS.md`](./BUILD_STATUS.md), which tracks correctness; this tracks what shouldn't be in the repo at all, or isn't reachable by anything that runs.
 
-**Update since first written:** one recommendation from this doc was acted on (`packages/infrastructure/repositories/__init__.zip` was deleted) — but the same accidental-zip pattern recurred at a larger scope in the same commit, and the top-level `sdk/` directory this doc originally covered was relocated (not fixed) to `packages/sdk/`. **A subsequent commit's message claimed "remove unused files"** — checked against the actual diff: nothing on this list was touched. Every item below is still present as of the eleventh audit pass.
+**Update since first written:** five recommendations from this doc have now been acted on — `packages/infrastructure/repositories/__init__.zip` (deleted early on); `packages/graph.zip` (deleted in commit `ff11edd`, twelfth audit pass); and, in the same session, by explicit request, the `GraphPlanner`/`PlannerResult` triplication was resolved by deleting the two losing duplicates outright: `packages/graph/planner.py`, `packages/graph/nodes/planner.py`, and `packages/graph/nodessss.py` (which only existed to import the now-gone `nodes/planner.py`). Everything else below is still present. An earlier commit's message claimed "remove unused files" when the diff didn't touch anything on this list — worth noting these deletions are genuine exceptions to that pattern, not a repeat of it.
 
 Confidence levels, in order of how sure this doc is:
 - **Confirmed unused** — zero references anywhere outside the file/package itself. Safe to delete.
@@ -13,16 +13,16 @@ Confidence levels, in order of how sure this doc is:
 
 ## Junk files — repo hygiene, delete immediately
 
-**Status update: one deleted, two larger ones took its place — and both are now committed to git history, not just sitting untracked.**
+**Status update: two of three are now gone.**
 
 | File | Why it shouldn't be here |
 |---|---|
-| ~~`packages/infrastructure/repositories/__init__.zip`~~ | **Deleted** in commit `e5d8709` — the one cleanup recommendation from this doc that landed. |
-| `packages.zip` (repo root, ~236 KB) — **new, committed** | A full zip snapshot of the entire `packages/` source tree, committed in `e5d8709` alongside the very refactor that broke the app (see `docs/BUILD_STATUS.md`'s two app-breaking bugs this pass). Same accidental-IDE-backup pattern as before, now at whole-project scope. |
-| `packages/graph.zip` — **new, committed** | A zip snapshot of `packages/graph/`, sitting as a sibling *file* next to the `packages/graph/` *directory* — includes the very `nodes.py`/`nodes/` files whose collision broke the app this pass. Also committed in `e5d8709`. |
-| `graph.png` (repo root) | Still present, unchanged. Generated output from `GraphVisualizer.save_png()` — a build artifact, not source. `.gitignore` still doesn't exclude it. |
+| ~~`packages/infrastructure/repositories/__init__.zip`~~ | **Deleted**, early pass. |
+| ~~`packages/graph.zip`~~ | **Deleted** in commit `ff11edd` (twelfth audit pass) — confirmed via `git show --stat HEAD`. |
+| `packages.zip` (repo root, ~232 KB) — **still committed** | A full zip snapshot of the entire `packages/` source tree, committed in `e5d8709`. Still present, unchanged, twelve passes running. |
+| `graph.png` (repo root) | Still present, unchanged. Generated output from `GraphVisualizer.save_png()` — a build artifact, not source. `.gitignore` still doesn't exclude it. It is at least being correctly regenerated now (`lifespan.py`'s missing `await` fix means it updates on every startup instead of silently failing to render). |
 
-**Fix:** `git rm packages.zip packages/graph.zip graph.png`. Since two of these are now committed to history (not just working-tree cruft), this needs an actual commit, not just a `.gitignore` addition — add `*.zip` and a root-level `graph.png` rule to `.gitignore` afterward so they can't be re-committed. Worth raising as a process question too: this is the second time a zip snapshot has been committed by accident, now at a larger scope than the first time — whatever tool or habit is producing these (IDE auto-backup, a packaging script run in the wrong directory) is worth identifying so it stops recurring.
+**Fix:** `git rm packages.zip graph.png`, then add `*.zip` and a root-level `graph.png` rule to `.gitignore` so they can't be re-committed.
 
 ## Duplicate dependency manifest
 
@@ -67,8 +67,9 @@ The whole package, with one small nuance explained below.
 | `packages/sdk/upload/*.py` (8 files: `client.py`, `bulk.py`, `exceptions.py`, `files.py`, `uploads.py`, etc.) | **Relocated, not fixed** — this used to be a top-level `sdk/upload/`; it's now `packages/sdk/upload/`, same 8 files, same bugs. Still confirmed unused outside `packages/sdk/` itself. `client.py` still imports `UploadSettings` from `packages.config.upload`, which doesn't exist (real path: `packages/config/upload_service.py`, real class: `UploadServiceSettings`). |
 | `packages/sdk/notification/*.py` (5 files) | Relocated, not fixed — still unused, still requires the uninstalled `email-validator` package. |
 | `packages/sdk/common/models.py` | Relocated, not fixed — still unused, still `NameError: name 'Pagination' is not defined` on import. |
-| `packages/graph/nodessss.py` (new) | The old `packages/graph/nodes.py` — genuinely renamed out of the way (via `git mv`) to resolve a collision with a new `packages/graph/nodes/` package (see `docs/BUILD_STATUS.md`), but renamed to a typo'd filename instead of being deleted or properly retired. Contains the old `GraphNodes`/`NodeContext` implementation, now confirmed unreferenced by anything. Safe to delete outright. |
-| `packages/graph/nodes/tool.py`'s `GraphToolNode` (new) | A real, working class — a thin async wrapper around LangGraph's own `ToolNode` — but confirmed via repo-wide grep to be constructed or referenced nowhere. `packages/graph/nodes/__init__.py`'s own `tool` field is typed against LangGraph's `ToolNode` directly instead. Same "wired but never consumed" pattern as `packages/knowledge/`'s dead leaves — worth wiring in properly (if the intent was to add tool-call-specific handling beyond LangGraph's default) or deleting. |
+| ~~`packages/graph/nodessss.py`~~ | **Deleted.** The old `packages/graph/nodes.py`, renamed out of the way rather than removed at the time; only existed to import `packages/graph/nodes/planner.py`, which is also now gone. |
+| ~~`packages/graph/planner.py`~~ | **Deleted.** The old, standalone `GraphPlanner`/`PlannerResult(next_node: str)` implementation, superseded by the consolidated planner below. |
+| ~~`packages/graph/nodes/planner.py`~~ | **Deleted.** This was briefly the live, DI-wired planner (as of the twelfth pass) — superseded the same session when the team chose to consolidate onto `packages/planner/planner.py`'s richer plan-based model instead (see below). |
 
 ---
 
@@ -83,29 +84,15 @@ These are real classes that the DI container constructs — so they "work" in th
 | `packages/rag/retriever.py` (`RetrievalPipeline` — note: a *different* class from the same-named one actually in use, see below) | Only imported by `packages/rag/pipeline.py` (the dead leaf above) — so this file is only reachable through an already-unconsumed provider. |
 | `packages/knowledge/manager.py` (`KnowledgeManager`) and the ~70-file `packages/knowledge/` subsystem behind it | `packages/infrastructure/container/rag.py:56-61` constructs `knowledge_manager = providers.Singleton(KnowledgeManager, ingestion_pipeline=providers.Object(None), embedding_manager=providers.Object(None), retriever_manager=providers.Object(None))` — real dependencies replaced with `None` placeholders, and no other provider consumes `knowledge_manager`. Calling any real method on it (`.ingest()`, `.search()`, etc.) would immediately raise `AttributeError: 'NoneType' object has no attribute ...`. See `docs/BUILD_STATUS.md` for the detailed internal-bug list (this package also has real, separate correctness bugs beyond just being unwired). |
 
-**A naming trap worth flagging explicitly:** there are **two different classes both named `RetrievalPipeline`** — `packages/rag/retriever.py`'s (dead, per above) and `packages/rag/pipelines/retrieval.py`'s (the one actually constructed as the `retriever` provider and used by the live `RAGManager`). Same for `ChatService` — `packages/chat/chat_service.py` (live, used by `RAGManager` via `services.chat`) vs. `packages/application/services/chat_service.py` (dead, see above) are two unrelated classes with the same name. **A third instance appeared two passes ago and is still unresolved:** `packages/graph/planner.py` and `packages/graph/nodes/planner.py` each define a different `PlannerResult` class, and `packages/graph/state.py`/`packages/graph/router.py` still reference the two inconsistently (see `docs/BUILD_STATUS.md`). All three collisions make it easy to misjudge what's actually running just by grepping a class name — worth renaming one side of each pair to prevent future confusion, independent of the cleanup itself.
+**A naming trap worth flagging explicitly:** there are **two different classes both named `RetrievalPipeline`** — `packages/rag/retriever.py`'s (dead, per above) and `packages/rag/pipelines/retrieval.py`'s (the one actually constructed as the `retriever` provider and used by the live `RAGManager`). Same for `ChatService` — `packages/chat/chat_service.py` (live, used by `RAGManager` via `services.chat`) vs. `packages/application/services/chat_service.py` (dead, see above) are two unrelated classes with the same name. **The `GraphPlanner`/`PlannerResult` case is now resolved, unlike the two above:** what had grown to three separate implementations is down to one — `packages/planner/planner.py`, chosen deliberately for its richer plan-based (`ExecutionPlan`/`ExecutionStep`/`Capability`) model, which better fits where the roadmap's Memory/HITL/Summarization phases are headed than a single-hop `next_node` enum would. The two losing duplicates are deleted, not just orphaned. Worth treating this as the template for resolving the still-open `RetrievalPipeline`/`ChatService` pairs above: pick the one with the better long-term shape, delete the other outright.
+
+**Resolved this pass:** `packages/graph/nodes/tool.py`'s `GraphToolNode` is no longer in this category — `packages/infrastructure/container/graph.py` now constructs it (`tool = providers.Singleton(GraphToolNode, tool_manager=tools.manager)`) and wires it into `GraphNodes`. Its own internal bug (calling `tool_manager.get_tools()`, a nonexistent method) is fixed too, now calling the real `tool_manager.list()`.
 
 ---
 
-## New this pass — a copy-pasted `__init__.py` template, spreading
+## Fixed in an earlier pass — the copy-pasted `__init__.py` template
 
-A distinct pattern from the "orphaned code" above: five new `__init__.py` files, evidently scaffolded by copying one file without updating its contents, all containing the identical:
-```python
-# init
-from .manager import MemoryManager
-__all__ = ["MemoryManager"]
-```
-None of the five directories they live in actually has a `manager.py` defining `MemoryManager` (the real one lives in `packages/memory/manager.py`, one level up from where it's expected). This isn't "unused" in the same sense as the rest of this document — two of these five are on the live request path and are actively breaking the app (tracked as the top Broken items in `docs/BUILD_STATUS.md` this pass); the other three are inert scaffolding that will break the moment anyone tries to use them.
-
-| Path | Live impact |
-|---|---|
-| `packages/rag/builders/__init__.py` | **Breaks the live app** — imported by `packages/infrastructure/container/rag.py` and `packages/rag/manager.py`. |
-| `packages/rag/pipelines/__init__.py` | **Breaks the live app** — same import chain. |
-| `packages/middleware/__init__.py` | Not yet imported by anything (confirmed via grep) — inert until something tries to use it. |
-| `packages/planner/__init__.py` | Not yet imported by anything — inert until something tries to use it. |
-| `packages/memory/implementations/__init__.py` | Not yet imported by anything outside `packages/memory/` itself, but would break immediately if it were — it looks one directory level too deep for `MemoryManager`. |
-
-**Fix:** replace all five with real (or simply empty) `__init__.py` files — none of them should reference `MemoryManager` at all.
+Previously flagged: five `__init__.py` files, evidently scaffolded by copying one file without updating its contents, all identically containing `from .manager import MemoryManager` despite none of their directories defining that class. All five (`packages/rag/builders/`, `packages/rag/pipelines/`, `packages/middleware/`, `packages/planner/`, `packages/memory/implementations/`) are now fixed — real, empty `# init` files, confirmed via import sweep. Two of these directories have since grown real content of their own: `packages/memory/implementations/` now holds the genuine `PostgresMemoryStore`/`LLMMemoryExtractor`/`LLMMemorySummarizer`/`PgVectorMemoryRetriever` classes actually wired into `MemoryManager`, and `packages/planner/` is now the sole, live `GraphPlanner` implementation (see above) — the empty scaffolding both grew into is real, load-bearing code now.
 
 ---
 
@@ -119,13 +106,10 @@ None of the five directories they live in actually has a `manager.py` defining `
 
 ## Suggested cleanup order
 
-1. **Fix the two live-breaking `__init__.py` files first** — `packages/rag/builders/__init__.py` and `packages/rag/pipelines/__init__.py` are currently why the app can't start at all (see `docs/BUILD_STATUS.md`). This isn't optional cleanup, it's the top priority in the repo right now.
-2. `git rm packages.zip packages/graph.zip graph.png`, then add `*.zip` and a root-level `graph.png` rule to `.gitignore`. Both zips are now committed to history, not just untracked — this needs an actual cleanup commit.
-3. Fix or delete the other three copy-pasted `__init__.py` files (`packages/middleware/`, `packages/planner/`, `packages/memory/implementations/`) before anything tries to import them.
-4. Delete `requirements.txt` (or regenerate it from `uv export` if some external process depends on it).
-5. Delete `packages/application/` in full, plus `packages/conversation/store.py` and `memory_store.py`.
-6. Delete `packages/sdk/upload/`, `packages/sdk/notification/`, `packages/sdk/common/models.py` — or fix their import bugs first if the SDK is meant to be used soon; as-is they're both unused *and* broken.
-7. Delete `packages/infrastructure/ai/factory.py` and the `registry` provider in `packages/infrastructure/container/ai.py` (plus its now-unused import of `LLMRegistry`).
-8. Decide `packages/rag/pipeline.py`/`packages/rag/retriever.py`'s fate — delete if `packages/rag/pipelines/retrieval.py` is the intended long-term path.
-9. Decide `packages/graph/nodes.py` vs `packages/graph/nodes/`'s fate — finish the refactor (update `packages/graph/builder.py` to use the new per-class nodes, then delete `nodes.py`) or delete the new `nodes/` directory until the migration is ready. See `docs/BUILD_STATUS.md` — this is the other half of the current app-breaking outage.
-10. `packages/knowledge/` remains the one item here worth finishing rather than deleting — real, substantial work with a coherent architecture; see `docs/BUILD_STATUS.md`'s priority list for what's left.
+1. `git rm packages.zip graph.png`, then add `*.zip` and a root-level `graph.png` rule to `.gitignore`. (`packages/graph.zip` and the `GraphPlanner` duplicates are already gone as of this pass.)
+2. Delete `requirements.txt` (or regenerate it from `uv export` if some external process depends on it).
+3. Delete `packages/application/` in full, plus `packages/conversation/store.py` and `memory_store.py`.
+4. Delete `packages/sdk/upload/`, `packages/sdk/notification/`, `packages/sdk/common/models.py` — or fix their import bugs first if the SDK is meant to be used soon; as-is they're both unused *and* broken.
+5. Delete `packages/infrastructure/ai/factory.py` and the `registry` provider in `packages/infrastructure/container/ai.py` (plus its now-unused import of `LLMRegistry`).
+6. Decide `packages/rag/pipeline.py`/`packages/rag/retriever.py`'s fate — delete if `packages/rag/pipelines/retrieval.py` is the intended long-term path. Same treatment now applies to `ChatService`'s duplication — pick one, delete the other, following the pattern that just resolved `GraphPlanner`.
+7. `packages/knowledge/` remains the one item here worth finishing rather than deleting — real, substantial work with a coherent architecture; see `docs/BUILD_STATUS.md`'s priority list for what's left.

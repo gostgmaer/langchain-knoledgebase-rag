@@ -111,7 +111,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
         tools=tools,
         memory=memory,
         services=services,
-        prompt_builder=prompt_builder,
     )
 
     #

@@ -4,7 +4,6 @@ from __future__ import annotations
 from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStore
 from langchain_chroma import Chroma
-from pgvector.sqlalchemy import Vector
 
 from packages.config.loader import settings
 from packages.rag.embeddings import EmbeddingManager
@@ -52,10 +51,12 @@ class VectorStoreManager:
         query: str,
         *,
         k: int = 5,
+        **kwargs,
     ) -> list[Document]:
         return await self._store.asimilarity_search(
             query,
             k=k,
+            **kwargs,
         )
 
     async def delete(

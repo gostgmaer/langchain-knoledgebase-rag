@@ -4,7 +4,7 @@ packages/memory/implementations/pgvector_retriever.py
 
 from __future__ import annotations
 
-from packages.knowledge.vectorstores.providers.pgvector import PostgresVectorStore
+from packages.rag.vectorstore import VectorStoreManager
 from packages.memory.retrieval import MemoryRetriever
 from packages.memory.schemas import (
     MemoryFact,
@@ -22,7 +22,7 @@ class PgVectorMemoryRetriever(MemoryRetriever):
 
     def __init__(
         self,
-        vector_store: PostgresVectorStore,
+        vector_store: VectorStoreManager,
     ) -> None:
         self._vector_store = vector_store
 
@@ -31,13 +31,19 @@ class PgVectorMemoryRetriever(MemoryRetriever):
         request: SearchMemoryRequest,
     ) -> SearchMemoryResponse:
 
+        filter_dict = {"tenant_id": str(request.tenant_id)}
+        if request.user_id:
+            filter_dict["user_id"] = str(request.user_id)
+            
+        if len(filter_dict) > 1:
+            filter_arg = {"$and": [{k: v} for k, v in filter_dict.items()]}
+        else:
+            filter_arg = filter_dict
+
         documents = await self._vector_store.similarity_search(
             query=request.query,
             k=request.top_k,
-            filters={
-                "tenant_id": str(request.tenant_id),
-                "user_id": str(request.user_id),
-            },
+            filter=filter_arg,
         )
 
         results: list[SearchResult] = []

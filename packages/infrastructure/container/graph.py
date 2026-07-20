@@ -8,8 +8,9 @@ from packages.graph.builder import GraphBuilder
 from packages.graph.manager import GraphManager
 from packages.graph.nodes import GraphNodes
 from packages.graph.router import GraphRouter
+from packages.prompts.builder import PromptBuilder
 
-from packages.graph.nodes.planner import GraphPlanner
+from packages.planner.planner import GraphPlanner
 from packages.graph.nodes.load_memory import LoadMemoryNode
 from packages.graph.nodes.retrieve import RetrieveNode
 from packages.graph.nodes.tool import GraphToolNode
@@ -25,7 +26,7 @@ class GraphContainer(containers.DeclarativeContainer):
     tools = providers.DependenciesContainer()
     memory = providers.DependenciesContainer()
     services = providers.DependenciesContainer()
-    prompt_builder = providers.Dependency()
+    prompt_builder = providers.Singleton(PromptBuilder)
 
     planner = providers.Singleton(
         GraphPlanner,

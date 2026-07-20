@@ -7,7 +7,7 @@ from uuid import UUID
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import AnyMessage, add_messages
 from typing_extensions import Annotated, TypedDict
-from packages.graph.nodes.planner import PlannerResult
+from packages.planner.models import ExecutionPlan
 
 from packages.knowledge.schemas import SearchResult
 from packages.memory.schemas import MemoryFact
@@ -70,7 +70,7 @@ class GraphState(TypedDict, total=False):
     #
     # Execution
     #
-    execution_plan: PlannerResult
+    execution_plan: ExecutionPlan
     retrieval_enabled: bool
     tools_enabled: bool
     stream: bool

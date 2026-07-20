@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from packages.graph.nodes.planner import NextNode
+from packages.planner.models import Capability
 from packages.graph.state import GraphState
 
 
@@ -16,19 +16,11 @@ class GraphRouter:
 
         plan = state["execution_plan"]
 
-        print(f"[Router] Next node: {plan.next_node}")
+        if plan.has(Capability.RETRIEVAL):
+            print("[Router] Next node: retrieve")
+            return "retrieve"
 
-        match plan.next_node:
-
-            case NextNode.RETRIEVE:
-                return "retrieve"
-
-            case NextNode.TOOL:
-                return "tool"
-
-            case NextNode.LLM:
-                return "llm"
-
+        print("[Router] Next node: llm")
         return "llm"
 
     def after_llm(
