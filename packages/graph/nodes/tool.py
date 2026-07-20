@@ -21,7 +21,7 @@ class GraphToolNode:
         tool_manager: ToolManager,
     ) -> None:
         self._tool_node = ToolNode(
-            tools=tool_manager.get_tools(),
+            tools=tool_manager.list(),
         )
 
     async def __call__(

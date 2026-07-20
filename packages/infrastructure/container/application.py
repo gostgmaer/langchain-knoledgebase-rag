@@ -94,6 +94,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
     memory = providers.Container(
         MemoryContainer,
         settings=settings,
+        database=database,
+        ai=ai,
+        rag=rag,
     )
 
     #
@@ -102,11 +105,13 @@ class ApplicationContainer(containers.DeclarativeContainer):
 
     graph = providers.Container(
         GraphContainer,
+        settings=settings,
         ai=ai,
         rag=rag,
         tools=tools,
         memory=memory,
-        runtime=agent_runtime,
+        services=services,
+        prompt_builder=prompt_builder,
     )
 
     #

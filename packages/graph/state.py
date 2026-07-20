@@ -7,10 +7,7 @@ from uuid import UUID
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import AnyMessage, add_messages
 from typing_extensions import Annotated, TypedDict
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from packages.graph.planner import PlannerResult
+from packages.graph.nodes.planner import PlannerResult
 
 from packages.knowledge.schemas import SearchResult
 from packages.memory.schemas import MemoryFact
@@ -61,8 +58,8 @@ class GraphState(TypedDict, total=False):
     # Memory
     #
     memories: list[MemoryFact]
-    checkpoint_id: str | None
-    checkpoint_version: int
+    memory_checkpoint_id: str | None
+    memory_checkpoint_version: int
     summary: str
     conversation_summary: str | None
     memory_context: str | None

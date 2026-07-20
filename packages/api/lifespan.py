@@ -33,8 +33,8 @@ async def lifespan(app: FastAPI):
 
     try:
         # Rendering uses the remote mermaid.ink API — never block startup on it.
-        GraphVisualizer.save_png(container.graph.builder().build())
-        pass
+        builder = await container.graph.builder()
+        GraphVisualizer.save_png(builder.build())
     except Exception as exc:
         logger.warning("Could not render graph.png: %s", exc)
 
