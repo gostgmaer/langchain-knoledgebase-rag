@@ -8,6 +8,7 @@ from .document import Document
 from .document_chunk import DocumentChunk
 from .embedding import Embedding
 from .knowledge_base import KnowledgeBase
+from .memory import Memory
 from .message import Message
 from .message_citation import MessageCitation
 from .model_profile import ModelProfile
@@ -26,6 +27,7 @@ __all__ = [
     "DocumentChunk",
     "Embedding",
     "KnowledgeBase",
+    "Memory",
     "Message",
     "MessageCitation",
     "ModelProfile",

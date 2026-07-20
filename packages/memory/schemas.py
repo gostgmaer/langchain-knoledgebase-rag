@@ -25,6 +25,9 @@ class MemoryType(StrEnum):
     PROFILE = "profile"
     TASK = "task"
     SUMMARY = "summary"
+    GOAL = "goal"
+    SKILL = "skill"
+    PROJECT = "project"
 
 
 @dataclass(slots=True)

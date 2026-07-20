@@ -4,7 +4,8 @@ packages/memory/implementations/pgvector_retriever.py
 
 from __future__ import annotations
 
-from packages.rag.vectorstore import VectorStoreManager
+from packages.domain.models.memory import Memory as MemoryRow
+from packages.infrastructure.repositories.memory import MemoryRepository
 from packages.memory.retrieval import MemoryRetriever
 from packages.memory.schemas import (
     MemoryFact,
@@ -12,63 +13,59 @@ from packages.memory.schemas import (
     SearchMemoryResponse,
     SearchResult,
 )
+from packages.rag.embeddings import EmbeddingManager
 
 
 class PgVectorMemoryRetriever(MemoryRetriever):
     """
-    Retrieves long-term memories using the application's
-    PgVectorStore abstraction.
+    Retrieves long-term memories from the dedicated `memories` table
+    via pgvector cosine-similarity search — the same table
+    PostgresMemoryStore writes to.
     """
 
     def __init__(
         self,
-        vector_store: VectorStoreManager,
+        repository: MemoryRepository,
+        embeddings: EmbeddingManager,
     ) -> None:
-        self._vector_store = vector_store
+        self._repository = repository
+        self._embeddings = embeddings
+
+    @staticmethod
+    def _to_fact(row: MemoryRow) -> MemoryFact:
+        return MemoryFact(
+            id=row.id,
+            tenant_id=row.tenant_id,
+            user_id=row.user_id,
+            conversation_id=row.conversation_id,
+            type=row.type,
+            content=row.content,
+            importance=row.importance,
+            metadata=row.metadata_,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
 
     async def search(
         self,
         request: SearchMemoryRequest,
     ) -> SearchMemoryResponse:
 
-        filter_dict = {"tenant_id": str(request.tenant_id)}
-        if request.user_id:
-            filter_dict["user_id"] = str(request.user_id)
-            
-        if len(filter_dict) > 1:
-            filter_arg = {"$and": [{k: v} for k, v in filter_dict.items()]}
-        else:
-            filter_arg = filter_dict
-
-        documents = await self._vector_store.similarity_search(
-            query=request.query,
-            k=request.top_k,
-            filter=filter_arg,
+        query_vector = await self._embeddings.client.aembed_query(
+            request.query,
         )
 
-        results: list[SearchResult] = []
+        rows = await self._repository.search_similar(
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            query_vector=query_vector,
+            k=request.top_k,
+        )
 
-        for document in documents:
-
-            metadata = document.metadata
-
-            memory = MemoryFact(
-                id=metadata["id"],
-                tenant_id=metadata["tenant_id"],
-                user_id=metadata["user_id"],
-                conversation_id=metadata.get("conversation_id"),
-                type=metadata["type"],
-                content=document.page_content,
-                importance=metadata.get("importance", 0.5),
-                metadata=metadata,
-            )
-
-            results.append(
-                SearchResult(
-                    memory=memory,
-                    score=metadata.get("score", 1.0),
-                )
-            )
+        results = [
+            SearchResult(memory=self._to_fact(row), score=1.0)
+            for row in rows
+        ]
 
         return SearchMemoryResponse(
             results=results,

@@ -82,3 +82,27 @@ Fixed:
 - Along the way, cleaned up a real naming collision the same file had: two methods both named `chat` (one sync, one async) — Python was silently keeping only the last one defined. Renamed the sync one to `chat_sync`.
 
 **Verified live:** asked to list its tools, the model now names exactly the 4 real registered ones. Asked to "use your calculator tool to compute 847 * 293," the graph genuinely routed to the tool node (`Tool calls detected` → `Calculator Tool Invoked` → `Calculation Successful`) and returned the mathematically correct `248,171` — real delegation, not a guess.
+
+---
+
+## Long-term memory was a functional no-op — now it's real
+
+Asked "what is the status of memory," tracing the pipeline found it ran cleanly but did nothing useful:
+
+- **`PostgresMemoryStore`** (`packages/memory/implementations/postgres_store.py`) was a complete stub. `create()`/`create_many()` built `MemoryFact` objects in Python and just returned them — no `INSERT`, nothing touched the database. The LLM did real work deciding what to remember; it was thrown away immediately.
+- **`PgVectorMemoryRetriever`** queried the wrong vector store entirely — the RAG *document* collection (`rag.vectorstore`), not a memories table. Even if anything had been stored, this would never have found it.
+
+Built for real, by request:
+
+- **`packages/domain/models/memory.py`** — a new `Memory` SQLAlchemy model with a genuine `pgvector` column, tenant/user/conversation-scoped.
+- **`packages/infrastructure/repositories/memory.py`** — a new `MemoryRepository` with real cosine-similarity search (`Memory.vector.cosine_distance(query_vector)`).
+- **`PostgresMemoryStore`** rewritten to actually embed content (via `EmbeddingManager`) and persist through the new repository, for every method (`create`, `update`, `delete`, `search`, `clear`).
+- **`PgVectorMemoryRetriever`** rewritten to search the same real table instead of the RAG document store.
+
+Getting this fully working end to end surfaced three more real bugs, each only visible by actually running it, not by reading the code:
+
+1. **Embedding dimension mismatch** — `settings.embedding.dimensions` defaulted to 1536, but the actually-configured model (`gemini-embedding-001`) produces 3072-dimensional vectors. Fixed the default; altered the (still-empty) `memories.vector` column to match.
+2. **Postgres enum drift** — expanded `MemoryType` in Python (added `GOAL`/`SKILL`/`PROJECT`, matching what the roadmap's Phase 7 actually asks memory to capture) — but Postgres enum types don't retroactively gain new values just because the Python enum did. The already-created `memorytype` type only knew the original 5. Fixed with `ALTER TYPE memorytype ADD VALUE`.
+3. **The significant one: a `Singleton` was caching a database session from before any request ever existed.** `GraphManager` and its entire node chain (`load_memory`, `extract_memory`, `llm`, etc.) were wired as `providers.Singleton` in `packages/infrastructure/container/graph.py` — constructed exactly once, the *first* time anything touched them, which happens at app startup in `lifespan.py`'s graph.png render, long before any request-scoped session override exists. Every memory write after that silently succeeded into that one permanently orphaned, never-committed session from startup — no error thrown, just data that was never visible to anyone, ever. Fixed by converting the entire graph construction chain (`planner`, `load_memory`, `retrieve`, `tool`, `llm`, `extract_memory`, `nodes`, `router`, `builder`, `manager`) and `MemoryManager` itself from `Singleton` to `Factory`, so they're rebuilt fresh inside each request's active session scope — matching how conversations/messages already worked correctly.
+
+**Verified with the strictest test available:** two genuinely separate conversations, zero shared message history. Told the first: "My favorite programming language is Rust and I am building a robotics startup called Ferrolabs." Asked the second, brand new: "What do you know about my programming preferences and my company?" It correctly answered both — pulled from real rows in the `memories` table, found via real pgvector similarity search, confirmed directly in the database.

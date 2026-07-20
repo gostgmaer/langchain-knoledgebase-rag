@@ -98,6 +98,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         database=database,
         ai=ai,
         rag=rag,
+        repositories=repositories,
     )
 
     #

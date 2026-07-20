@@ -19,10 +19,12 @@ class MemoryContainer(containers.DeclarativeContainer):
     database = providers.DependenciesContainer()
     ai = providers.DependenciesContainer()
     rag = providers.DependenciesContainer()
+    repositories = providers.DependenciesContainer()
 
     store = providers.Factory(
         PostgresMemoryStore,
-        db=database.session,
+        repository=repositories.memory,
+        embeddings=rag.embeddings,
     )
 
     extractor = providers.Factory(
@@ -37,7 +39,8 @@ class MemoryContainer(containers.DeclarativeContainer):
 
     retriever = providers.Factory(
         PgVectorMemoryRetriever,
-        vector_store=rag.vectorstore,
+        repository=repositories.memory,
+        embeddings=rag.embeddings,
     )
 
     checkpoint = providers.Singleton(
@@ -45,7 +48,7 @@ class MemoryContainer(containers.DeclarativeContainer):
         strategy=MemoryStrategy.MEMORY,
     )
 
-    manager = providers.Singleton(
+    manager = providers.Factory(
         MemoryManager,
         store=store,
         extractor=extractor,

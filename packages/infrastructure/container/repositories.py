@@ -9,6 +9,7 @@ from packages.infrastructure.repositories.document import DocumentRepository
 from packages.infrastructure.repositories.document_chunk import DocumentChunkRepository
 from packages.infrastructure.repositories.embedding import EmbeddingRepository
 from packages.infrastructure.repositories.knowledge_base import KnowledgeBaseRepository
+from packages.infrastructure.repositories.memory import MemoryRepository
 from packages.infrastructure.repositories.message import MessageRepository
 from packages.infrastructure.repositories.model_profile import ModelProfileRepository
 from packages.infrastructure.repositories.prompt import PromptRepository
@@ -70,5 +71,10 @@ class RepositoryContainer(
 
     agent = providers.Factory(
         AgentRepository,
+        session=session,
+    )
+
+    memory = providers.Factory(
+        MemoryRepository,
         session=session,
     )

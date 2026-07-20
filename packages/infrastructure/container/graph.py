@@ -28,39 +28,49 @@ class GraphContainer(containers.DeclarativeContainer):
     services = providers.DependenciesContainer()
     prompt_builder = providers.Singleton(PromptBuilder)
 
-    planner = providers.Singleton(
+    # NOTE: this whole chain is Factory, not Singleton, on purpose.
+    # extract_memory/load_memory ultimately depend on a DB session
+    # (via memory.manager -> repositories.memory), and that session is
+    # only valid for the lifetime of one request (see
+    # packages/api/dependencies.py's request_scoped_session). A Singleton
+    # here would be constructed once — the first time anything touches
+    # it, e.g. lifespan.py's startup graph.png render, long before any
+    # request-scoped session exists — and then every later request would
+    # silently reuse that one stale, never-committed session forever.
+
+    planner = providers.Factory(
         GraphPlanner,
     )
 
-    load_memory = providers.Singleton(
+    load_memory = providers.Factory(
         LoadMemoryNode,
         memory_manager=memory.manager,
     )
 
-    retrieve = providers.Singleton(
+    retrieve = providers.Factory(
         RetrieveNode,
         knowledge_manager=rag.knowledge_manager,
     )
 
-    tool = providers.Singleton(
+    tool = providers.Factory(
         GraphToolNode,
         tool_manager=tools.manager,
     )
 
-    llm = providers.Singleton(
+    llm = providers.Factory(
         LLMNode,
         chat_service=services.chat,
         prompt_builder=prompt_builder,
         system_prompt="You are a helpful assistant.",
         tool_manager=tools.manager,
     )
-    
-    extract_memory = providers.Singleton(
+
+    extract_memory = providers.Factory(
         ExtractMemoryNode,
         memory_manager=memory.manager,
     )
 
-    nodes = providers.Singleton(
+    nodes = providers.Factory(
         GraphNodes,
         planner=planner,
         load_memory=load_memory,
@@ -70,17 +80,17 @@ class GraphContainer(containers.DeclarativeContainer):
         extract_memory=extract_memory,
     )
 
-    router = providers.Singleton(
+    router = providers.Factory(
         GraphRouter,
     )
 
-    builder = providers.Singleton(
+    builder = providers.Factory(
         GraphBuilder,
         nodes=nodes,
         router=router,
     )
 
-    manager = providers.Singleton(
+    manager = providers.Factory(
         GraphManager,
         builder=builder,
     )

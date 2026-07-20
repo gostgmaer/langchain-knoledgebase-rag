@@ -94,7 +94,8 @@ Ignore:
 ✘ Small talk
 ✘ Questions without lasting value
 
-Return ONLY valid JSON.
+Return ONLY valid JSON. Each item's "type" MUST be exactly one of:
+"fact", "preference", "profile", "task", "summary", "goal", "skill", "project" — no other values are accepted.
 
 Example:
 
@@ -103,6 +104,11 @@ Example:
     "type": "preference",
     "content": "User prefers PostgreSQL.",
     "importance": 0.95
+  }},
+  {{
+    "type": "project",
+    "content": "User is building a startup called Acme Robotics.",
+    "importance": 0.9
   }}
 ]
 

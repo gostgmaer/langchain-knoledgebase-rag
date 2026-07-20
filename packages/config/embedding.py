@@ -13,7 +13,7 @@ class EmbeddingSettings(BaseSettings):
     )
     model: str = Field(default="gemini-pro", alias="LLM_MODEL")
 
-    dimensions: int | None = Field(default=1536, alias="EMBEDDING_DIMENSIONS")
+    dimensions: int | None = Field(default=3072, alias="EMBEDDING_DIMENSIONS")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
