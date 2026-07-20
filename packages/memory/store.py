@@ -25,6 +25,7 @@ from uuid import UUID
 from packages.memory.schemas import (
     CreateMemoryRequest,
     MemoryFact,
+    MemoryType,
     SearchMemoryRequest,
     SearchMemoryResponse,
     UpdateMemoryRequest,
@@ -103,5 +104,16 @@ class MemoryStore(ABC):
         """
         Persist multiple memories in a single operation.
         """
+        ...
 
-    ...
+    @abstractmethod
+    async def get_by_conversation_and_type(
+        self,
+        conversation_id: UUID,
+        type: MemoryType,
+    ) -> MemoryFact | None:
+        """
+        Retrieve the existing memory of a given type for a conversation,
+        if one exists (e.g. a conversation's running summary).
+        """
+        ...

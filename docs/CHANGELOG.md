@@ -106,3 +106,50 @@ Getting this fully working end to end surfaced three more real bugs, each only v
 3. **The significant one: a `Singleton` was caching a database session from before any request ever existed.** `GraphManager` and its entire node chain (`load_memory`, `extract_memory`, `llm`, etc.) were wired as `providers.Singleton` in `packages/infrastructure/container/graph.py` — constructed exactly once, the *first* time anything touched them, which happens at app startup in `lifespan.py`'s graph.png render, long before any request-scoped session override exists. Every memory write after that silently succeeded into that one permanently orphaned, never-committed session from startup — no error thrown, just data that was never visible to anyone, ever. Fixed by converting the entire graph construction chain (`planner`, `load_memory`, `retrieve`, `tool`, `llm`, `extract_memory`, `nodes`, `router`, `builder`, `manager`) and `MemoryManager` itself from `Singleton` to `Factory`, so they're rebuilt fresh inside each request's active session scope — matching how conversations/messages already worked correctly.
 
 **Verified with the strictest test available:** two genuinely separate conversations, zero shared message history. Told the first: "My favorite programming language is Rust and I am building a robotics startup called Ferrolabs." Asked the second, brand new: "What do you know about my programming preferences and my company?" It correctly answered both — pulled from real rows in the `memories` table, found via real pgvector similarity search, confirmed directly in the database.
+
+---
+
+## Episodic memory — the last piece, and it was mostly already built
+
+Asked about the one remaining Partial item, Episodic Memory — the difference from semantic memory (isolated facts) is remembering *what happened*, the narrative of a specific conversation. Tracing it found real, working code that simply had no caller: `LLMMemorySummarizer` and `MemoryManager.summarize()` build a genuine LLM-generated conversation summary, but nothing in the graph ever invoked them.
+
+Fixed:
+
+- **Wired `MemoryManager.summarize()` into `packages/graph/nodes/extract_memory.py`**, called alongside fact extraction on every turn.
+- **Made it an upsert, not a blind insert.** By design (confirmed with the user): summarize every turn, but *update* the existing summary rather than pile up a new near-duplicate row each time. Added `MemoryRepository.get_by_conversation_and_type()` and the matching `MemoryStore` interface method; `MemoryManager.summarize()` now checks for an existing `SUMMARY`-typed row for the conversation and updates it in place if found.
+- **Fixed a latent bug before it ever fired**: `LLMMemorySummarizer.summarize()` called `response.content.strip()` — the exact same Gemini list-vs-string content bug found and fixed elsewhere this session, just never previously exercised since nothing called this method. Fixed proactively with the same `normalize_message_content()` helper used everywhere else.
+
+**Verified live:** two turns in one conversation — first describing a Rust memory-leak bug, then reporting the root cause found — produced exactly **one** summary row in the database, correctly *updated* on the second turn (not duplicated), whose content captured the whole arc of the conversation rather than just the latest message. Phase 7 (Memory) is now the first phase in this project's history to reach 100%.
+
+---
+
+## The checkpointer msgpack warning — fixed, not just noted
+
+LangGraph's checkpointer had been logging a warning on every single turn:
+
+```
+Deserializing unregistered type packages.planner.models.Capability from checkpoint.
+This will be blocked in a future version. Set LANGGRAPH_STRICT_MSGPACK=true to block
+now, or add to allowed_msgpack_modules to allow explicitly.
+```
+
+LangGraph's checkpoint serializer (`JsonPlusSerializer`) uses `ormsgpack` to serialize graph state between steps, including this codebase's own custom types (`Capability`, `ExecutionStep`, `ExecutionPlan` from `packages/planner/models.py`) and a third-party one (`asyncpg.pgproto.pgproto.UUID`). By default it allows any type through with just a warning — but the warning itself says that's changing, and setting `LANGGRAPH_STRICT_MSGPACK=true` (or a future LangGraph default change) would turn this into a hard deserialization failure.
+
+**Fixed** in `packages/graph/builder.py` — instead of `MemorySaver()` with its default serializer, it now constructs one explicitly:
+
+```python
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+_CHECKPOINT_SERDE = JsonPlusSerializer().with_msgpack_allowlist([
+    Capability,
+    ExecutionStep,
+    ExecutionPlan,
+    ("asyncpg.pgproto.pgproto", "UUID"),
+])
+
+self._checkpointer = MemorySaver(serde=_CHECKPOINT_SERDE)
+```
+
+`with_msgpack_allowlist` accepts either an actual class (it derives the `(module, name)` key automatically) or an explicit `(module, name)` tuple — used the tuple form for the third-party asyncpg type since importing its internal `pgproto` module directly felt more fragile than just naming it.
+
+**Verified live:** two full chat turns, zero occurrences of the warning that previously fired on every single one.

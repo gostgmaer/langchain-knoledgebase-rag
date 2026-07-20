@@ -227,6 +227,46 @@ SELECT type, content, importance FROM memories ORDER BY created_at DESC;
 | Store | `packages/memory/implementations/postgres_store.py` | Embed + persist (create/update/delete/get) |
 | Retriever | `packages/memory/implementations/pgvector_retriever.py` | Embed + search |
 | Orchestrator | `packages/memory/manager.py` | Ties store/extractor/summarizer/retriever together |
-| Extraction | `packages/memory/implementations/llm_extractor.py` | Asks an LLM what's worth remembering |
+| Extraction (semantic) | `packages/memory/implementations/llm_extractor.py` | Asks an LLM what atomic facts are worth remembering |
+| Summarization (episodic) | `packages/memory/implementations/llm_summarizer.py` | Asks an LLM to summarize the whole conversation so far |
 | Graph nodes | `packages/graph/nodes/{load_memory,extract_memory}.py` | Where this runs inside a chat turn |
 | DI wiring | `packages/infrastructure/container/{memory,graph}.py` | How all of the above get constructed — and where the `Singleton`/`Factory` lesson lives |
+
+---
+
+## 7. Postscript: semantic vs. episodic, and a lesson about "unused" code
+
+The Memory phase originally shipped with two extraction paths already written: `LLMMemoryExtractor` (atomic facts — "user prefers Rust") and `LLMMemorySummarizer` (a whole-conversation summary — "the user is debugging a Rust memory leak, found the cause was a circular `Arc` reference, discussing `Weak` pointers as the fix"). Only the first one was ever called from `ExtractMemoryNode`. The second was real, tested-quality code, just orphaned — nothing in the graph ever reached it.
+
+This is a different kind of gap from the ones in sections 2–5: it's not a stub, and it's not a bug. It's a **complete, correct feature that was simply never wired up.** The lesson is the mirror image of section 2's: don't assume "no code exists" just because a feature isn't working — sometimes the fastest fix is finding what's already sitting there unused and connecting it, rather than building from scratch. Tracing *why* something doesn't work (read the call graph, not just search for the class name) is what tells you which situation you're in.
+
+The actual wiring was small — one more call in `ExtractMemoryNode`:
+
+```python
+# packages/graph/nodes/extract_memory.py
+async def __call__(self, state):
+    await self._memory.extract(...)     # semantic: atomic facts (already wired)
+    await self._memory.summarize(...)   # episodic: the conversation's narrative (newly wired)
+    return state
+```
+
+The one design decision worth calling out: summarizing *every turn* would be wasteful and messy if it just inserted a new row each time — a 20-turn conversation would leave 20 overlapping, increasingly-redundant summaries behind. The fix was to make `summarize()` an **upsert**: look for an existing summary for this conversation first, and update it in place if found, insert only if not.
+
+```python
+# packages/memory/manager.py
+async def summarize(self, *, conversation_id, ...) -> MemoryFact:
+    summary = await self._summarizer.summarize(...)
+
+    existing = await self._store.get_by_conversation_and_type(conversation_id, MemoryType.SUMMARY)
+
+    if existing is not None:
+        await self._store.update(existing.id, UpdateMemoryRequest(content=summary.content))
+    else:
+        await self._store.create(self._to_create_request(summary))
+
+    return summary
+```
+
+This required one new lookup method on the repository (`get_by_conversation_and_type`) threaded up through the `MemoryStore` interface — a small addition, but it's the difference between "one running summary that stays current" and "a pile of stale snapshots nobody queries correctly."
+
+**Verified live:** two turns in one conversation produced exactly one `SUMMARY` row, and its content after turn two included information from *both* turns — proof the update path fired instead of a second insert.

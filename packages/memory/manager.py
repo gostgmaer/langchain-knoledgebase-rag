@@ -33,6 +33,7 @@ from packages.memory.retrieval import MemoryRetriever
 from packages.memory.schemas import (
     CreateMemoryRequest,
     MemoryFact,
+    MemoryType,
     SearchMemoryRequest,
     SearchMemoryResponse,
     UpdateMemoryRequest,
@@ -150,9 +151,20 @@ class MemoryManager:
             messages=messages,
         )
 
-        await self._store.create(
-            self._to_create_request(summary)
+        existing = await self._store.get_by_conversation_and_type(
+            conversation_id,
+            MemoryType.SUMMARY,
         )
+
+        if existing is not None:
+            await self._store.update(
+                existing.id,
+                UpdateMemoryRequest(content=summary.content),
+            )
+        else:
+            await self._store.create(
+                self._to_create_request(summary)
+            )
 
         return summary
 

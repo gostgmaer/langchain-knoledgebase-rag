@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.domain.models.memory import Memory
 from packages.infrastructure.repositories.base import BaseRepository
+from packages.memory.schemas import MemoryType
 
 
 class MemoryRepository(BaseRepository[Memory]):
@@ -34,6 +35,18 @@ class MemoryRepository(BaseRepository[Memory]):
         ).limit(k)
 
         return await self.scalars(stmt)
+
+    async def get_by_conversation_and_type(
+        self,
+        *,
+        conversation_id: UUID,
+        type: MemoryType,
+    ) -> Memory | None:
+        stmt = select(Memory).where(
+            Memory.conversation_id == conversation_id,
+            Memory.type == type,
+        )
+        return await self.scalar(stmt)
 
     async def delete_by_conversation(
         self,

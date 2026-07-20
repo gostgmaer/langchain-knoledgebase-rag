@@ -14,6 +14,7 @@ from packages.memory.schemas import (
     MemoryType,
 )
 from packages.memory.summarizer import MemorySummarizer
+from packages.shared.messages import normalize_message_content
 
 
 class LLMMemorySummarizer(MemorySummarizer):
@@ -52,7 +53,7 @@ class LLMMemorySummarizer(MemorySummarizer):
             user_id=user_id,
             conversation_id=conversation_id,
             type=MemoryType.SUMMARY,
-            content=response.content.strip(),
+            content=normalize_message_content(response.content).strip(),
             importance=1.0,
         )
 

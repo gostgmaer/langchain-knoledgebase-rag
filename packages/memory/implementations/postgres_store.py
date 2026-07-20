@@ -11,6 +11,7 @@ from packages.infrastructure.repositories.memory import MemoryRepository
 from packages.memory.schemas import (
     CreateMemoryRequest,
     MemoryFact,
+    MemoryType,
     SearchMemoryRequest,
     SearchMemoryResponse,
     SearchResult,
@@ -95,6 +96,19 @@ class PostgresMemoryStore(MemoryStore):
     ) -> MemoryFact | None:
 
         row = await self._repository.get(memory_id)
+
+        return self._to_fact(row) if row is not None else None
+
+    async def get_by_conversation_and_type(
+        self,
+        conversation_id: UUID,
+        type: MemoryType,
+    ) -> MemoryFact | None:
+
+        row = await self._repository.get_by_conversation_and_type(
+            conversation_id=conversation_id,
+            type=type,
+        )
 
         return self._to_fact(row) if row is not None else None
 

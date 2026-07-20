@@ -31,4 +31,11 @@ class ExtractMemoryNode:
             messages=state["messages"],
         )
 
+        await self._memory.summarize(
+            conversation_id=state["conversation_id"],
+            tenant_id=state["tenant_id"],
+            user_id=state["user_id"],
+            messages=state["messages"],
+        )
+
         return state

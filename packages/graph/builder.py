@@ -1,12 +1,29 @@
 from __future__ import annotations
 
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from packages.graph.nodes import GraphNodes
 from packages.graph.router import GraphRouter
 from packages.graph.state import GraphState
+from packages.planner.models import Capability, ExecutionPlan, ExecutionStep
+
+# The checkpointer serializes graph state (including these custom planner
+# types) with msgpack. Unregistered types are currently allowed with just a
+# warning, but LangGraph's own message says this will be blocked in a future
+# version (or immediately, if LANGGRAPH_STRICT_MSGPACK=true is ever set) —
+# so these need to be explicitly allowlisted rather than relying on the
+# permissive default forever.
+_CHECKPOINT_SERDE = JsonPlusSerializer().with_msgpack_allowlist(
+    [
+        Capability,
+        ExecutionStep,
+        ExecutionPlan,
+        ("asyncpg.pgproto.pgproto", "UUID"),
+    ]
+)
 
 
 class GraphBuilder:
@@ -49,7 +66,7 @@ class GraphBuilder:
     ) -> None:
         self._nodes = nodes
         self._router = router
-        self._checkpointer = MemorySaver()
+        self._checkpointer = MemorySaver(serde=_CHECKPOINT_SERDE)
 
     def build(self) -> CompiledStateGraph:
         graph = StateGraph(GraphState)
