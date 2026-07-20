@@ -61,7 +61,7 @@ import ast
 import math
 import operator
 import statistics
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from langchain.tools import tool
@@ -203,10 +203,6 @@ class SafeCalculator:
                 return node.value
 
             raise ValueError("Only numeric constants are allowed.")
-
-        # Python <3.8 compatibility
-        if isinstance(node, ast.Num):
-            return node.n
 
         # Binary operations
         if isinstance(node, ast.BinOp):
@@ -371,7 +367,7 @@ def calculator(expression: str) -> dict:
 
         logger.info("Calculation Successful")
 
-        return response.__dict__
+        return asdict(response)
 
     except ZeroDivisionError:
 
@@ -390,7 +386,7 @@ def calculator(expression: str) -> dict:
             },
         )
 
-        return response.__dict__
+        return asdict(response)
 
     except ValueError as exc:
 
@@ -409,7 +405,7 @@ def calculator(expression: str) -> dict:
             },
         )
 
-        return response.__dict__
+        return asdict(response)
 
     except OverflowError:
 
@@ -428,7 +424,7 @@ def calculator(expression: str) -> dict:
             },
         )
 
-        return response.__dict__
+        return asdict(response)
 
     except Exception as exc:
 
@@ -447,7 +443,7 @@ def calculator(expression: str) -> dict:
             },
         )
 
-        return response.__dict__
+        return asdict(response)
 
     # ============================================================
 
