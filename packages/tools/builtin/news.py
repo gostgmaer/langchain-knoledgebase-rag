@@ -10,16 +10,10 @@
 
 
 from langchain_tavily import TavilySearch
-from dotenv import load_dotenv
-load_dotenv()
-
 from langchain.tools import tool
-
-import os
 from packages.logging.logger import get_logger
-
+from packages.config.loader import settings
 logger = get_logger(__name__)
-
 
 @tool(
     "get_news",
@@ -28,7 +22,7 @@ logger = get_logger(__name__)
 async def get_news(topic: str):
     """Get the latest news for a topic."""
 
-    api_key = os.getenv("TAVILY_API_KEY")
+    api_key = settings.tools.tavily_api_key
     if not api_key:
         return "Tavily API key is missing."
 

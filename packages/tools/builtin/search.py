@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from langchain_core.tools import tool
 from langchain_community.utilities import GoogleSerperAPIWrapper
+from packages.config.loader import settings
 
 @tool(
     "get_google_search",
@@ -32,6 +33,6 @@ def get_google_search(topic: str) -> dict:
     """
     
     search = GoogleSerperAPIWrapper(
-        serper_api_key=os.getenv("SERPER_API_KEY", "")
+        serper_api_key=settings.tools.serper_api_key
     )
     return search.results(query=topic,)

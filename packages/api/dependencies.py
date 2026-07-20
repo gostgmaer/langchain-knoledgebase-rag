@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @inject
-def get_container(
+async def get_container(
     container: ApplicationContainer = Depends(Provide[ApplicationContainer]),
 ) -> ApplicationContainer:
     return container
@@ -45,7 +45,7 @@ async def get_db_session(
 
 
 @inject
-def get_ai_manager(
+async def get_ai_manager(
     manager: LLMManager = Depends(Provide[ApplicationContainer.ai.manager]),
 ) -> LLMManager:
     return manager
@@ -57,7 +57,7 @@ def get_ai_manager(
 
 
 @inject
-def get_conversation_manager(
+async def get_conversation_manager(
     manager: ConversationManager = Depends(
         Provide[ApplicationContainer.conversation.manager]
     ),
@@ -71,7 +71,7 @@ def get_conversation_manager(
 
 
 @inject
-def get_graph_manager(
+async def get_graph_manager(
     manager: GraphManager = Depends(Provide[ApplicationContainer.graph.manager]),
 ) -> GraphManager:
     return manager
@@ -83,7 +83,7 @@ def get_graph_manager(
 
 
 @inject
-def get_memory_manager(
+async def get_memory_manager(
     manager: MemoryManager = Depends(Provide[ApplicationContainer.memory.manager]),
 ) -> MemoryManager:
     return manager
@@ -95,7 +95,7 @@ def get_memory_manager(
 
 
 @inject
-def get_rag_manager(
+async def get_rag_manager(
     manager: RAGManager = Depends(Provide[ApplicationContainer.rag.manager]),
 ) -> RAGManager:
     return manager
@@ -107,7 +107,7 @@ def get_rag_manager(
 
 
 @inject
-def get_tool_manager(
+async def get_tool_manager(
     manager: ToolManager = Depends(Provide[ApplicationContainer.tools.manager]),
 ) -> ToolManager:
     return manager

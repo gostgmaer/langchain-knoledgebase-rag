@@ -9,10 +9,8 @@
 
 
 from dataclasses import dataclass
-import os
-from dotenv import load_dotenv
-load_dotenv()
 
+from packages.config.loader import settings
 from langchain.tools import tool
 import httpx
 
@@ -52,17 +50,30 @@ client = httpx.AsyncClient(timeout=10)
 async def get_weather(city: str):
     """Get the current weather for a city."""
 
-    url  = os.getenv("OPENWEATHER_BASE_URL")
+    # url = os.getenv("OPENWEATHER_BASE_URL")
 
-    if not os.getenv("OPENWEATHER_API_KEY"):
-        return "Weather API key is missing."
+    # if not os.getenv("OPENWEATHER_API_KEY"):
+    #     return "Weather API key is missing."
+    # key = os.getenv("OPENWEATHER_API_KEY")
     logger.debug("Weather tool executed for %s", city)
+
+    # geocoding = await client.get(
+    #     url + "/geo/1.0/direct",
+    #     params={"q": city, "limit": 1, "appid": key},
+    # )
+    # if geocoding.status_code != 200:
+    #     return f"City '{city}' not found."
+    # geocoding_data = geocoding.json()
+    # lat = geocoding_data[0]["lat"]
+    # lon = geocoding_data[0]["lon"]
+    # print(f"Geocoding data for {city}: {lat}, {lon}")
     try:
         response = await client.get(
-            url,
+            f"{settings.tools.weather_api_url}/data/2.5/weather",
             params={
                 "q": city,
-                "appid": os.getenv("OPENWEATHER_API_KEY"),
+                "lang": "en",
+                "appid": settings.tools.weather_api_key,
                 "units": "metric",
             },
         )
@@ -71,14 +82,73 @@ async def get_weather(city: str):
         data = response.json()
         logger.debug("Weather tool executed for %s", city)
         logger.debug(f"Weather data for {city}: {data}")
-        return (
-            f"📍 {data['name']}, {data['sys']['country']}\n"
-            f"🌤 {data['weather'][0]['description'].title()}\n"
-            f"🌡 {data['main']['temp']}°C\n"
-            f"🤗 Feels Like: {data['main']['feels_like']}°C\n"
-            f"💧 Humidity: {data['main']['humidity']}%\n"
-            f"💨 Wind: {data['wind']['speed']} m/s"
-        )
+        data = {
+            "success": True,
+            "tool": "get_weather",
+            "query": {
+                "city": city,
+            },
+            "location": {
+                "city": data["name"],
+                "country": data["sys"]["country"],
+                "coordinates": {
+                    "latitude": data["coord"]["lat"],
+                    "longitude": data["coord"]["lon"],
+                },
+                "timezone_offset": data["timezone"],
+            },
+            "weather": {
+                "main": data["weather"][0]["main"],
+                "description": data["weather"][0]["description"],
+                "icon": data["weather"][0]["icon"],
+            },
+            "temperature": {
+                "current": data["main"]["temp"],
+                "feels_like": data["main"]["feels_like"],
+                "minimum": data["main"]["temp_min"],
+                "maximum": data["main"]["temp_max"],
+                "unit": "°C",
+            },
+            "atmosphere": {
+                "humidity": data["main"]["humidity"],
+                "pressure": data["main"]["pressure"],
+                "sea_level": data["main"].get("sea_level"),
+                "ground_level": data["main"].get("grnd_level"),
+                "visibility_km": round(data.get("visibility", 0) / 1000, 1),
+                "cloud_cover": data.get("clouds", {}).get("all"),
+            },
+            "wind": {
+                "speed": data["wind"]["speed"],
+                "direction": data["wind"].get("deg"),
+                "gust": data["wind"].get("gust"),
+                "unit": "m/s",
+            },
+            "sun": {
+                "sunrise": data["sys"]["sunrise"],
+                "sunset": data["sys"]["sunset"],
+            },
+            "precipitation": {
+                "rain_1h": data.get("rain", {}).get("1h"),
+                "rain_3h": data.get("rain", {}).get("3h"),
+                "snow_1h": data.get("snow", {}).get("1h"),
+                "snow_3h": data.get("snow", {}).get("3h"),
+            },
+            "metadata": {
+                "observation_time": data["dt"],
+                "api": "OpenWeatherMap",
+                "units": "metric",
+            },
+            "summary": (
+                f"It is currently {data['weather'][0]['description']} in "
+                f"{data['name']}, {data['sys']['country']}. "
+                f"The temperature is {data['main']['temp']}°C "
+                f"(feels like {data['main']['feels_like']}°C) "
+                f"with {data['main']['humidity']}% humidity and "
+                f"wind speed of {data['wind']['speed']} m/s."
+            ),
+        }
+        print(data)
+        return data
 
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:

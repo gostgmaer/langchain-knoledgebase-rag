@@ -31,12 +31,12 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting EasyDev AI Platform")
 
-    try:
-        # Rendering uses the remote mermaid.ink API — never block startup on it.
-        GraphVisualizer.save_png(container.graph.builder().build())
-        pass
-    except Exception as exc:
-        logger.warning("Could not render graph.png: %s", exc)
+    # try:
+    #     # Rendering uses the remote mermaid.ink API — never block startup on it.
+    #     GraphVisualizer.save_png(container.graph.builder().build())
+    #     pass
+    # except Exception as exc:
+    #     logger.warning("Could not render graph.png: %s", exc)
 
     logger.info("Initializing database schema...")
     try:

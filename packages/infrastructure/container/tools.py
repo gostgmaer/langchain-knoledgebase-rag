@@ -4,6 +4,7 @@ from __future__ import annotations
 from dependency_injector import containers
 from dependency_injector import providers
 
+from packages.tools.builtin.calculator import calculator
 from packages.tools.executor import ToolExecutor
 from packages.tools.manager import ToolManager
 from packages.tools.registry import ToolRegistry
@@ -17,6 +18,7 @@ def init_tool_manager(registry: ToolRegistry, executor: ToolExecutor) -> ToolMan
     manager.register(get_weather)
     manager.register(get_news)
     manager.register(get_google_search)
+    manager.register(calculator)
     return manager
 
 

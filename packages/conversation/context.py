@@ -38,26 +38,7 @@ class ConversationContextBuilder:
         )
 
         context: list[BaseMessage] = []
-
-        if system_prompt:
-            context.append(
-                self.formatter.system_prompt(
-                    system_prompt,
-                )
-            )
-
-        if documents:
-            rag_text = "\n\n".join(
-                doc.page_content
-                for doc in documents
-            )
-
-            context.append(
-                self.formatter.system_prompt(
-                    f"Relevant context:\n\n{rag_text}"
-                )
-            )
-
+        
         context.extend(messages)
 
         return context

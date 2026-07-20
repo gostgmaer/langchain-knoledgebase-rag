@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
 from uuid import UUID
@@ -20,6 +21,7 @@ class GraphState(TypedDict, total=False):
     # Conversation
     #
     response:str
+    final_response: str | None
     messages: Annotated[list[BaseMessage], add_messages]
 
     conversation_id: UUID
@@ -53,9 +55,15 @@ class GraphState(TypedDict, total=False):
     #
     # Memory
     #
-
+    checkpoint_id: str | None
+    checkpoint_version: int
     summary: str
-
+    conversation_summary: str | None
+    memory_context: str | None
+    user_preferences: dict[str, Any]
+    user_facts: list[str]
+    created_at: datetime
+    updated_at: datetime
     #
     # Execution
     #
@@ -72,4 +80,6 @@ class GraphState(TypedDict, total=False):
 
     retry_count: int
     error: str | None
+    last_error: str | None
+    error_node: str | None
 

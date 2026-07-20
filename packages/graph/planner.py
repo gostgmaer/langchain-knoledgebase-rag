@@ -38,7 +38,10 @@ class GraphPlanner:
         # if "weather" in message:
         #     return PlannerResult("tool")
 
+        print(f"[GraphPlanner] Evaluating message: {message}")
         if any(keyword in message for keyword in RETRIEVAL_KEYWORDS):
+            print(f"[GraphPlanner] Routed to RETRIEVE")
             return PlannerResult("retrieve")
 
+        print(f"[GraphPlanner] Routed to LLM")
         return PlannerResult("llm")

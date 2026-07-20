@@ -22,7 +22,7 @@ class DatabaseContainer(containers.DeclarativeContainer):
         engine=engine,
     )
 
-    session = providers.Factory(
+    session = providers.Resource(
         create_session,
         session_factory=session_factory,
     )

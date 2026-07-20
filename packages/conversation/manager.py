@@ -70,6 +70,8 @@ class ConversationManager:
         # Save user message
         #
 
+        print(f"\n[ConversationManager] RECEIVED USER MESSAGE: {request.message}\n")
+
         await self.service.add_message(
             Message(
                 conversation_id=request.conversation_id,
@@ -117,11 +119,12 @@ class ConversationManager:
 
         assistant_content = assistant.content
         if isinstance(assistant_content, list):
-            text_parts = [
-                part.get("text", "")
-                for part in assistant_content
-                if isinstance(part, dict) and part.get("type") == "text"
-            ]
+            text_parts = []
+            for part in assistant_content:
+                if isinstance(part, str):
+                    text_parts.append(part)
+                elif isinstance(part, dict) and part.get("type") == "text":
+                    text_parts.append(part.get("text", ""))
             assistant_content = "\n".join(text_parts)
 
         #

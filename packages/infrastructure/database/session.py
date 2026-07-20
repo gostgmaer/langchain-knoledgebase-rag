@@ -18,8 +18,11 @@ def create_session_factory(
     )
 
 
-def create_session(
+from typing import AsyncIterator
+
+async def create_session(
     session_factory: async_sessionmaker[AsyncSession],
-) -> AsyncSession:
-    """Create a new AsyncSession."""
-    return session_factory()
+) -> AsyncIterator[AsyncSession]:
+    """Create a new AsyncSession and close it when done."""
+    async with session_factory() as session:
+        yield session

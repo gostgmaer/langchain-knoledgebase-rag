@@ -25,6 +25,8 @@ class PromptBuilder:
 
         system_messages: list[BaseMessage] = []
 
+        system_content = []
+
         #
         # System prompt
         #
@@ -33,11 +35,7 @@ class PromptBuilder:
         )
 
         if system_prompt:
-            system_messages.append(
-                SystemMessage(
-                    content=system_prompt,
-                )
-            )
+            system_content.append(system_prompt)
 
         #
         # Retrieved RAG context
@@ -47,9 +45,12 @@ class PromptBuilder:
         )
 
         if context and context.text:
+            system_content.append(f"Context:\n\n{context.text}")
+
+        if system_content:
             system_messages.append(
                 SystemMessage(
-                    content=f"Context:\n\n{context.text}",
+                    content="\n\n".join(system_content)
                 )
             )
 
