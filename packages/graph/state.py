@@ -5,9 +5,11 @@ from typing import Any
 
 from uuid import UUID
 from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
+from langgraph.graph.message import AnyMessage, add_messages
 from typing_extensions import Annotated, TypedDict
+from packages.graph.planner import PlannerResult
 from packages.knowledge.schemas import SearchResult
+from packages.memory.schemas import MemoryFact
 from packages.rag.schemas import Context
 from packages.rag.schemas import Citation
 
@@ -22,7 +24,7 @@ class GraphState(TypedDict, total=False):
     #
     response:str
     final_response: str | None
-    messages: Annotated[list[BaseMessage], add_messages]
+    messages: Annotated[list[AnyMessage], add_messages]
 
     conversation_id: UUID
     thread_id: UUID
@@ -42,7 +44,7 @@ class GraphState(TypedDict, total=False):
     #
 
     search_results: list[SearchResult]
-    context: Context | None
+    context: list[str]
     citations: list[Citation]
 
     #
@@ -55,6 +57,7 @@ class GraphState(TypedDict, total=False):
     #
     # Memory
     #
+    memories: list[MemoryFact]
     checkpoint_id: str | None
     checkpoint_version: int
     summary: str
@@ -67,11 +70,12 @@ class GraphState(TypedDict, total=False):
     #
     # Execution
     #
+    execution_plan: PlannerResult
     retrieval_enabled: bool
     tools_enabled: bool
     stream: bool
     next_node: str
-    metadata: dict[str, Any]
+    metadata: dict[str, object]
     usage: dict[str, Any]
 
     #
