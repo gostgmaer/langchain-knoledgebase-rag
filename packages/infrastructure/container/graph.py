@@ -52,6 +52,7 @@ class GraphContainer(containers.DeclarativeContainer):
         chat_service=services.chat,
         prompt_builder=prompt_builder,
         system_prompt="You are a helpful assistant.",
+        tool_manager=tools.manager,
     )
     
     extract_memory = providers.Singleton(

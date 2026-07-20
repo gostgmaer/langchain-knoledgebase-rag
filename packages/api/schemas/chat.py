@@ -14,8 +14,13 @@ class ChatRequestSchema(BaseModel):
         extra="forbid",
     )
 
-    conversation_id: UUID = Field(
-        description="Conversation identifier.",
+    conversation_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Conversation identifier. Omit to use (or auto-create) a "
+            "default conversation for the calling tenant/user — useful "
+            "for quick testing without calling POST /conversations first."
+        ),
     )
 
     message: str = Field(

@@ -5,7 +5,7 @@ from packages.infrastructure.database.session import (
     create_session,
     create_session_factory,
 )
-from packages.infrastructure.database.transaction import UnitOfWork
+from packages.infrastructure.repositories.unit_of_work import UnitOfWork
 
 
 class DatabaseContainer(containers.DeclarativeContainer):
@@ -22,7 +22,7 @@ class DatabaseContainer(containers.DeclarativeContainer):
         engine=engine,
     )
 
-    session = providers.Resource(
+    session = providers.Factory(
         create_session,
         session_factory=session_factory,
     )

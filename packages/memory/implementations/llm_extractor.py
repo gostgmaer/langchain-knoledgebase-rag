@@ -15,6 +15,10 @@ from packages.memory.schemas import (
     MemoryFact,
     MemoryType,
 )
+from packages.shared.logging import get_logger
+from packages.shared.messages import normalize_message_content, strip_code_fence
+
+logger = get_logger(__name__)
 
 
 class LLMMemoryExtractor(MemoryExtractor):
@@ -113,30 +117,47 @@ Conversation:
 
     def _parse_response(
         self,
-        response: str,
+        response: str | list,
         conversation_id: UUID,
         tenant_id: UUID,
         user_id: UUID,
     ) -> list[MemoryFact]:
 
-        data = json.loads(response)
+        text = strip_code_fence(normalize_message_content(response))
+
+        if not text:
+            return []
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning(
+                "Memory extraction returned non-JSON output, skipping this turn: %r",
+                text[:200],
+            )
+            return []
 
         memories: list[MemoryFact] = []
 
         for item in data:
 
-            memories.append(
-                MemoryFact(
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    type=MemoryType(item["type"]),
-                    content=item["content"],
-                    importance=item.get(
-                        "importance",
-                        0.5,
-                    ),
+            try:
+                memories.append(
+                    MemoryFact(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        type=MemoryType(item["type"]),
+                        content=item["content"],
+                        importance=item.get(
+                            "importance",
+                            0.5,
+                        ),
+                    )
                 )
-            )
+            except (KeyError, ValueError):
+                logger.warning(
+                    "Skipping malformed memory extraction item: %r", item
+                )
 
         return memories

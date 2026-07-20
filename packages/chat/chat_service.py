@@ -15,23 +15,28 @@ class ChatService:
     def __init__(self, llm: LLMManager | None = None):
         self._llm = llm or LLMManager()
 
-    def chat(self, request: ChatRequest) -> ChatResponse:
+    def _model(self, request: ChatRequest):
+        if request.tools:
+            return self._llm.bind_tools(request.tools)
+        return self._llm
+
+    def chat_sync(self, request: ChatRequest) -> ChatResponse:
         """
         Execute a synchronous chat request.
         """
 
-        response: AIMessage = self._llm.invoke(
+        response: AIMessage = self._model(request).invoke(
             request.messages
         )
 
         return ChatResponse(
             message=response,
             usage=response.usage_metadata or {},
-            provider=self._llm.provider,
-            model=self._llm.model_name,
+            provider=str(self._llm.config.provider),
+            model=self._llm.config.model,
         )
 
-    async def achat(
+    async def chat(
         self,
         request: ChatRequest,
     ) -> ChatResponse:
@@ -39,15 +44,15 @@ class ChatService:
         Execute an asynchronous chat request.
         """
 
-        response: AIMessage = await self._llm.ainvoke(
+        response: AIMessage = await self._model(request).ainvoke(
             request.messages
         )
 
         return ChatResponse(
             message=response,
             usage=response.usage_metadata or {},
-            provider=self._llm.provider,
-            model=self._llm.model_name,
+            provider=str(self._llm.config.provider),
+            model=self._llm.config.model,
         )
 
     def stream(

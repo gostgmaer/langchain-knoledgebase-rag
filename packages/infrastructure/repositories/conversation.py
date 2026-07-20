@@ -17,13 +17,13 @@ class ConversationRepository(BaseRepository[Conversation]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(Conversation, session)
 
-    async def get_by_thread_id(
+    async def get_by_session_id(
         self,
-        thread_id: UUID,
+        session_id: str,
     ) -> Conversation | None:
-        """Retrieve a conversation by its thread ID."""
+        """Retrieve a conversation by its session ID."""
         stmt = select(Conversation).where(
-            Conversation.thread_id == thread_id
+            Conversation.session_id == session_id
         )
         return await self.scalar(stmt)
 

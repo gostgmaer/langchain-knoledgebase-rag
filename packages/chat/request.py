@@ -18,3 +18,4 @@ class ChatRequest:
     max_tokens: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     stream: bool = False
+    tools: list[Any] = field(default_factory=list)

@@ -1,9 +1,8 @@
-import datetime
-
-from packages import conversation
 from packages.application.dto.chat import ChatRequest, ChatResponse
-from packages.application.dto.conversation import CreateConversationRequest
-from packages.application.dto.message import CreateMessageRequest
+from packages.application.dto.conversation import (
+    ConversationResponse,
+    CreateConversationRequest,
+)
 from packages.application.services.conversation_service import (
     ConversationService,
 )
@@ -11,9 +10,9 @@ from packages.application.services.message_service import (
     MessageService,
 )
 
-from packages.domain.enums.message_role import MessageRole
-from packages.domain.models.conversation import Conversation
 from packages.domain.models.message import Message
+from packages.graph.manager import GraphManager
+from packages.conversation.context import ConversationContextBuilder
 from packages.infrastructure.repositories.unit_of_work import (
     UnitOfWork,
 )
@@ -26,11 +25,15 @@ class ChatService:
         uow: UnitOfWork,
         conversation_service: ConversationService,
         message_service: MessageService,
+        graph: GraphManager,
+        context: ConversationContextBuilder,
     ) -> None:
 
         self._uow = uow
         self._conversation_service = conversation_service
         self._message_service = message_service
+        self._graph = graph
+        self._context = context
 
     async def chat(
         self,
@@ -72,7 +75,7 @@ class ChatService:
     async def _get_conversation(
         self,
         request: ChatRequest,
-    ) -> Conversation:
+    ) -> ConversationResponse:
         return await self._conversation_service.get_or_create(
             CreateConversationRequest(
                 tenant_id=request.tenant_id,
@@ -84,7 +87,7 @@ class ChatService:
 
     async def _save_user_message(
         self,
-        conversation: Conversation,
+        conversation: ConversationResponse,
         request: ChatRequest,
     ) -> Message:
         return await self._message_service.create_user_message(
@@ -94,14 +97,50 @@ class ChatService:
 
     async def _execute_runtime(
         self,
-        conversation: Conversation,
+        conversation: ConversationResponse,
         message: Message,
     ) -> str:
-        return "Hello! AI Runtime is not connected yet."
+        """
+        Runs the real LangGraph pipeline (planner, retrieval, tools,
+        memory extraction) for this conversation and returns the
+        assistant's final response text.
+        """
+
+        agent = await self._uow.agents.get(conversation.agent_id)
+
+        history = await self._context.build(
+            conversation_id=conversation.id,
+            system_prompt=agent.system_prompt,
+        )
+
+        state = {
+            "messages": history,
+            "conversation_id": conversation.id,
+            "thread_id": conversation.id,
+            "tenant_id": conversation.tenant_id,
+            "user_id": conversation.user_id,
+            "model_profile_id": agent.model_profile_id,
+            "system_prompt": agent.system_prompt,
+            "temperature": float(agent.temperature),
+            "max_tokens": agent.max_tokens,
+            "retrieval_enabled": True,
+            "tools_enabled": True,
+            "stream": False,
+            "search_results": [],
+            "context": None,
+            "citations": [],
+            "tool_calls": [],
+            "tool_results": [],
+            "memories": [],
+        }
+
+        result = await self._graph.invoke(state)
+
+        return result["messages"][-1].content
 
     async def _save_assistant_message(
         self,
-        conversation: Conversation,
+        conversation: ConversationResponse,
         response: str,
     ) -> Message:
         return await self._message_service.create_assistant_message(
@@ -111,19 +150,8 @@ class ChatService:
 
     async def _update_conversation(
         self,
-        conversation: Conversation,
+        conversation: ConversationResponse,
     ) -> None:
         await self._conversation_service.touch(
-            conversation,
-        )
-
-    async def touch(
-        self,
-        conversation: Conversation,
-    ) -> None:
-        conversation.total_messages += 2
-        conversation.last_message_at = datetime.now(datetime.UTC)
-
-        await self._uow.conversations.update(
-            conversation,
+            conversation.id,
         )

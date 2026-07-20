@@ -1,10 +1,7 @@
-# Empty file
 from __future__ import annotations
 
 import datetime
 from uuid import UUID
-
-from aiohttp import request
 
 from packages.application.dto.conversation import (
     ConversationResponse,
@@ -116,7 +113,7 @@ class ConversationService:
 
         conversation.status = ConversationStatus.COMPLETED
 
-        conversation.ended_at = datetime.utcnow()
+        conversation.ended_at = datetime.datetime.utcnow()
 
         conversation = await self._uow.conversations.update(
             conversation,
@@ -128,4 +125,20 @@ class ConversationService:
             conversation,
         )
 
-conversation: ConversationService = ConversationService
+    async def touch(
+        self,
+        conversation_id: UUID,
+    ) -> None:
+        conversation = await self._uow.conversations.get(
+            conversation_id,
+        )
+
+        if conversation is None:
+            raise ResourceNotFoundError(f"Conversation '{conversation_id}' not found.")
+
+        conversation.total_messages += 2
+        conversation.last_message_at = datetime.datetime.utcnow()
+
+        await self._uow.conversations.update(
+            conversation,
+        )

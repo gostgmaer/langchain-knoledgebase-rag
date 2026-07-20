@@ -1,8 +1,13 @@
 # API dependencies
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+from uuid import UUID
+
+from dependency_injector import providers
 from dependency_injector.wiring import Provide, inject
-from fastapi import Depends
+from fastapi import Depends, HTTPException, Request, status
 
 from packages.infrastructure.ai.manager import LLMManager
 from packages.conversation.manager import ConversationManager
@@ -39,6 +44,77 @@ async def get_db_session(
         await session.close()
 
 
+@asynccontextmanager
+async def request_scoped_session(
+    container: ApplicationContainer,
+) -> AsyncIterator[AsyncSession]:
+    """
+    Opens one session for the lifetime of a single request and overrides
+    the whole DI tree onto it, so every repository/memory-store construction
+    reached from this request shares one session instead of each opening
+    its own (which either leaks a connection or breaks shared-transaction
+    consistency across repos touched in the same request).
+
+    Commits once at the end of a successful request, rolls back on
+    exception. Repositories (packages/infrastructure/repositories/base.py)
+    only flush(), never commit() — that's correct for them, since several
+    repository calls in one request should share one transaction; this is
+    the actual transaction boundary.
+    """
+    session = container.database.session()
+    container.database.session.override(providers.Object(session))
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        container.database.session.reset_override()
+        await session.close()
+
+
+@inject
+async def get_scoped_container(
+    container: ApplicationContainer = Depends(Provide[ApplicationContainer]),
+) -> AsyncIterator[ApplicationContainer]:
+    async with request_scoped_session(container):
+        yield container
+
+
+#
+# Well-known, fixed IDs used only as a fallback when a caller doesn't
+# send X-Tenant-ID/X-User-ID, so the API is testable (curl, cli.py, the
+# API docs "Try it out" button) without hand-generating UUIDs first.
+# Real callers should still send their own — these are never invented
+# silently for a header that's present but malformed.
+#
+DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
+DEFAULT_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
+
+
+def require_uuid_header(
+    request: Request,
+    header: str,
+    default: UUID | None = None,
+) -> UUID:
+    raw = request.headers.get(header)
+    if not raw:
+        if default is not None:
+            return default
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{header} header is required.",
+        )
+    try:
+        return UUID(raw)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{header} must be a valid UUID.",
+        )
+
+
 #
 # AI
 #
@@ -58,11 +134,10 @@ async def get_ai_manager(
 
 @inject
 async def get_conversation_manager(
-    manager: ConversationManager = Depends(
-        Provide[ApplicationContainer.conversation.manager]
-    ),
-) -> ConversationManager:
-    return manager
+    container: ApplicationContainer = Depends(Provide[ApplicationContainer]),
+) -> AsyncIterator[ConversationManager]:
+    async with request_scoped_session(container):
+        yield container.conversation.manager()
 
 
 #

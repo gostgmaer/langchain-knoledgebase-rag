@@ -1,6 +1,8 @@
 # Agent repository
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +23,21 @@ class AgentRepository(BaseRepository[Agent]):
         stmt = (
             select(Agent)
             .where(func.lower(Agent.name) == name.lower())
+        )
+
+        return await self.scalar(stmt)
+
+    async def get_by_tenant_and_name(
+        self,
+        tenant_id: UUID,
+        name: str,
+    ) -> Agent | None:
+        stmt = (
+            select(Agent)
+            .where(
+                Agent.tenant_id == tenant_id,
+                func.lower(Agent.name) == name.lower(),
+            )
         )
 
         return await self.scalar(stmt)

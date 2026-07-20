@@ -2,6 +2,28 @@
 
 Verified against [`docs/mvpRAG.md`](./mvpRAG.md) — that file is the **target roadmap** (what's in scope for v1.0/v1.1/v2.0 and why); this file is the **reality check** (what's actually built, working, broken, or missing right now). Read them as a pair: mvpRAG.md's ✅ marks mean "in v1.0 scope," not "done" — this document is where "done" gets verified.
 
+## 🎉 Milestone: `POST /api/v1/chat` works end to end, for the first time ever
+
+Confirmed live, twice in a row, in the same conversation: a real message in, a real Gemini-generated response out, correctly remembering the prior turn ("You asked me to say hello in exactly three words."). This is the first fully successful chat completion across every audit pass this project has had.
+
+Getting here required replacing `ConversationManager`'s flow with `packages/application/services/chat_service.py`'s `ChatService` (by explicit request), which meant finding and fixing **9 real, distinct bugs** in one continuous chain, each one only reachable once the previous was fixed:
+
+1. `LLMNode` called `self._chat.ainvoke(...)` — `ChatService` has no such method; real one is `achat()`.
+2. `ConversationService.get_or_create()` called a repository method (`get_by_session_id`) that didn't exist.
+3. `ChatService._update_conversation()` called `self._conversation_service.touch(...)` — `ConversationService` had no `touch()` method at all.
+4. Two competing `UnitOfWork` classes existed; the DI container was wired to the wrong (thinner) one.
+5. `ChatService._execute_runtime()` was a hardcoded stub (`"Hello! AI Runtime is not connected yet."`) — rewired to genuinely invoke `GraphManager`, keeping retrieval/tools/memory-extraction intact rather than bypassing them.
+6. `packages/chat/chat_service.py` referenced `self._llm.model_name`, which doesn't exist on `LLMManager` — real attribute is `.config.model` (and `.provider` needed the same fix for the `str`-typed field it was assigned to).
+7. Gemini returns `AIMessage.content` as a list of content blocks, not a plain string — broke memory-fact JSON parsing (`json.loads` on a list).
+8. The same list-content issue broke saving the assistant's message to the database (`Text` column, list value) — fixed at the true source (`LLMNode`, before the message ever enters graph state) rather than patched at every consumer.
+9. `ConversationService.touch()`/`close()` used a timezone-*aware* `datetime.now(datetime.UTC)` against a `TIMESTAMP WITHOUT TIME ZONE` column — asyncpg rejected the mismatch. Fixed to match the naive-datetime convention the rest of this model already uses.
+
+Also added this session, at the user's request, specifically to make manual/API testing practical: `X-Tenant-ID`/`X-User-ID` now fall back to fixed default UUIDs when omitted (three separate places were independently hard-rejecting a missing tenant header — `TenantMiddleware`, `packages/api/security.py`'s `get_tenant_id`, and the router itself — all three now consistently fall back together), and `POST /api/v1/chat`'s `conversation_id` is now optional, auto-provisioning a default conversation (idempotently, keyed by tenant+user) when omitted. A bare `POST /api/v1/chat {"message": "..."}` with zero headers now works.
+
+**New, non-fatal finding surfaced by this success:** LangGraph's checkpointer now warns `Deserializing unregistered type ... from checkpoint. This will be blocked in a future version` for `asyncpg.pgproto.pgproto.UUID` and `packages.planner.models.{Capability,ExecutionStep,ExecutionPlan}` — the in-memory checkpointer's msgpack serialization doesn't know about these custom types yet. Doesn't fail anything today (both test requests still returned `200`), but LangGraph's own message says this becomes a hard error in a future version. Worth registering these types with LangGraph's `allowed_msgpack_modules` before that happens.
+
+**10th bug, found via live user testing of the running server, not by me:** the user asked their own running instance "what about calculator" and got back a confident description of a "Code Interpreter" and "Google Search" tool — **neither of which exists.** Real tools (`calculator`, `get_weather`, `get_news`, `get_google_search`) were all correctly registered in `ToolManager` the whole time, but `LLMNode` never called `.bind_tools()` on the model before invoking it — the exact pattern `packages/agent/runtime.py`'s (separate, unused) `AgentRuntime.run()` already did correctly. With no tools bound, the model had zero real tool-calling capability and was purely hallucinating plausible-sounding tool names from its training data. **Fixed:** `ChatRequest` gained a `tools` field; `LLMNode` now passes `tool_manager.list()` through it; `ChatService.chat()`/`chat_sync()` bind them onto the model before invoking, mirroring `AgentRuntime`'s correct pattern. Confirmed live: asked to list its tools, the model now names exactly the 4 real registered ones, no more and no less; asked to "use your calculator tool to compute 847 * 293," the graph genuinely routed to the tool node (`[Router] Tool calls detected` → `Calculator Tool Invoked` → `Calculation Successful`) and returned the mathematically correct `248,171` — real tool delegation, not an LLM guess.
+
 Twelfth audit pass, HEAD `ff11edd` ("Refactor and clean up various components in the project"), clean working tree, re-verified 2026-07-20. This is the first pass in several where the tree was NOT being edited live mid-audit — the commit landed cleanly between checks, and everything below was re-verified directly against it.
 
 **Headline finding this pass — the bug that blocked chat for the entire last pass is fixed. `POST /api/v1/chat` no longer 500s.** It now correctly returns a `404 Conversation not found` for a conversation ID that doesn't exist — legitimate business logic, not a crash. The DI container for `memory`/`graph` now constructs fully and for real: `packages/infrastructure/container/memory.py`'s `MemoryManager` is wired with genuine `PostgresMemoryStore`/`LLMMemoryExtractor`/`LLMMemorySummarizer`/`PgVectorMemoryRetriever` instances (all four now receive real dependencies — `database.session`, `ai.manager`, `rag.vectorstore` — and all construct successfully, confirmed live), replacing the nonexistent `factory=checkpoint` argument from last pass.
@@ -29,9 +51,32 @@ Fixed, confirmed live this pass:
 - **The two losing duplicates are deleted outright**, not just left orphaned: `packages/graph/planner.py` and `packages/graph/nodes/planner.py`. `packages/graph/nodessss.py` (the old renamed-not-deleted `nodes.py`, already flagged for deletion) was also deleted — it only existed to import the now-gone `packages/graph/nodes/planner.py` and was otherwise already fully dead.
 - Confirmed live end to end after the swap: full import sweep, direct `GraphPlanner()`/`GraphRouter()` execution against both a plain message and a retrieval-keyword message, and a full `TestClient` round trip (`GET /api/v1/health` → 200, `POST /api/v1/chat` → 404 Conversation not found, same as before the swap) — no behavior change, no regressions.
 
-**Still not resolved:** most of `docs/UNUSED_FILES.md`'s list is still present (`packages/application/`, `packages/sdk/upload`/`notification`/`common/models.py`, `infrastructure/ai/factory.py`, `requirements.txt`, the top-level `packages.zip`). The DB session `providers.Resource`/`Factory` bug (`packages/infrastructure/container/database.py:25`, unchanged, now five passes running) is confirmed still present and is the next thing that will surface once a real chat turn becomes testable.
+**The DB session `Resource`/`Factory` bug is now fixed — and it turned out to be more involved than the one-line swap this doc previously suggested.** `packages/infrastructure/container/database.py:25`'s `session = providers.Resource(create_session, ...)` is now `providers.Factory(create_session, ...)`, with `create_session` (`packages/infrastructure/database/session.py`) rewritten from an async generator to a plain function that just returns `session_factory()` — a `Resource` is a singleton-until-shutdown lifecycle; `Factory` creates a new instance every resolution, which is what "don't share one session across every request" actually requires.
+
+**Testing this immediately surfaced two real follow-on problems, both now also fixed, not just noted:**
+1. **`packages/api/lifespan.py`'s `await container.graph.builder()` broke** (`TypeError: 'GraphBuilder' object can't be awaited`, caught by the surrounding `try/except` so it only ever showed up as a warning, never crashed anything). Cause: with `database.session` now synchronous, the entire dependency chain feeding `graph.builder()` (via `memory.manager()` → `PostgresMemoryStore(db=database.session)`) resolves synchronously too — dependency_injector no longer returns a coroutine here. Fixed by dropping the `await`.
+2. **A real connection leak, confirmed live via a `SAWarning`/`RuntimeError` during shutdown** (`"garbage collector is trying to clean up non-checked-in connection"`), not a hypothetical: naively making `session` a `Factory` means every independent resolution of it — one for each of the 9 repositories in `packages/infrastructure/container/repositories.py`, one for `packages/infrastructure/container/memory.py`'s `PostgresMemoryStore` — creates its **own** fresh `AsyncSession`/DB connection, and only the one existing consumer wrapped in an explicit `try/finally` (`packages/api/dependencies.py`'s `get_db_session`, used by the health check) ever closed what it created. A single chat request was silently opening a new, real, unclosed connection on every `ConversationRepository`/`MessageRepository`/`PostgresMemoryStore` construction. Fixed by rewriting `get_conversation_manager` (`packages/api/dependencies.py`) to open **one** session per request, temporarily `.override()` `container.database.session` with it (which — because `database` is wired as a `providers.Container`, the same underlying provider `repositories.py` and `memory.py` both reference via `DependenciesContainer` links — makes every repository and the memory store resolve to that *same* session for the duration of the request), then `reset_override()` and `await session.close()` in a `finally`. This also incidentally fixes the earlier-documented "repos in one request could end up on different sessions, breaking transactional consistency" risk, since they now provably share one.
+
+Confirmed live: 3 sequential chat requests plus a health check, no leak warnings, no cross-request sharing (two independent `container.database.session()` calls return distinct objects), full import sweep unchanged (384/398, same 14 pre-existing failures, none new).
 
 - Modules importing cleanly (fresh sweep, just now): **384 / 399 (96.2%)** — module count dropped by 2 from deleting the two dead planner files plus `nodessss.py`, as expected. All 14 remaining failures are the same pre-existing, already-tracked issues (stale `AgentState` imports, `sdk` bugs, `knowledge/splitters` mismatch, dead `ai/factory.py`, Alembic env quirk, one unwired `packages.middleware.memory` `NameError`) — none introduced by this fix.
+
+## Milestone this session: a chat turn now reaches the LLM node for the first time across every audit pass
+
+By request, built the previously-missing "create a conversation" flow and chased it all the way to a genuinely new, deeper bug — this is the furthest any request has ever gotten in this codebase's history.
+
+**Built:**
+- **`packages/api/routers/conversations.py`** — was a one-line stub, now a real `POST /conversations` route. Requires `X-Tenant-ID` and `X-User-ID` headers (validated as well-formed UUIDs, not just present), creates a `Conversation` against a per-tenant default `Agent`.
+- **`packages/conversation/bootstrap.py`** (new) — `ensure_default_model_profile()`/`ensure_default_agent()`, get-or-create helpers seeded from real `packages.config` AI settings (provider, model, temperature, etc.), not hardcoded values. `ModelProfile` is global (get-or-create by `is_default`/name); `Agent` is correctly scoped per-tenant (a new `AgentRepository.get_by_tenant_and_name()` method), since `Agent.tenant_id` is a required column — a single global default agent would have leaked one tenant's agent config to every other tenant.
+- **`packages/api/schemas/conversation.py`** — was a one-line stub, now `ConversationCreateSchema`/`ConversationResponseSchema`.
+
+**Two real, live-confirmed bugs found and fixed while proving this actually works end to end, neither hypothetical:**
+1. **DB schema drift**: `model_profiles` (a real table with 1 existing row, 1 agent, 1 conversation, and 47 messages already in it — this is not an empty dev DB) was missing its `vector` column entirely — `Base.metadata.create_all` only creates missing tables, never adds columns to ones that already exist, and this table predates the `vector` column being added to the `ModelProfile` model. This broke *any* query against `ModelProfile`, not just new ones. **Fixed via an additive `ALTER TABLE model_profiles ADD COLUMN vector vector(1536)`**, backfilled the existing row with a zero vector, then `SET NOT NULL` to match the model — confirmed the existing row and its relationships (1 agent, 1 conversation, 47 messages) are untouched (row counts unchanged before/after).
+2. **Repository writes don't commit — a previously-documented gap, now confirmed as a live, request-breaking bug, not just a code-reading finding.** `packages/infrastructure/repositories/base.py`'s `create()` only ever `flush()`ed, never `commit()`ed. `POST /conversations` returned a real-looking `201` with a valid UUID, but the row was silently rolled back the moment its request-scoped session closed — the very next `POST /api/v1/chat` against that same ID correctly 404'd, since the conversation was never actually persisted. **Fixed at the correct boundary**: `packages/api/dependencies.py`'s `request_scoped_session` (the same per-request session helper from the DB-session fix above) now commits once at the end of a successful request and rolls back on exception — not inside `BaseRepository` itself, since several repository calls in one request need to share one transaction.
+
+**Confirmed live, full round trip:** `POST /conversations` → `201`; `POST /api/v1/chat` against that real `conversation_id` → conversation found (no more 404), memory/graph construction succeeds, **a real embedding API call to Google's `generativelanguage.googleapis.com` succeeds (`200 OK`)** — the first live proof, ever, that the `GoogleProvider` `api_key=` fix (tracked as "correct but unprovable" for four straight passes) actually works — planner correctly routes to `"llm"`, and execution reaches `packages/graph/nodes/llm.py:47`. Two independently-created conversations for the same tenant correctly reuse the same auto-provisioned default agent (idempotency confirmed).
+
+**The new blocker, found this session, not yet fixed:** `packages/graph/nodes/llm.py:47` calls `self._chat.ainvoke(request.messages)` — but `self._chat` is a `packages.chat.chat_service.ChatService` instance, and `ChatService` has no `.ainvoke()` method at all. Its real async method is `achat(request: ChatRequest) -> ChatResponse` (`packages/chat/chat_service.py:34-51`) — different name, and it expects a `ChatRequest` object, not a raw messages list. `AttributeError: 'ChatService' object has no attribute 'ainvoke'`, confirmed live. This is now the single thing standing between here and a fully complete, working chat response.
 
 Status legend:
 - **✅ Done** — built and proven to work at runtime.
@@ -49,12 +94,12 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 
 | Phase | Items | ✅ Done | 🟡 Partial | 🔴 Broken | ⚪ Pending | % Done |
 |---|---|---|---|---|---|---|
-| 1 — Foundation | 11 | 8 | 3 | 0 | 0 | **72.7%** ▲ |
+| 1 — Foundation | 11 | 8 | 3 | 0 | 0 | **72.7%** |
 | 2 — IAM | 7 | 2 | 0 | 0 | 5 | **28.6%** |
 | 3 — Database | 12 | 8 | 0 | 0 | 4 | **66.7%** |
-| 4 — LangChain | 10 | 1 | 0 | 6 | 3 | **10.0%** |
-| 5 — LangGraph | 9 | 3 | 3 | 0 | 3 | **33.3%** ▲ |
-| 6 — Session Management | 4 | 0 | 3 | 0 | 1 | **0.0%** |
+| 4 — LangChain | 10 | 4 | 3 | 0 | 3 | **40.0%** ▲▲ |
+| 5 — LangGraph | 9 | 3 | 3 | 0 | 3 | **33.3%** |
+| 6 — Session Management | 4 | 1 | 2 | 0 | 1 | **25.0%** ▲ |
 | 7 — Memory | 5 | 0 | 5 | 0 | 0 | **0.0%** |
 | 8 — Document Processing | 15 | 0 | 10 | 0 | 5 | **0.0%** |
 | 9 — Production Retrieval ⭐ | 13 | 0 | 4 | 0 | 9 | **0.0%** |
@@ -62,14 +107,14 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 | 11 — Human in the Loop | 3 | 0 | 0 | 0 | 3 | **0.0%** |
 | 12 — Background Jobs | 5 | 1 | 1 | 0 | 3 | **20.0%** |
 | 13 — Production hardening | 5 | 3 | 0 | 0 | 2 | **60.0%** |
-| 14 — APIs | 7 | 0 | 1 | 0 | 6 | **0.0%** ▲ |
+| 14 — APIs | 7 | 1 | 1 | 0 | 5 | **14.3%** ▲ |
 | 15 — Testing | 4 | 0 | 0 | 0 | 4 | **0.0%** |
 | 16 — Deployment | 3 | 0 | 3 | 0 | 0 | **0.0%** |
-| **Total** | **119** | **27** | **36** | **0** | **56** | **22.7%** ▲ |
+| **Total** | **119** | **32** | **38** | **0** | **49** | **26.9%** ▲▲ |
 
-**Overall: 22.7% done · 30.3% partial · 0.0% broken · 47.1% pending** (27 / 36 / 0 / 56 out of 119 roadmap items) — up from 21.0% last pass. **Broken hit zero for the first time across all twelve passes** — everything previously counted as "real code that currently fails" either got fixed or was reclassified to Partial because it now fails gracefully (a proper 404, not a crash) rather than being genuinely broken.
+**Correction to last pass's table: "Broken hit zero" was wrong — the LangChain row still showed 6 broken items even as the Total row claimed zero, an arithmetic error that slipped through. The real prior baseline was 27 / 36 / 6 / 50, not 27 / 36 / 0 / 56.** Corrected and rebuilt from the per-row numbers this time, then updated for today's session on top of that corrected baseline.
 
-**Why the picture actually got better, not just the score:** the `MemoryManager` bug that blocked the entire chat pipeline is fixed — confirmed by the fact that a chat request now runs the full DI chain (`database→ai→rag→tools→memory→graph→services`) successfully and fails only on a legitimate, expected business rule ("conversation doesn't exist yet," since there's still no create-conversation endpoint — a known, already-tracked Pending gap, not a bug). That's why LangGraph's DI wiring, Session Management's "Chat Sessions," and the Chat API all moved from Broken to Done/Partial this pass. Memory jumped from 1/5 to 5/5 partial because the pgvector-backed store/extractor/summarizer/retriever implementations are now actually reachable and constructing with real dependencies, not just sitting unwired in `packages/memory/implementations/`. The one thing that got worse: the `PlannerResult`/`GraphPlanner` duplication grew from two classes to three (see below) — a real regression, tracked as a Gap rather than a numeric roadmap item.
+**Overall: 26.9% done · 31.9% partial · 0.0% broken · 41.2% pending** (32 / 38 / 0 / 49 out of 119 roadmap items) — up from 23.5%, and tied with the ninth pass for the highest score this project has ever recorded. Broken hit zero again, this time for real (the earlier "zero" claim was an arithmetic error, corrected above). The movers: **Chat Models and Gemini both moved to Done** — a real, complete chat completion now works end to end, meeting the roadmap's acceptance bar ("providers wired" means completing a real request with a real key, not just instantiating). OpenAI/Anthropic/Groq move to Partial (the shared bug blocking all four is fixed; these three specifically just haven't been exercised with real keys). **Session Management's "Chat Sessions" moved to Done** — a full turn now completes, persists, and correctly recalls prior context. **APIs' "Chat API" moved to Done** — the core "send a message, get a response" now genuinely works (streaming/history are explicitly "ideally," not blocking, per the roadmap's own wording).
 
 ---
 
@@ -99,8 +144,11 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 | Item | Evidence |
 |---|---|
 | Document objects | Unaffected. |
+| **Embeddings — recovered, first live proof** | A real chat request now reaches the embedding call: `PgVectorMemoryRetriever`/`LLMMemoryExtractor`'s dependency chain hit `generativelanguage.googleapis.com`'s `batchEmbedContents` endpoint and got back a genuine `200 OK`. This is the acceptance bar the roadmap itself sets ("actually complete a real request with a real key") — met, for the first time, this session. |
+| **Chat Models — Done, first time ever** | A complete chat turn now works end to end: `LLMNode` → `ChatService.achat()` → real Gemini completion → response saved and returned to the client. Confirmed live, twice in a row, including correct recall of prior conversation turns. |
+| **Gemini — Done** | Proven on both axes now: embeddings (see above) and chat completion (see Chat Models). `GoogleProvider`'s `api_key=` fix (`packages/infrastructure/ai/providers/google.py`) is fully live-confirmed correct. |
 
-**Still Broken:** Chat Models, Gemini, Embeddings, OpenAI, Anthropic, Groq — a real chat request still never reaches LLM construction, because it 404s earlier (no conversation exists — see APIs/Phase 14). `GoogleProvider`'s `api_key=` fix is still believed correct (confirmed unchanged in the code) but remains unprovable live for a fourth pass running, now blocked by a missing prerequisite endpoint rather than any bug in the DI chain itself.
+**Partial, not Broken:** OpenAI, Anthropic, Groq — the bug that blocked every provider identically (`LLMNode` calling a nonexistent `ChatService.ainvoke`) is fixed, so there's no known reason these three wouldn't work too; they just haven't been exercised live with real keys this session (the default provider is Google).
 
 ### LangGraph
 | Item | Evidence |
@@ -115,15 +163,15 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 | Item | Evidence |
 |---|---|
 | No more duplicate user message (fix retained) | Unaffected. |
-| **Chat Sessions — recovered from Broken to Partial** | `POST /api/v1/chat` no longer 500s. Confirmed live: a request against a nonexistent `conversation_id` now returns a clean `404 Conversation not found` from real business logic (`ConversationManager.chat()` → `service.get()` → `None`). A full successful turn still isn't provable — there's no HTTP-reachable way to create a conversation yet (see APIs/Phase 14) — so this stays Partial, not Done. |
+| **Chat Sessions — Done, first time ever** | A complete chat turn now works: conversation created/found, user message saved, real LLM response generated and saved, conversation stats updated, all in one transaction. Confirmed live twice in a row, the second call correctly recalling the first turn's content. |
 
 ### Tools
 | Item | Evidence |
 |---|---|
-| Tool registry population, tool executor signature | Structurally unchanged. |
-| **Calculator — fixed, confirmed still working** | Unaffected by this pass's changes; re-confirmed live. |
+| Tool registry population, tool executor signature | Now proven correct through real invocation, not just structurally — see below. |
+| **Calculator — Done, now proven through the full app, not just standalone** | Confirmed live: asked to compute `847 * 293` via chat, the graph genuinely routed to the tool node (`[Router] Tool calls detected` → `Calculator Tool Invoked` → `Calculation Successful`) and returned the mathematically correct `248,171` in the final response — real delegation, not an LLM guess. |
 
-**Still Partial:** Web search and Weather — tool code itself is fine, but the live, through-the-app proof still isn't obtainable since chat itself doesn't complete a turn.
+**Still Partial, but for a different, better reason now:** Web Search, Weather, News — the real blocker (no tools were ever bound to the model at all — see the milestone section's 10th bug) is fixed; these three are discoverable and bindable through the exact same mechanism just proven for Calculator, and the model now correctly names all four in its own tool list. They're Partial rather than Done only because this session specifically live-tested Calculator's invocation, not these three individually.
 
 ### Background jobs / Production
 | Item | Evidence |
@@ -135,7 +183,7 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 | Item | Evidence |
 |---|---|
 | Conversation memory (short-term) | Unaffected. |
-| **Semantic / episodic / preferences / facts backing store — upgraded from Pending to Partial** | `packages/infrastructure/container/memory.py` now constructs real `PostgresMemoryStore` (backed by `database.session`), `LLMMemoryExtractor`/`LLMMemorySummarizer` (backed by `ai.manager`), and `PgVectorMemoryRetriever` (backed by `rag.vectorstore`) — confirmed live, all four build successfully as part of `MemoryManager`'s construction. Still Partial, not Done: the actual quality/correctness of what these implementations retrieve or extract has not been exercised live yet, only that they construct. |
+| **Semantic / episodic / preferences / facts backing store — upgraded from Pending to Partial** | `packages/infrastructure/container/memory.py` now constructs real `PostgresMemoryStore` (backed by `database.session`), `LLMMemoryExtractor`/`LLMMemorySummarizer` (backed by `ai.manager`), and `PgVectorMemoryRetriever` (backed by `rag.vectorstore`) — confirmed live, all four build successfully as part of `MemoryManager`'s construction. Partial, not Done, for a stronger reason than "unproven live": `PostgresMemoryStore` itself is fully a stub — every method is a placeholder comment, `self._db` is never actually used for a query (see Broken section's correction below). Only `PgVectorMemoryRetriever` has confirmed real query logic behind it. |
 
 ---
 
@@ -156,8 +204,8 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 
 | Item | File(s) | What's wrong |
 |---|---|---|
-| **DB session provider still shares one session across every request** | `packages/infrastructure/container/database.py:25` | Unchanged for five passes running: `session = providers.Resource(...)` instead of `providers.Factory(...)`. Confirmed live: calling it twice returns the identical `AsyncSession` object. No longer masked by an upstream crash — this is now the next real bug in line, since the DI chain reaches this far successfully. |
 | **`GoogleProvider`'s `api_key=` fix — still correct, still unprovable, fourth pass running** | `packages/infrastructure/ai/providers/google.py` | Unchanged, confirmed still correctly passing `api_key=settings.ai.google_api_key`. Still can't be demonstrated live — not because of a DI bug anymore, but because there's no way to create a conversation over HTTP to actually drive a chat turn through to LLM construction (see APIs/Phase 14). |
+| **Correction: `packages/memory/implementations/postgres_store.py` is a stub, not "substantial"** | `packages/memory/implementations/postgres_store.py` | Traced fully while tracking down the connection-leak fix above: every method (`create`, `get`, `update`, `delete`, `search`, ...) is a placeholder — comments like `# INSERT INTO memories ...` where a real query would go, no actual SQL anywhere. `self._db` is stored in `__init__` but never touched by any method. An earlier pass's description of this file as part of "real, substantial pgvector-backed implementations" was wrong — only `PgVectorMemoryRetriever` (backed by `rag.vectorstore`, confirmed separately to have real `similarity_search()` SQL) earns that description. `LLMMemoryExtractor`/`LLMMemorySummarizer` weren't re-verified this pass either way. |
 | **Most of `docs/UNUSED_FILES.md`'s cleanup list is still untouched** | — | `packages/application/` (full package), `packages/conversation/store.py`/`memory_store.py`, `packages/infrastructure/ai/factory.py`, `packages/sdk/upload/`, `packages/sdk/notification/`, `packages/sdk/common/models.py`, `requirements.txt`, and the top-level `packages.zip` are all still present, unchanged. Three items did come off the list this pass — see below. |
 
 ### Found and fixed in the same session — a regression that didn't survive the pass
@@ -303,11 +351,11 @@ This is still the phase furthest from its own ambition in the roadmap — the st
 | Retry policies | `tenacity` is a declared dependency; `infrastructure/http/retry.py` is a **1-line stub** with an unimplemented `@retry` TODO |
 
 ### APIs (Phase 14)
-Only 2 of 9 planned routers are real and registered — and each of those two only has **a single route**, not a full resource API. Confirmed by reading `packages/api/routers/__init__.py` directly:
+**3 of 9 planned routers are now real and registered** (`conversations.py` joined `chat.py`/`health.py` this session) — but each only covers part of its resource's lifecycle, not a full CRUD surface. Confirmed by reading `packages/api/routers/__init__.py` directly:
 
 ```python
 from packages.api.routers.chat import router as chat_router
-# from .conversations import router as conversation_router
+from packages.api.routers.conversations import router as conversation_router
 # from .documents import router as document_router
 # from .feedback import router as feedback_router
 from packages.api.routers.health import router as health_router
@@ -319,23 +367,25 @@ from packages.api.routers.health import router as health_router
 ...
 api_router.include_router(health_router)
 api_router.include_router(chat_router)
-# api_router.include_router(conversation_router)   # ... and 6 more, all commented out
+api_router.include_router(conversation_router)
+# ... and 6 more, all commented out
 ```
 
-**Chat router — only `POST /api/v1/chat` exists.** Verified by reading `packages/api/routers/chat.py` in full (52 lines): it defines exactly one route, `@router.post("", ...)` (lines 22-28), which takes a `ChatRequestSchema` (`conversation_id`, `message`, `stream`) and calls `ConversationManager.chat(...)`. There is no other route in this file — confirmed via `grep "@router\.(get|post|put|delete|patch|websocket)"` across the whole `routers/` directory, which returns only this one `@router.post` in `chat.py` and one `@router.get` in `health.py`. Specifically **missing** from the chat surface, even though the roadmap and the request schema imply them:
+**Chat router — Done for its one route, still just one route.** `POST /api/v1/chat` now genuinely works end to end — real conversation, real LLM response, real persistence (see the Done section's milestone above). `conversation_id` is now optional (auto-provisions a default conversation when omitted), and `X-Tenant-ID`/`X-User-ID` fall back to fixed default UUIDs when omitted, specifically to make this testable without hand-crafting headers first. Still missing, unchanged: history/streaming/delete routes (see the table below — streaming's `stream` field is still silently ignored).
+
+**Conversation router — new this pass, real, but create-only.** `packages/api/routers/conversations.py` now defines `POST /conversations`, confirmed live: creates a real, persisted `Conversation` against a per-tenant auto-provisioned default `Agent` (see the Done section's "Milestone this session" for the full account). Per this phase's own acceptance bar ("full resource lifecycle... at minimum create + read... a router that only implements one verb... is partial, not done"), this stays **Partial** — there's still no `GET /conversations/{id}`, no list, no delete.
 
 | Missing route | Evidence it's expected but absent |
 |---|---|
 | `GET /chat/{conversation_id}` or similar — fetch conversation/message history | No such route in `chat.py`; the only way to read back messages is directly from the DB |
 | Streaming response (`GET`/`POST` with SSE, or a websocket) | `ChatRequestSchema` has a `stream: bool` field and `cli.py` always sends `stream: false` with a comment implying streaming isn't actually wired up server-side; `ConversationManager`/`GraphManager` do expose a `stream()` method (`packages/graph/manager.py:27-35`) but nothing in `chat.py` calls it — the field is accepted and silently ignored |
 | `DELETE /chat/{conversation_id}` — end/delete a conversation | Not present |
-| Conversation creation (`POST /conversations`) | Lives under the still-stubbed `conversations.py` router (see below), not `chat.py` — there is genuinely no HTTP-reachable way to create a conversation at all right now |
+| `GET /conversations/{id}`, `GET /conversations`, `DELETE /conversations/{id}` | `conversations.py` only has the create route; read/list/delete don't exist |
 
-Each of the 7 unregistered router files (including `conversations.py`, which is where conversation creation/listing would actually belong) is a **single-line comment stub** (verified by reading each file directly):
+The remaining 6 unregistered router files are still **single-line comment stubs** (verified by reading each file directly):
 
 | File | Full contents |
 |---|---|
-| `packages/api/routers/conversations.py` | `# Router conversations` |
 | `packages/api/routers/documents.py` | `# Router documents` |
 | `packages/api/routers/feedback.py` | `# Router feedback` |
 | `packages/api/routers/knowledge_bases.py` | `# Router knowledge bases` |
@@ -344,7 +394,7 @@ Each of the 7 unregistered router files (including `conversations.py`, which is 
 | `packages/api/routers/search.py` | `# Router search` |
 | `packages/api/routers/tools.py` | `# Router tools` |
 
-**Practical impact:** the entire HTTP-reachable chat surface is one endpoint — send a message into an existing conversation, non-streaming, with no way to create that conversation, list its history, or delete it over HTTP. **And nothing is reachable at all this pass** — see Broken → the `packages.graph.nodes` / `packages.rag.builders` import failures — the app doesn't start, so even `GET /api/v1/health` cannot currently be reached.
+**Practical impact, updated this session:** a conversation can now genuinely be created over HTTP and then chatted with — the two previously-separate halves of the flow are connected for the first time. What's still missing: no history/listing, no delete, no streaming, and (see LangChain/Phase 4 above) the chat call itself still fails once it reaches the LLM node, on the `ChatService.ainvoke` bug.
 
 ### Testing (Phase 15)
 | Item | Status |
@@ -426,14 +476,16 @@ Previously flagged as reshaped-but-ignored. Traced fully this pass (see Broken �
 
 ## Suggested next priorities (roughly in order)
 
-The DI/memory/graph wiring bug is fixed — the next blocker is a missing feature, not a crash:
+Chat works end to end now — the priorities below are genuinely the *next* layer, not "get it working at all":
 
-1. **Wire up the `conversations.py` router** (currently a one-line stub) with at least a `POST /conversations` create route. This is now the single thing standing between here and a provable, full, real chat turn — without it, there's no HTTP-reachable way to get a valid `conversation_id` to send to `POST /api/v1/chat`.
-2. **Fix the DB session `Resource`→`Factory` bug** in `packages/infrastructure/container/database.py:25` — no longer masked by a crash; it's the next real bug once a full chat turn becomes testable, since it currently shares one `AsyncSession` across every request.
-3. **Reconfirm `GoogleProvider`'s `api_key=` fix live** — the code has been correct for four passes running; it just needs #1 to finally be reachable.
+1. **Register `Capability`/`ExecutionStep`/`ExecutionPlan`/`asyncpg.pgproto.pgproto.UUID` with LangGraph's `allowed_msgpack_modules`.** The in-memory checkpointer currently warns on every turn that deserializing these will be blocked in a future LangGraph version — not broken today, but a ticking clock.
+2. **Verify OpenAI/Anthropic/Groq actually work**, not just Gemini — the shared bug that blocked all four is fixed, but only Gemini has been exercised live with a real key. Same for Web Search/Weather/News tools — Calculator's live invocation is proven, these three aren't individually yet, despite sharing the exact same now-fixed binding mechanism.
+3. **Build `GET /conversations/{id}`** (at minimum) to bring the Conversation API up to its own "create + read" acceptance bar — `POST /conversations` alone keeps it Partial.
 4. **Fix `EmbeddingSettings` missing `provider`**, and `packages/knowledge/splitters/{pipeline,recursive,factory}.py`'s `DocumentSplitter`/`BaseSplitter` mismatch — both still unchanged across five passes now.
-5. **Finish cleaning up `docs/UNUSED_FILES.md`'s inventory** — four items (`packages/graph.zip`, `packages/graph/planner.py`, `packages/graph/nodes/planner.py`, `packages/graph/nodessss.py`) came off this pass; still remaining: `git rm packages.zip`, delete `packages/application/`, `packages/sdk/upload/`, `packages/sdk/notification/`, `packages/sdk/common/models.py`, `infrastructure/ai/factory.py`, `requirements.txt`.
-6. **Write an actual pytest suite.** Twelve audit passes in: a CI import-smoke-test alone (`python -c "from packages.api.app import app"`) would have caught several of the headline regressions in under a second, for free.
-7. **Restore the commit() calls in `packages/infrastructure/repositories/base.py`**, fix the Docker healthcheck path and Makefile paths, wire real JWT validation, and regenerate the Alembic "initial schema" migration properly.
+5. **Finish cleaning up `docs/UNUSED_FILES.md`'s inventory** — most of `packages/application/` just went from "confirmed dead" to "load-bearing" this session (it's the live `ChatService` stack now), so that entry needs a re-read, not a deletion; still safe to remove: `packages.zip`, `packages/sdk/upload/`, `packages/sdk/notification/`, `packages/sdk/common/models.py`, `infrastructure/ai/factory.py`, `requirements.txt`.
+6. **Write an actual pytest suite.** A test that created a conversation and chatted against it twice in a row would have caught most of this session's 9 bugs automatically instead of one-at-a-time manual discovery.
+7. **Fix the Docker healthcheck path and Makefile paths, wire real JWT validation, and regenerate the Alembic "initial schema" migration properly** — the migration still has no `create_table` calls, and now also doesn't know about the `model_profiles.vector` column added via direct `ALTER TABLE` this session.
+8. **Implement `PostgresMemoryStore`'s actual database logic** — every method is currently a placeholder stub; `self._db` (the per-request session it now correctly receives) is never used.
+9. **Add streaming and history routes** to the chat surface — explicitly "ideally," not blocking, per the roadmap, but still the most visible remaining gap in the primary conversational surface.
 
-**Fixed in earlier passes, holding steady:** `SafeCalculator`'s `ast.Num` and `dataclass(slots=True)`/`__dict__` crashes — unaffected by this pass's changes, re-confirmed still working.
+**Fixed this session:** the DB session `Resource`→`Factory` bug and the connection-leak/multi-session risks it could have introduced; the `model_profiles.vector` schema drift; the repository-writes-never-commit bug; the conversations router (stub → real, working, idempotent `POST /conversations`); and, replacing `ConversationManager`'s flow with `packages/application/services/chat_service.py`'s `ChatService` at the user's request, 9 further real bugs across that stack (see the milestone section at the top of this document for the full list) — resulting in the first fully working `POST /api/v1/chat` round trip this project has ever had. **Fixed in earlier passes, holding steady:** `SafeCalculator`'s `ast.Num` and `dataclass(slots=True)`/`__dict__` crashes.
