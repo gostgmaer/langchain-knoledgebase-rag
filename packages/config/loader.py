@@ -2,6 +2,7 @@ from functools import lru_cache
 
 from packages.config.embedding import EmbeddingSettings
 from packages.config.rag import RAGSettings
+from packages.config.tools import ToolsSettings
 from packages.config.upload_service import UploadServiceSettings
 
 from .ai import AISettings
@@ -34,7 +35,8 @@ def get_settings() -> Settings:
         upload_service=UploadServiceSettings(),
         iam = IAMSettings(),
         rag=RAGSettings(),
-        embedding=EmbeddingSettings()
+        embedding=EmbeddingSettings(),
+        tools=ToolsSettings()
         )
 
 settings = get_settings()

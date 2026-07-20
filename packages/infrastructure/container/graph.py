@@ -49,7 +49,7 @@ class GraphContainer(containers.DeclarativeContainer):
 
     retrieve = providers.Factory(
         RetrieveNode,
-        knowledge_manager=rag.knowledge_manager,
+        retrieval_pipeline=rag.retriever,
     )
 
     tool = providers.Factory(
@@ -61,7 +61,6 @@ class GraphContainer(containers.DeclarativeContainer):
         LLMNode,
         chat_service=services.chat,
         prompt_builder=prompt_builder,
-        system_prompt="You are a helpful assistant.",
         tool_manager=tools.manager,
     )
 

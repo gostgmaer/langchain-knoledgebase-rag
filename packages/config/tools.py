@@ -4,8 +4,8 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class SecuritySettings(BaseSettings):
-    """Security configuration."""
+class ToolsSettings(BaseSettings):
+    """Tools configuration."""
 
     model_config = SettingsConfigDict(
         env_file=".env",

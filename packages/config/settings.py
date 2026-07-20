@@ -4,6 +4,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 from packages.config.embedding import EmbeddingSettings
+from packages.config.tools import ToolsSettings
 from .ai import AISettings
 from .api import APISettings
 from .app import AppSettings
@@ -34,3 +35,4 @@ class Settings(BaseSettings):
     iam: IAMSettings = Field(default_factory=IAMSettings)
     rag: RAGSettings = Field(default_factory=RAGSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    tools: ToolsSettings = Field(default_factory=ToolsSettings)

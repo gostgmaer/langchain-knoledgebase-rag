@@ -29,13 +29,11 @@ class LLMNode:
         self,
         chat_service: ChatService,
         prompt_builder: PromptBuilder,
-        system_prompt: str,
         tool_manager: ToolManager,
     ) -> None:
 
         self._chat = chat_service
         self._builder = prompt_builder
-        self._system_prompt = system_prompt
         self._tools = tool_manager
 
     async def __call__(
@@ -44,7 +42,7 @@ class LLMNode:
     ) -> GraphState:
 
         prompt = self._builder.build(
-            system_prompt=self._system_prompt,
+            system_prompt=state["system_prompt"],
             memories=state["memories"],
             context=state["context"],
             messages=state["messages"],
