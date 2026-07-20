@@ -26,7 +26,7 @@ class GraphPlanner:
 
     async def plan(
         self,
-        state: GraphState,
+        state,
     ) -> PlannerResult:
 
         message = state["messages"][-1].content.lower()

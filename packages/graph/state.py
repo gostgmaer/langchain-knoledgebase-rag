@@ -7,10 +7,13 @@ from uuid import UUID
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import AnyMessage, add_messages
 from typing_extensions import Annotated, TypedDict
-from packages.graph.planner import PlannerResult
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from packages.graph.planner import PlannerResult
+
 from packages.knowledge.schemas import SearchResult
 from packages.memory.schemas import MemoryFact
-from packages.rag.schemas import Context
 from packages.rag.schemas import Citation
 
 class GraphState(TypedDict, total=False):

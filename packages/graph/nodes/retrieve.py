@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from packages.graph.state import GraphState
 from packages.knowledge.manager import KnowledgeManager
-from packages.knowledge.schemas import SearchKnowledgeRequest
+from packages.knowledge.schemas import SearchRequest
 
 
 class RetrieveNode:
@@ -34,7 +34,7 @@ class RetrieveNode:
         query = state["messages"][-1].content
 
         response = await self._knowledge.search(
-            SearchKnowledgeRequest(
+            SearchRequest(
                 query=query,
                 tenant_id=state["tenant_id"],
                 top_k=5,

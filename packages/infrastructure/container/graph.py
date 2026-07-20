@@ -6,7 +6,7 @@ from dependency_injector import providers
 
 from packages.graph.builder import GraphBuilder
 from packages.graph.manager import GraphManager
-from packages.graph.nodes import GraphNodes, NodeContext
+from packages.graph.nodes import GraphNodes
 from packages.graph.router import GraphRouter
 from packages.graph.nodes.planner import GraphPlanner
 
@@ -28,7 +28,7 @@ class GraphContainer(containers.DeclarativeContainer):
     )
 
     context = providers.Factory(
-        NodeContext,
+        # NodeContext,
         runtime=runtime,
         rag=rag.manager,
         tools=tools.manager,
