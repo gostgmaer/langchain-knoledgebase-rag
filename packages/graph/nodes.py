@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 from packages.agent.runtime import AgentRuntime
-from packages.graph.planner import GraphPlanner
+from packages.graph.nodes.planner import GraphPlanner
 from packages.graph.state import GraphState
 from packages.memory.manager import MemoryManager
 from packages.rag.manager import RAGManager
