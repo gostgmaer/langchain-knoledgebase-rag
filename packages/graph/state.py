@@ -13,6 +13,34 @@ from packages.knowledge.schemas import SearchResult
 from packages.memory.schemas import MemoryFact
 from packages.rag.schemas import Citation
 
+
+def merge_usage(
+    current: dict[str, Any] | None,
+    update: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """
+    Reducer for `usage`: sums token counts across however many times
+    the LLM node runs in a single turn (e.g. once before a tool call,
+    once after) instead of the last call silently overwriting the
+    first. Nodes should return only their own call's usage delta, not
+    a pre-merged total — this function does the accumulation.
+
+    LangChain's UsageMetadata has non-numeric sub-fields too (e.g.
+    `input_token_details`), so only int/float values are summed —
+    anything else falls back to the most recent value.
+    """
+    current = current or {}
+    update = update or {}
+    merged: dict[str, Any] = {}
+    for key in set(current) | set(update):
+        c, u = current.get(key), update.get(key)
+        if isinstance(c, (int, float)) and isinstance(u, (int, float)):
+            merged[key] = c + u
+        else:
+            merged[key] = u if key in update else c
+    return merged
+
+
 class GraphState(TypedDict, total=False):
     """
     Shared state across the LangGraph workflow.
@@ -76,7 +104,7 @@ class GraphState(TypedDict, total=False):
     stream: bool
     next_node: str
     metadata: dict[str, object]
-    usage: dict[str, Any]
+    usage: Annotated[dict[str, int], merge_usage]
 
     #
     # Error Handling

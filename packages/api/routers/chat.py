@@ -1,7 +1,10 @@
 # Router chat
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
@@ -73,17 +76,23 @@ async def chat(
 
     chat_service = container.chat_service.chat_service()
 
-    response = await chat_service.chat(
-        ChatRequest(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            agent_id=conversation.agent_id,
-            session_id=conversation.session_id,
-            conversation_id=conversation.id,
-            message=payload.message,
-            stream=payload.stream,
-        )
+    chat_request = ChatRequest(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        agent_id=conversation.agent_id,
+        session_id=conversation.session_id,
+        conversation_id=conversation.id,
+        message=payload.message,
+        stream=payload.stream,
     )
+
+    if payload.stream:
+        return StreamingResponse(
+            _sse_events(chat_service, chat_request, conversation.id),
+            media_type="text/event-stream",
+        )
+
+    response = await chat_service.chat(chat_request)
 
     return ApiResponse(
         message="Chat completed successfully.",
@@ -93,3 +102,17 @@ async def chat(
             model=agent.llm_model,
         ),
     )
+
+
+async def _sse_events(chat_service, chat_request: ChatRequest, conversation_id):
+    """
+    Formats each token chunk from ChatService.stream() as a
+    Server-Sent Event. One "token" event per chunk, followed by a
+    single terminal "done" event once the full response has been
+    generated and persisted.
+    """
+
+    async for token in chat_service.stream(chat_request):
+        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+    yield f"data: {json.dumps({'type': 'done', 'conversation_id': str(conversation_id)})}\n\n"

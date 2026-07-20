@@ -75,7 +75,7 @@ class ChatService:
         Stream model output asynchronously.
         """
 
-        async for chunk in self._llm.astream(
+        async for chunk in self._model(request).astream(
             request.messages
         ):
             yield chunk

@@ -40,9 +40,16 @@ class GraphManager:
         self,
         state: GraphState,
     ):
+        """
+        Streams token-level chunks pushed by LLMNode via
+        get_stream_writer() (see packages/graph/nodes/llm.py). Requires
+        stream_mode="custom" — the default "updates" mode only yields
+        one event per whole node completion, not per token.
+        """
 
         async for event in self.graph.astream(
             state,
             config=self._config(state),
+            stream_mode="custom",
         ):
             yield event
