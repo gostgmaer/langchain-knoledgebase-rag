@@ -21,7 +21,7 @@ class IAMAuthSDK(BaseClient):
     ) -> None:
         super().__init__(
             client=client,
-            base_url=str(settings.url),
+            base_url=settings.base_url,
         )
 
         self._settings = settings

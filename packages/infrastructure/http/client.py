@@ -16,5 +16,4 @@ def create_http_client() -> httpx.AsyncClient:
             max_keepalive_connections=20,
         ),
         follow_redirects=True,
-        http2=True,
     )

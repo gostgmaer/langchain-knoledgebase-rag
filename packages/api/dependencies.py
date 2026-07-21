@@ -14,6 +14,7 @@ from packages.conversation.manager import ConversationManager
 from packages.graph.manager import GraphManager
 from packages.infrastructure.container import ApplicationContainer
 from packages.memory.manager import MemoryManager
+from packages.sdk.iam.models import CurrentUser
 from packages.tools.manager import ToolManager
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,6 +113,71 @@ def require_uuid_header(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"{header} must be a valid UUID.",
         )
+
+
+#
+# IAM
+#
+# The current user is resolved by AuthenticationMiddleware (see
+# packages/api/middleware/authentication.py) and stashed on
+# request.state — it fails open, so current_user is None whenever no
+# token was presented or IAM rejected/couldn't be reached. Permission
+# checks below mirror that: they only enforce once a real, verified
+# user is present.
+#
+
+
+async def get_current_user(
+    request: Request,
+) -> CurrentUser | None:
+    return getattr(request.state, "current_user", None)
+
+
+def require_permission(code: str):
+    """
+    FastAPI dependency factory: raises 403 if a verified current user
+    lacks the given permission code. No-ops (fail-open) when there's
+    no verified user at all, matching AuthenticationMiddleware's
+    fail-open design — enforcement only turns on once real auth flows.
+    """
+
+    async def _check(
+        current_user: CurrentUser | None = Depends(get_current_user),
+    ) -> None:
+        if current_user is None:
+            return
+
+        if not any(
+            permission.code == code
+            for permission in current_user.permissions
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing required permission: {code}",
+            )
+
+    return _check
+
+
+def require_role(code: str):
+    """Same as require_permission, checked against roles instead."""
+
+    async def _check(
+        current_user: CurrentUser | None = Depends(get_current_user),
+    ) -> None:
+        if current_user is None:
+            return
+
+        if not any(
+            role.code == code
+            for role in current_user.roles
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing required role: {code}",
+            )
+
+    return _check
 
 
 #

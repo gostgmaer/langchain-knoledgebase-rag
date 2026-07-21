@@ -17,7 +17,7 @@ class IAMUsersSDK(BaseClient):
     ) -> None:
         super().__init__(
             client=client,
-            base_url=str(settings.url),
+            base_url=settings.base_url,
         )
 
     async def get_user(

@@ -12,6 +12,7 @@ from .ai import AIContainer
 # from package.conversation import ConversationContainer
 from packages.infrastructure.container.database import DatabaseContainer
 from packages.infrastructure.container.graph import GraphContainer
+from packages.infrastructure.container.iam import IAMContainer
 from packages.infrastructure.container.memory import MemoryContainer
 from packages.infrastructure.container.rag import RAGContainer
 from packages.infrastructure.container.repositories import RepositoryContainer
@@ -48,6 +49,14 @@ class ApplicationContainer(containers.DeclarativeContainer):
     repositories = providers.Container(
         RepositoryContainer,
         database=database,
+    )
+
+    #
+    # IAM
+    #
+
+    iam = providers.Container(
+        IAMContainer,
     )
 
     #
