@@ -11,4 +11,4 @@ class GraphVisualizer:
 
         Path(filename).write_bytes(png)
 
-        print(f"✅ Graph saved as {filename}")
+        print(f"Graph saved as {filename}")
