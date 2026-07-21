@@ -43,7 +43,7 @@ class BaseVectorStore(ABC):
     @abstractmethod
     async def similarity_search(
         self,
-        query: Embedding,
+        query_embedding: list[float],
         *,
         filters: SearchFilter,
         options: SearchOptions | None = None,
@@ -55,7 +55,7 @@ class BaseVectorStore(ABC):
     @abstractmethod
     async def mmr_search(
         self,
-        query: Embedding,
+        query_embedding: list[float],
         *,
         filters: SearchFilter,
         options: SearchOptions | None = None,

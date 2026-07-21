@@ -9,6 +9,7 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
+from packages.knowledge.exceptions import DocumentReadError
 from .base import BaseDocumentLoader
 
 
@@ -46,7 +47,7 @@ class JSONDocumentLoader(BaseDocumentLoader):
             )
 
         except Exception as exc:
-            raise self.handle_exception(
-                path,
-                exc,
-            )
+            raise DocumentReadError(
+                str(path),
+                str(exc),
+            ) from exc

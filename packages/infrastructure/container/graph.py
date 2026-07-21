@@ -10,10 +10,9 @@ from packages.graph.builder import GraphBuilder
 from packages.graph.manager import GraphManager
 from packages.graph.nodes import GraphNodes
 from packages.graph.router import GraphRouter
-from packages.knowledge.schemas import SearchResult
+from packages.knowledge.schemas import Citation, SearchResult
 from packages.memory.schemas import MemoryFact, MemoryType
 from packages.planner.models import Capability, ExecutionPlan, ExecutionStep
-from packages.rag.schemas import Citation
 from packages.prompts.builder import PromptBuilder
 from packages.prompts.system import get_base_system_prompt
 
@@ -88,7 +87,7 @@ class GraphContainer(containers.DeclarativeContainer):
 
     retrieve = providers.Factory(
         RetrieveNode,
-        retrieval_pipeline=rag.retriever,
+        knowledge_manager=rag.knowledge_manager,
     )
 
     tool = providers.Factory(

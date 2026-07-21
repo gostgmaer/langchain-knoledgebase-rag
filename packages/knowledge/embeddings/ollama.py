@@ -5,6 +5,7 @@ Ollama embedding provider.
 
 from __future__ import annotations
 
+from langchain_core.embeddings import Embeddings
 from langchain_ollama import OllamaEmbeddings
 
 from packages.config.loader import settings
@@ -22,9 +23,12 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
     def __init__(self) -> None:
 
         self._client = OllamaEmbeddings(
-            model=settings.embedding.model,
-            base_url=settings.ollama.base_url,
+            model=settings.rag.embedding_model,
         )
+
+    @property
+    def client(self) -> Embeddings:
+        return self._client
 
     async def embed(
         self,
@@ -51,3 +55,9 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
             chunk.embedding = vector
 
         return chunks
+
+    async def embed_query(
+        self,
+        text: str,
+    ) -> list[float]:
+        return await self._client.aembed_query(text)

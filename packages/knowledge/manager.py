@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from packages.domain.models.document import Document
 from packages.knowledge.embeddings.manager import EmbeddingManager
 from packages.knowledge.pipelines.ingestion import IngestionPipeline
 from packages.knowledge.retrievers.manager import RetrieverManager
-from packages.knowledge.retrievers.schemas import IngestionRequest
-from packages.knowledge.schemas import IngestionRequest
+from packages.knowledge.retrievers.schemas import RetrievalRequest
+from packages.knowledge.schemas import IngestionRequest, IngestionResponse
 from packages.knowledge.vectorstores.schema import (
     SearchFilter,
     SearchOptions,
@@ -37,20 +36,20 @@ class KnowledgeManager:
     async def ingest(
         self,
         request: IngestionRequest,
-    ) -> Document:
+    ) -> IngestionResponse:
         return await self.ingestion_pipeline.ingest(request)
 
     async def ingest_many(
         self,
         requests: list[IngestionRequest],
-    ) -> list[Document]:
-        documents: list[Document] = []
+    ) -> list[IngestionResponse]:
+        responses: list[IngestionResponse] = []
 
         for request in requests:
-            document = await self.ingestion_pipeline.ingest(request)
-            documents.append(document)
+            response = await self.ingestion_pipeline.ingest(request)
+            responses.append(response)
 
-        return documents
+        return responses
 
     # ------------------------------------------------------------------
     # Search
@@ -63,13 +62,9 @@ class KnowledgeManager:
         options: SearchOptions | None = None,
     ) -> list[SearchResult]:
 
-        query_embedding = await self.embedding_manager.embed_query(
-            query=query,
-            tenant_id=filters.tenant_id,
-            model_profile_id=filters.model_profile_id,
-        )
+        query_embedding = await self.embedding_manager.embed_query(query)
 
-        request = IngestionRequest(
+        request = RetrievalRequest(
             query_embedding=query_embedding,
             filters=filters,
             options=options,
@@ -115,7 +110,7 @@ class KnowledgeManager:
     async def reindex_document(
         self,
         document_id: UUID,
-    ) -> Document:
+    ):
         return await self.ingestion_pipeline.reindex_document(
             document_id=document_id,
         )

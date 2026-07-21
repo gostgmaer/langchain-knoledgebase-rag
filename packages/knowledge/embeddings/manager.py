@@ -5,6 +5,7 @@ Embedding manager.
 
 from __future__ import annotations
 
+from langchain_core.embeddings import Embeddings
 
 from packages.knowledge.schema.chunk import KnowledgeChunk
 from packages.shared.logging import get_logger
@@ -22,11 +23,16 @@ class EmbeddingManager:
 
     def __init__(self) -> None:
 
-        provider = EmbeddingFactory.create()
+        self._provider = EmbeddingFactory.create()
 
         self._pipeline = EmbeddingPipeline(
-            provider=provider,
+            provider=self._provider,
         )
+
+    @property
+    def client(self) -> Embeddings:
+        """The real, underlying LangChain Embeddings client."""
+        return self._provider.client
 
     async def embed(
         self,
@@ -39,3 +45,11 @@ class EmbeddingManager:
         )
 
         return await self._pipeline.run(chunks)
+
+    async def embed_query(
+        self,
+        text: str,
+    ) -> list[float]:
+        """Embed a single ad-hoc query, used at search time."""
+
+        return await self._provider.embed_query(text)

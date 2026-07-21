@@ -7,8 +7,7 @@ from __future__ import annotations
 from abc import ABC
 from abc import abstractmethod
 
-from packages.knowledge.splitters.schema import SplitRequest
-from packages.domain.models.document_chunk import DocumentChunk
+from langchain_core.documents import Document
 
 
 class BaseSplitter(ABC):
@@ -19,15 +18,15 @@ class BaseSplitter(ABC):
     @abstractmethod
     async def split(
         self,
-        request: SplitRequest,
-    ) -> list[DocumentChunk]:
+        documents: list[Document],
+    ) -> list[Document]:
         """
-        Split a document into chunks.
+        Split documents into chunks.
 
         Args:
-            request: Split request.
+            documents: Documents to split.
 
         Returns:
-            List of document chunks.
+            List of chunked documents.
         """
         raise NotImplementedError

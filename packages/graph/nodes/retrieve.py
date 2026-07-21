@@ -5,8 +5,8 @@ packages/graph/nodes/retrieve.py
 from __future__ import annotations
 
 from packages.graph.state import GraphState
-from packages.rag.pipelines.retrieval import RetrievalPipeline
-from packages.rag.schemas import RAGRequest
+from packages.knowledge.manager import KnowledgeManager
+from packages.knowledge.vectorstores.schema import SearchFilter
 
 
 class RetrieveNode:
@@ -22,9 +22,9 @@ class RetrieveNode:
 
     def __init__(
         self,
-        retrieval_pipeline: RetrievalPipeline,
+        knowledge_manager: KnowledgeManager,
     ) -> None:
-        self._retrieval = retrieval_pipeline
+        self._knowledge = knowledge_manager
 
     async def __call__(
         self,
@@ -33,16 +33,16 @@ class RetrieveNode:
 
         query = state["messages"][-1].content
 
-        results = await self._retrieval.retrieve(
-            RAGRequest(
+        results = await self._knowledge.search(
+            query=query,
+            filters=SearchFilter(
                 tenant_id=state["tenant_id"],
                 model_profile_id=state["model_profile_id"],
-                query=query,
-            )
+            ),
         )
 
         state["context"] = [
-            result.content
+            result.chunk.content
             for result in results
         ]
 

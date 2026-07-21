@@ -1,49 +1,44 @@
 from __future__ import annotations
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from packages.domain.models.document import Document
+from langchain_core.documents import Document as LangChainDocument
+
 from packages.domain.models.document_chunk import DocumentChunk
 from packages.domain.models.embedding import Embedding
 
-from packages.infrastructure.repositories.document import DocumentRepository
-from packages.infrastructure.repositories.document_chunk import (
-    DocumentChunkRepository,
-)
-from packages.infrastructure.repositories.embedding import (
-    EmbeddingRepository,
-)
-
 from packages.knowledge.embeddings.manager import EmbeddingManager
-from packages.knowledge.loaders.base import BaseDocumentLoader
+from packages.knowledge.loaders.manager import DocumentLoaderManager
 from packages.knowledge.processors.base import DocumentProcessor
-from packages.knowledge.schemas import IngestionRequest
+from packages.knowledge.schemas import IngestionRequest, IngestionResponse
 from packages.knowledge.splitters.base import BaseSplitter
+from packages.knowledge.vectorstores.manager import VectorStoreManager
 
 
 class IngestionPipeline:
     """
-    Handles the complete document ingestion workflow.
+    Handles the complete document ingestion workflow: load, clean,
+    split, embed, and store into the configured vector store.
+
+    Note: this stores chunks/embeddings in the vector store only. It
+    does not yet persist a durable `documents`/`document_chunks` row
+    in Postgres — that requires a KnowledgeBase + File subsystem that
+    doesn't exist yet (see docs/BUILD_STATUS.md Phase 8).
     """
 
     def __init__(
         self,
-        loader: BaseDocumentLoader,
+        loader: DocumentLoaderManager,
         transformer: DocumentProcessor,
         splitter: BaseSplitter,
         embedding_manager: EmbeddingManager,
-        document_repository: DocumentRepository,
-        chunk_repository: DocumentChunkRepository,
-        embedding_repository: EmbeddingRepository,
+        vector_store: VectorStoreManager,
     ) -> None:
         self.loader = loader
         self.transformer = transformer
         self.splitter = splitter
         self.embedding_manager = embedding_manager
-
-        self.document_repository = document_repository
-        self.chunk_repository = chunk_repository
-        self.embedding_repository = embedding_repository
+        self.vector_store = vector_store
 
     # ============================================================
     # Public
@@ -52,28 +47,28 @@ class IngestionPipeline:
     async def ingest(
         self,
         request: IngestionRequest,
-    ) -> Document:
+    ) -> IngestionResponse:
 
-        loaded_document = await self._load(request)
+        loaded_documents = await self._load(request)
 
-        markdown = await self._transform(
-            loaded_document,
-        )
+        cleaned_documents = await self._clean(loaded_documents)
 
-        chunks = await self._split(
-            markdown,
-            request,
-        )
+        chunked_documents = await self._split(cleaned_documents)
+
+        document_id = uuid4()
 
         embeddings = await self._embed(
-            chunks,
+            chunked_documents,
             request,
+            document_id,
         )
 
-        return await self._persist(
-            request,
-            chunks,
-            embeddings,
+        await self.vector_store.store.add_many(embeddings)
+
+        return IngestionResponse(
+            document_id=document_id,
+            chunk_count=len(chunked_documents),
+            embedding_count=len(embeddings),
         )
 
     async def delete_document(
@@ -82,31 +77,15 @@ class IngestionPipeline:
         document_id: UUID,
     ) -> None:
 
-        await self.embedding_repository.delete_by_document(
+        await self.vector_store.store.delete_document(
             tenant_id=tenant_id,
             document_id=document_id,
-        )
-
-        await self.chunk_repository.delete_by_document(
-            document_id=document_id,
-        )
-
-        await self.document_repository.delete(
-            document_id,
         )
 
     async def reindex_document(
         self,
         document_id: UUID,
-    ) -> Document:
-
-        document = await self.document_repository.get(
-            document_id,
-        )
-
-        if document is None:
-            raise ValueError("Document not found.")
-
+    ):
         raise NotImplementedError(
             "Reindex implementation will be added later."
         )
@@ -115,19 +94,16 @@ class IngestionPipeline:
         self,
         document_id: UUID,
     ) -> bool:
-
-        return await self.document_repository.exists(
-            document_id,
+        raise NotImplementedError(
+            "Existence check by document_id requires durable document "
+            "storage, not yet implemented."
         )
 
     async def count(
         self,
         tenant_id: UUID,
     ) -> int:
-
-        return await self.document_repository.count_by_tenant(
-            tenant_id,
-        )
+        return await self.vector_store.count(tenant_id)
 
     # ============================================================
     # Private
@@ -136,71 +112,55 @@ class IngestionPipeline:
     async def _load(
         self,
         request: IngestionRequest,
-    ):
-        return await self.loader.load(
-            request.file,
-        )
+    ) -> list[LangChainDocument]:
+        return await self.loader.load(request.file)
 
-    async def _transform(
+    async def _clean(
         self,
-        loaded_document,
-    ):
-        return await self.transformer.transform(
-            loaded_document,
-        )
+        documents: list[LangChainDocument],
+    ) -> list[LangChainDocument]:
+        return await self.transformer.process(documents)
 
     async def _split(
         self,
-        content: str,
-        request: IngestionRequest,
-    ) -> list[DocumentChunk]:
-
-        return await self.splitter.split(
-            tenant_id=request.tenant_id,
-            content=content,
-        )
+        documents: list[LangChainDocument],
+    ) -> list[LangChainDocument]:
+        return await self.splitter.split(documents)
 
     async def _embed(
         self,
-        chunks: list[DocumentChunk],
+        documents: list[LangChainDocument],
         request: IngestionRequest,
+        document_id: UUID,
     ) -> list[Embedding]:
 
-        return await self.embedding_manager.embed_documents(
-            chunks=chunks,
-            tenant_id=request.tenant_id,
-            model_profile_id=request.model_profile_id,
-        )
+        embeddings: list[Embedding] = []
 
-    async def _persist(
-        self,
-        request: IngestionRequest,
-        chunks: list[DocumentChunk],
-        embeddings: list[Embedding],
-    ) -> Document:
+        for index, document in enumerate(documents):
 
-        document = await self.document_repository.create(
-            tenant_id=request.tenant_id,
-            name=request.document_name,
-            metadata=request.metadata,
-        )
+            vector = await self.embedding_manager.embed_query(
+                document.page_content,
+            )
 
-        for chunk in chunks:
-            chunk.document_id = document.id
+            chunk = DocumentChunk(
+                id=uuid4(),
+                tenant_id=request.tenant_id,
+                document_id=document_id,
+                chunk_index=index,
+                content=document.page_content,
+                token_count=0,
+                character_count=len(document.page_content),
+                metadata_=document.metadata,
+            )
 
-        for embedding, chunk in zip(
-            embeddings,
-            chunks,
-            strict=True,
-        ):
-            embedding.chunk_id = chunk.id
+            embeddings.append(
+                Embedding(
+                    tenant_id=request.tenant_id,
+                    chunk_id=chunk.id,
+                    model_profile_id=request.model_profile_id,
+                    vector=vector,
+                    chunk=chunk,
+                )
+            )
 
-        await self.chunk_repository.create_many(
-            chunks,
-        )
-
-        await self.embedding_repository.create_many(
-            embeddings,
-        )
-
-        return document
+        return embeddings

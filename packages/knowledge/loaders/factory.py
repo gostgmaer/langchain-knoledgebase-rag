@@ -36,10 +36,10 @@ class LoaderFactory:
     @classmethod
     def create(
         cls,
-        path: Path,
+        path: str | Path,
     ) -> DocumentLoader:
 
-        extension = path.suffix.lower()
+        extension = Path(path).suffix.lower()
 
         loader = cls._loaders.get(extension)
 

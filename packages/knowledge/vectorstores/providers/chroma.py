@@ -6,6 +6,7 @@ from uuid import UUID
 import chromadb
 from chromadb.api.models.Collection import Collection
 
+from packages.domain.models.document_chunk import DocumentChunk
 from packages.domain.models.embedding import Embedding
 from packages.knowledge.vectorstores.base import BaseVectorStore
 from packages.knowledge.vectorstores.schema import (
@@ -39,7 +40,7 @@ class ChromaVectorStore(BaseVectorStore):
 
     async def similarity_search(
         self,
-        query_embedding: Embedding,
+        query_embedding: list[float],
         *,
         filters: SearchFilter,
         options: SearchOptions | None = None,
@@ -47,24 +48,29 @@ class ChromaVectorStore(BaseVectorStore):
 
         options = options or SearchOptions()
 
-        where: dict[str, object] = {
-            "tenant_id": str(filters.tenant_id),
-            "model_profile_id": str(filters.model_profile_id),
-        }
+        conditions: list[dict[str, object]] = [
+            {"tenant_id": str(filters.tenant_id)},
+            {"model_profile_id": str(filters.model_profile_id)},
+        ]
 
         if filters.document_id:
-            where["document_id"] = str(filters.document_id)
+            conditions.append({"document_id": str(filters.document_id)})
 
         if filters.metadata:
-            where.update(filters.metadata)
+            conditions.extend(
+                {key: value} for key, value in filters.metadata.items()
+            )
+
+        where = {"$and": conditions} if len(conditions) > 1 else conditions[0]
 
         results = self.collection.query(
-            query_embeddings=[query_embedding.vector],
+            query_embeddings=[query_embedding],
             n_results=options.limit,
-            where=where if where else None,
+            where=where,
             include=[
                 "metadatas",
                 "distances",
+                "documents",
             ],
         )
 
@@ -73,6 +79,7 @@ class ChromaVectorStore(BaseVectorStore):
         ids = results.get("ids", [[]])[0]
         metadatas = results.get("metadatas", [[]])[0]
         distances = results.get("distances", [[]])[0]
+        contents = results.get("documents", [[]])[0]
 
         for index, chunk_id in enumerate(ids):
 
@@ -88,27 +95,119 @@ class ChromaVectorStore(BaseVectorStore):
             ):
                 continue
 
-            embedding = Embedding(
-                chunk_id=UUID(chunk_id),
+            content = contents[index] if index < len(contents) else ""
+
+            chunk = DocumentChunk(
+                id=UUID(chunk_id),
                 tenant_id=UUID(metadata["tenant_id"]),
-                model_profile_id=UUID(
-                    metadata["model_profile_id"]
-                ),
-                vector=[],
+                document_id=UUID(metadata.get("document_id", chunk_id)),
+                chunk_index=int(metadata.get("chunk_index", 0)),
+                content=content,
+                token_count=int(metadata.get("token_count", 0)),
+                character_count=len(content),
+                metadata_=metadata,
             )
 
             search_results.append(
                 SearchResult(
-                    embedding=embedding,
+                    chunk=chunk,
                     score=similarity,
                 )
             )
 
         return search_results
 
+    async def add(
+        self,
+        embedding: Embedding,
+    ) -> None:
+
+        chunk = embedding.chunk
+
+        self.collection.add(
+            ids=[str(embedding.chunk_id)],
+            embeddings=[embedding.vector],
+            documents=[chunk.content if chunk else ""],
+            metadatas=[
+                {
+                    "tenant_id": str(embedding.tenant_id),
+                    "model_profile_id": str(embedding.model_profile_id),
+                    "document_id": str(chunk.document_id) if chunk else "",
+                    "chunk_index": chunk.chunk_index if chunk else 0,
+                }
+            ],
+        )
+
+    async def add_many(
+        self,
+        embeddings: list[Embedding],
+    ) -> None:
+
+        for embedding in embeddings:
+            await self.add(embedding)
+
+    async def delete_chunk(
+        self,
+        tenant_id: UUID,
+        chunk_id: UUID,
+    ) -> int:
+
+        existing = self.collection.get(
+            ids=[str(chunk_id)],
+            where={"tenant_id": str(tenant_id)},
+            include=[],
+        )
+
+        if not existing["ids"]:
+            return 0
+
+        self.collection.delete(ids=[str(chunk_id)])
+
+        return len(existing["ids"])
+
+    async def delete_document(
+        self,
+        tenant_id: UUID,
+        document_id: UUID,
+    ) -> int:
+
+        existing = self.collection.get(
+            where={
+                "$and": [
+                    {"tenant_id": str(tenant_id)},
+                    {"document_id": str(document_id)},
+                ]
+            },
+            include=[],
+        )
+
+        if not existing["ids"]:
+            return 0
+
+        self.collection.delete(ids=existing["ids"])
+
+        return len(existing["ids"])
+
+    async def clear(
+        self,
+        tenant_id: UUID,
+    ) -> int:
+
+        existing = self.collection.get(
+            where={"tenant_id": str(tenant_id)},
+            include=[],
+        )
+
+        if not existing["ids"]:
+            return 0
+
+        self.collection.delete(ids=existing["ids"])
+
+        return len(existing["ids"])
+
     async def mmr_search(
         self,
-        query_embedding: Embedding,
+        query_embedding: list[float],
         *,
         filters: SearchFilter,
         options: SearchOptions | None = None,

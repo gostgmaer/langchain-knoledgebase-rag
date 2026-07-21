@@ -58,6 +58,22 @@ class SearchResult:
 
 
 # ============================================================
+# Citation
+# ============================================================
+
+@dataclass(slots=True)
+class Citation:
+    """Citation returned alongside an AI response."""
+
+    document_id: UUID
+    chunk_id: UUID
+
+    chunk_index: int
+
+    score: float
+
+
+# ============================================================
 # Delete
 # ============================================================
 

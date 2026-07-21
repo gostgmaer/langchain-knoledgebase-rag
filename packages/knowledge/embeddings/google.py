@@ -4,6 +4,7 @@ Google embedding provider.
 
 from __future__ import annotations
 
+from langchain_core.embeddings import Embeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from packages.config.loader import settings
@@ -21,8 +22,13 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
     def __init__(self) -> None:
 
         self._client = GoogleGenerativeAIEmbeddings(
-            model=settings.embedding.model,
+            model=settings.rag.embedding_model,
+            google_api_key=settings.ai.google_api_key,
         )
+
+    @property
+    def client(self) -> Embeddings:
+        return self._client
 
     async def embed(
         self,
@@ -49,3 +55,9 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
             chunk.embedding = vector
 
         return chunks
+
+    async def embed_query(
+        self,
+        text: str,
+    ) -> list[float]:
+        return await self._client.aembed_query(text)

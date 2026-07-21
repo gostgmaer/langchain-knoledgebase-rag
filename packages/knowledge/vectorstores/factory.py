@@ -20,9 +20,9 @@ class VectorStoreFactory:
         chroma_client: chromadb.ClientAPI | None = None,
     ) -> BaseVectorStore:
 
-        provider = settings.vector_store_provider.lower()
+        provider = settings.rag.vector_store_backend.lower()
 
-        if provider == "postgres":
+        if provider == "pgvector":
             return PostgresVectorStore(
                 session=session,
             )
@@ -35,7 +35,7 @@ class VectorStoreFactory:
 
             return ChromaVectorStore(
                 client=chroma_client,
-                collection_name=settings.chroma_collection,
+                collection_name=settings.rag.vector_collection_name,
             )
 
         raise ValueError(

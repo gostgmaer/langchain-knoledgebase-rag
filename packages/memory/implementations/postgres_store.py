@@ -18,7 +18,7 @@ from packages.memory.schemas import (
     UpdateMemoryRequest,
 )
 from packages.memory.store import MemoryStore
-from packages.rag.embeddings import EmbeddingManager
+from packages.knowledge.embeddings.manager import EmbeddingManager
 
 
 class PostgresMemoryStore(MemoryStore):

@@ -19,7 +19,7 @@ class EmbeddingFactory:
     @staticmethod
     def create() -> EmbeddingProvider:
 
-        provider = settings.embedding.provider.lower()
+        provider = settings.rag.embedding_provider.lower()
 
         match provider:
 

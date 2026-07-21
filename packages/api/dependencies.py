@@ -14,7 +14,6 @@ from packages.conversation.manager import ConversationManager
 from packages.graph.manager import GraphManager
 from packages.infrastructure.container import ApplicationContainer
 from packages.memory.manager import MemoryManager
-from packages.rag.manager import RAGManager
 from packages.tools.manager import ToolManager
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -161,18 +160,6 @@ async def get_graph_manager(
 async def get_memory_manager(
     manager: MemoryManager = Depends(Provide[ApplicationContainer.memory.manager]),
 ) -> MemoryManager:
-    return manager
-
-
-#
-# RAG
-#
-
-
-@inject
-async def get_rag_manager(
-    manager: RAGManager = Depends(Provide[ApplicationContainer.rag.manager]),
-) -> RAGManager:
     return manager
 
 

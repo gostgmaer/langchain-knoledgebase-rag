@@ -18,14 +18,13 @@ from packages.knowledge.exceptions import (
 from packages.knowledge.interfaces import DocumentLoader
 
 
-def __init__(self, logger: get_logger) -> None:
-    self._logger = logger
-
-
 class BaseDocumentLoader(DocumentLoader, ABC):
     """Base class for all document loaders."""
 
     loader_name: str = "base"
+
+    def __init__(self, logger=None) -> None:
+        self._logger = logger or get_logger(self.__class__.__module__)
 
     async def load(self, path: Path) -> list[Document]:
         raise NotImplementedError
@@ -72,7 +71,7 @@ class BaseDocumentLoader(DocumentLoader, ABC):
 
         self.validate(path)
 
-        logger.info(
+        self._logger.info(
             "Loading document",
             loader=self.loader_name,
             path=str(path),
@@ -86,7 +85,7 @@ class BaseDocumentLoader(DocumentLoader, ABC):
                 path,
             )
 
-            logger.info(
+            self._logger.info(
                 "Document loaded",
                 loader=self.loader_name,
                 documents=len(documents),
@@ -95,7 +94,7 @@ class BaseDocumentLoader(DocumentLoader, ABC):
             return documents
 
         except Exception as exc:
-            logger.exception(
+            self._logger.exception(
                 "Failed loading document",
                 loader=self.loader_name,
                 path=str(path),

@@ -1,26 +1,39 @@
-# Container rag setup
+# Container rag setup — builds the packages.knowledge document/RAG stack.
 from __future__ import annotations
 
+import chromadb
 from dependency_injector import containers
 from dependency_injector import providers
 
-from packages.rag.embeddings import EmbeddingManager
-from packages.rag.indexer import DocumentIndexer
-from packages.rag.loader import DocumentLoader
-from packages.rag.manager import RAGManager
-from packages.rag.pipeline import RAGPipeline
-from packages.rag.pipelines.retrieval import RetrievalPipeline
-from packages.rag.splitter import DocumentSplitter
-from packages.rag.vectorstore import VectorStoreManager
+from packages.config.loader import settings as app_settings
+from packages.knowledge.embeddings.manager import EmbeddingManager
+from packages.knowledge.loaders.manager import DocumentLoaderManager
 from packages.knowledge.manager import KnowledgeManager
-from packages.rag.builders.context import ContextBuilder
-from packages.rag.builders.prompt import PromptBuilder
-from packages.rag.builders.citation import CitationBuilder
+from packages.knowledge.pipelines.ingestion import IngestionPipeline
+from packages.knowledge.processors.cleaner import DocumentCleaner
+from packages.knowledge.retrievers.manager import RetrieverManager
+from packages.knowledge.retrievers.providers.similarity import (
+    SimilarityRetriever,
+)
+from packages.knowledge.splitters.recursive import RecursiveDocumentSplitter
+from packages.knowledge.vectorstores.manager import VectorStoreManager
+from packages.knowledge.vectorstores.providers.chroma import ChromaVectorStore
+
+
+def _build_chroma_client() -> chromadb.ClientAPI:
+    return chromadb.PersistentClient(
+        path=app_settings.rag.chroma_directory,
+    )
 
 
 class RAGContainer(
     containers.DeclarativeContainer,
 ):
+    """
+    Wires the packages.knowledge document-processing/RAG stack: real
+    loaders (PDF/TXT/MD/DOCX/HTML/JSON/CSV), real cleaning, real
+    splitting, real embeddings, and a real Chroma-backed vector store.
+    """
 
     settings = providers.DependenciesContainer()
 
@@ -32,54 +45,55 @@ class RAGContainer(
         EmbeddingManager,
     )
 
+    chroma_client = providers.Singleton(
+        _build_chroma_client,
+    )
+
+    vectorstore_backend = providers.Singleton(
+        ChromaVectorStore,
+        client=chroma_client,
+        collection_name=app_settings.rag.vector_collection_name,
+    )
+
     vectorstore = providers.Singleton(
         VectorStoreManager,
-        embeddings=embeddings,
+        store=vectorstore_backend,
     )
 
     loader = providers.Singleton(
-        DocumentLoader,
+        DocumentLoaderManager,
+    )
+
+    cleaner = providers.Singleton(
+        DocumentCleaner,
     )
 
     splitter = providers.Singleton(
-        DocumentSplitter,
+        RecursiveDocumentSplitter,
     )
 
-    indexer = providers.Singleton(
-        DocumentIndexer,
+    ingestion_pipeline = providers.Singleton(
+        IngestionPipeline,
         loader=loader,
+        transformer=cleaner,
         splitter=splitter,
-        embeddings=embeddings,
-        vectorstore=vectorstore,
+        embedding_manager=embeddings,
+        vector_store=vectorstore,
+    )
+
+    similarity_retriever = providers.Singleton(
+        SimilarityRetriever,
+        vector_store=vectorstore,
+    )
+
+    retriever_manager = providers.Singleton(
+        RetrieverManager,
+        retriever=similarity_retriever,
     )
 
     knowledge_manager = providers.Singleton(
         KnowledgeManager,
-        ingestion_pipeline=providers.Object(None),
-        embedding_manager=providers.Object(None),
-        retriever_manager=providers.Object(None),
-    )
-
-    retriever = providers.Singleton(
-        RetrievalPipeline,
-        vectorstore=vectorstore,
-    )
-
-    pipeline = providers.Singleton(
-        RAGPipeline,
-        retriever=retriever,
-        indexer=indexer,
-    )
-
-    context_builder = providers.Singleton(ContextBuilder)
-    prompt_builder = providers.Singleton(PromptBuilder)
-    citation_builder = providers.Singleton(CitationBuilder)
-
-    manager = providers.Singleton(
-        RAGManager,
-        retrieval_pipeline=retriever,
-        context_builder=context_builder,
-        prompt_builder=prompt_builder,
-        citation_builder=citation_builder,
-        chat_service=services.chat,
+        ingestion_pipeline=ingestion_pipeline,
+        embedding_manager=embeddings,
+        retriever_manager=retriever_manager,
     )

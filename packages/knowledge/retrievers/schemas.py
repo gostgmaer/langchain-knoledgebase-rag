@@ -4,6 +4,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import UUID
 
+from packages.knowledge.vectorstores.schema import SearchFilter, SearchOptions
+
+
+# ============================================================
+# Retrieval
+# ============================================================
+
+@dataclass(slots=True)
+class RetrievalRequest:
+    """
+    Request to retrieve chunks for an already-embedded query.
+    """
+
+    query_embedding: list[float]
+
+    filters: SearchFilter
+
+    options: SearchOptions | None = None
+
 
 # ============================================================
 # Ingestion
@@ -12,7 +31,8 @@ from uuid import UUID
 @dataclass(slots=True)
 class IngestionRequest:
     """
-    Request for ingesting a document into the knowledge base.
+    Request for ingesting a document into the knowledge base.continue
+    
     """
 
     tenant_id: UUID

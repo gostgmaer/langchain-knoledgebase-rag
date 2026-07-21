@@ -13,7 +13,7 @@ from packages.memory.schemas import (
     SearchMemoryResponse,
     SearchResult,
 )
-from packages.rag.embeddings import EmbeddingManager
+from packages.knowledge.embeddings.manager import EmbeddingManager
 
 
 class PgVectorMemoryRetriever(MemoryRetriever):

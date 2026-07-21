@@ -4,6 +4,7 @@ OpenAI embedding provider.
 
 from __future__ import annotations
 
+from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
 
 from packages.config.loader import settings
@@ -21,9 +22,13 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def __init__(self) -> None:
 
         self._client = OpenAIEmbeddings(
-            model=settings.embedding.model,
-            api_key=settings.openai.api_key,
+            model=settings.rag.embedding_model,
+            api_key=settings.ai.openai_api_key,
         )
+
+    @property
+    def client(self) -> Embeddings:
+        return self._client
 
     async def embed(
         self,
@@ -50,3 +55,9 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             chunk.embedding = vector
 
         return chunks
+
+    async def embed_query(
+        self,
+        text: str,
+    ) -> list[float]:
+        return await self._client.aembed_query(text)

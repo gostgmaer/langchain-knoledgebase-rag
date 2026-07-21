@@ -21,7 +21,7 @@ class VectorStoreManager:
 
     async def similarity_search(
         self,
-        query_embedding: Embedding,
+        query_embedding: list[float],
         *,
         filters: SearchFilter,
         options: SearchOptions | None = None,
@@ -34,7 +34,7 @@ class VectorStoreManager:
 
     async def mmr_search(
         self,
-        query_embedding: Embedding,
+        query_embedding: list[float],
         *,
         filters: SearchFilter,
         options: SearchOptions | None = None,

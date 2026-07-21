@@ -10,10 +10,10 @@ from langchain_core.documents import Document
 
 from packages.config.loader import settings
 
-from .base import DocumentSplitter
+from .base import BaseSplitter
 
 
-class RecursiveDocumentSplitter(DocumentSplitter):
+class RecursiveDocumentSplitter(BaseSplitter):
 
     def __init__(self) -> None:
 

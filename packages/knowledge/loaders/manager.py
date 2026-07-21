@@ -20,8 +20,10 @@ class DocumentLoaderManager:
 
     async def load(
         self,
-        path: Path,
+        path: str | Path,
     ) -> list[Document]:
+
+        path = Path(path)
 
         logger.info(
             "Loading document",

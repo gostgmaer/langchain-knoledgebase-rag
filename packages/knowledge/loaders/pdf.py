@@ -9,7 +9,6 @@ from pathlib import Path
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
 
-from packages.shared.logging import get_logger
 from .base import BaseDocumentLoader
 
 
@@ -17,9 +16,6 @@ class PDFDocumentLoader(BaseDocumentLoader):
     """Loads PDF documents using LangChain."""
 
     loader_name = "pdf"
-
-    def __init__(self, logger: get_logger) -> None:
-        super().__init__(logger)
 
     async def load(
         self,

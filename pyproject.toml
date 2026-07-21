@@ -12,6 +12,7 @@ dependencies = [
     "asyncpg>=0.31.0",
     "beautifulsoup4>=4.15.0",
     "dependency-injector>=4.49.1",
+    "docx2txt>=0.9",
     "faiss-cpu>=1.14.3",
     "fastapi>=0.139.2",
     "google-genai>=2.12.1",

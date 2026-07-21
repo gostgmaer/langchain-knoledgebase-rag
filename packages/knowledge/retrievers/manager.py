@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from packages.knowledge.retrievers.base import BaseRetriever
-from packages.knowledge.retrievers.schemas import IngestionRequest
+from packages.knowledge.retrievers.schemas import RetrievalRequest
 from packages.knowledge.vectorstores.schema import SearchResult
 
 
@@ -16,7 +16,7 @@ class RetrieverManager:
 
     async def retrieve(
         self,
-        request: IngestionRequest,
+        request: RetrievalRequest,
     ) -> list[SearchResult]:
 
         return await self.retriever.retrieve(request)

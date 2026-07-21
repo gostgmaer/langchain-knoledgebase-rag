@@ -9,9 +9,8 @@ from langgraph.graph.message import AnyMessage, add_messages
 from typing_extensions import Annotated, TypedDict
 from packages.planner.models import ExecutionPlan
 
-from packages.knowledge.schemas import SearchResult
+from packages.knowledge.schemas import Citation, SearchResult
 from packages.memory.schemas import MemoryFact
-from packages.rag.schemas import Citation
 
 
 def merge_usage(

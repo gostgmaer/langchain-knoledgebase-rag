@@ -7,14 +7,14 @@ from __future__ import annotations
 
 from langchain_core.documents import Document
 
-from .base import DocumentSplitter
+from .base import BaseSplitter
 
 
 class DocumentSplitterPipeline:
 
     def __init__(
         self,
-        splitter: DocumentSplitter,
+        splitter: BaseSplitter,
     ) -> None:
 
         self._splitter = splitter

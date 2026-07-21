@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import delete
 from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +30,7 @@ class PostgresVectorStore(BaseVectorStore):
 
     async def similarity_search(
         self,
-        query_embedding: Embedding,
+        query_embedding: list[float],
         *,
         filters: SearchFilter,
         options: SearchOptions | None = None,
@@ -44,7 +45,7 @@ class PostgresVectorStore(BaseVectorStore):
             select(
                 Embedding,
                 Embedding.vector.cosine_distance(
-                    query_embedding.vector,
+                    query_embedding,
                 ).label("distance"),
             )
             .options(
@@ -89,7 +90,7 @@ class PostgresVectorStore(BaseVectorStore):
 
             results.append(
                 SearchResult(
-                    embedding=embedding,
+                    chunk=embedding.chunk,
                     score=similarity,
                 )
             )
@@ -98,7 +99,7 @@ class PostgresVectorStore(BaseVectorStore):
 
     async def mmr_search(
         self,
-        query_embedding: Embedding,
+        query_embedding: list[float],
         *,
         filters: SearchFilter,
         options: SearchOptions | None = None,
@@ -110,6 +111,65 @@ class PostgresVectorStore(BaseVectorStore):
         raise NotImplementedError(
             "MMR search has not been implemented."
         )
+
+    async def add(
+        self,
+        embedding: Embedding,
+    ) -> None:
+
+        self.session.add(embedding)
+        await self.session.flush()
+
+    async def add_many(
+        self,
+        embeddings: list[Embedding],
+    ) -> None:
+
+        self.session.add_all(embeddings)
+        await self.session.flush()
+
+    async def delete_chunk(
+        self,
+        tenant_id: UUID,
+        chunk_id: UUID,
+    ) -> int:
+
+        stmt = delete(Embedding).where(
+            Embedding.tenant_id == tenant_id,
+            Embedding.chunk_id == chunk_id,
+        )
+
+        result = await self.session.execute(stmt)
+
+        return result.rowcount or 0
+
+    async def delete_document(
+        self,
+        tenant_id: UUID,
+        document_id: UUID,
+    ) -> int:
+
+        stmt = delete(Embedding).where(
+            Embedding.tenant_id == tenant_id,
+            Embedding.chunk.has(document_id=document_id),
+        )
+
+        result = await self.session.execute(stmt)
+
+        return result.rowcount or 0
+
+    async def clear(
+        self,
+        tenant_id: UUID,
+    ) -> int:
+
+        stmt = delete(Embedding).where(
+            Embedding.tenant_id == tenant_id,
+        )
+
+        result = await self.session.execute(stmt)
+
+        return result.rowcount or 0
 
     async def count(
         self,
