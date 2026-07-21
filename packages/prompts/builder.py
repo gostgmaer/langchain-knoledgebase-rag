@@ -59,44 +59,49 @@ class PromptBuilder:
         messages: list[BaseMessage],
     ) -> list[BaseMessage]:
 
-        template_messages: list[tuple[str, str] | MessagesPlaceholder] = [
-            ("system", "{system_prompt}"),
-        ]
-        variables: dict[str, Any] = {
-            "system_prompt": system_prompt,
-        }
-
-        #
-        # Long-Term Memory
-        #
+        # Memory/context are folded into the single system message, not
+        # appended as separate "human" turns — as separate human messages
+        # they read to the model as things the *user* just typed, which
+        # caused real live confusion (a retrieved chunk got treated as
+        # "information you have provided", and empty-context turns had no
+        # signal that retrieval ran at all vs. never happened).
+        sections = [system_prompt]
 
         if memories:
-            template_messages.append(
-                ("human", "Known facts about the user:\n\n{memory_text}")
-            )
-            variables["memory_text"] = "\n".join(
-                f"- {memory.content}" for memory in memories
+            memory_text = "\n".join(f"- {memory.content}" for memory in memories)
+            sections.append(
+                "Known facts about the user, from long-term memory "
+                f"(not written by the user in this message):\n\n{memory_text}"
             )
 
-        #
-        # RAG Context
-        #
-
-        if context:
-            budgeted_context = self._dedup_and_budget(context)
+        if context is not None:
+            budgeted_context = self._dedup_and_budget(context) if context else []
             if budgeted_context:
-                template_messages.append(
-                    ("human", "Relevant knowledge:\n\n{context}")
+                context_text = "\n\n".join(budgeted_context)
+                sections.append(
+                    "Relevant knowledge retrieved from the knowledge base for "
+                    "this specific question (not written by the user — this is "
+                    "retrieval output, use it to answer if relevant):\n\n"
+                    f"{context_text}"
                 )
-                variables["context"] = "\n\n".join(budgeted_context)
+            else:
+                sections.append(
+                    "The knowledge base was searched for this specific question "
+                    "and no matching documents were found. Say so plainly if "
+                    "relevant — do not claim you have no knowledge base at all, "
+                    "and do not invent a public/web search you did not perform."
+                )
 
-        #
-        # Conversation
-        #
+        variables: dict[str, Any] = {
+            "system_prompt": "\n\n---\n\n".join(sections),
+            "conversation": messages,
+        }
 
-        template_messages.append(MessagesPlaceholder("conversation"))
-        variables["conversation"] = messages
-
-        template = ChatPromptTemplate.from_messages(template_messages)
+        template = ChatPromptTemplate.from_messages(
+            [
+                ("system", "{system_prompt}"),
+                MessagesPlaceholder("conversation"),
+            ]
+        )
 
         return template.invoke(variables).to_messages()

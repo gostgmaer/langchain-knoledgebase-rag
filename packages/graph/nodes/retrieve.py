@@ -78,6 +78,13 @@ class RetrieveNode:
             top_k=top_k,
         )
 
+        # Cross-encoder scores are unbounded, not probabilities — with a
+        # small candidate pool, "best of what's available" can still be a
+        # confidently irrelevant match. Drop anything below the relevance
+        # floor rather than surface it as if it answered the question.
+        min_score = settings.rag.min_relevance_score
+        reranked = [result for result in reranked if result.score >= min_score]
+
         state["context"] = [result.chunk.content for result in reranked]
 
         state["search_results"] = [
