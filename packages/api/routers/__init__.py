@@ -9,7 +9,7 @@ from packages.api.routers.conversations import router as conversation_router
 # from .documents import router as document_router
 # from .feedback import router as feedback_router
 from packages.api.routers.health import router as health_router
-from packages.api.security import get_tenant_id
+from packages.api.security import get_bearer_token, get_tenant_id
 
 # from .knowledge_bases import router as knowledge_base_router
 # from .models import router as model_router
@@ -18,7 +18,10 @@ from packages.api.security import get_tenant_id
 # from .tools import router as tool_router
 api_router = APIRouter(
         prefix="/api/v1",
-        dependencies=[Depends(get_tenant_id)],
+        dependencies=[
+            Depends(get_tenant_id),
+            Depends(get_bearer_token),
+        ],
     )
 
 # api_router = APIRouter(prefix="/api/v1")
