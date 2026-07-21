@@ -31,3 +31,7 @@ class RAGSettings(BaseSettings):
         " ",
         "",
     ]
+
+    retrieval_strategy: str = Field(default="hybrid", alias="RETRIEVAL_STRATEGY")
+    max_results: int = Field(default=5, alias="RAG_MAX_RESULTS")
+    context_token_budget: int = Field(default=4000, alias="RAG_CONTEXT_TOKEN_BUDGET")

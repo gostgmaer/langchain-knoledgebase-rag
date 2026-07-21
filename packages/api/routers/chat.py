@@ -16,6 +16,7 @@ from packages.api.responses import ApiResponse
 from packages.api.schemas.chat import (
     ChatRequestSchema,
     ChatResponseSchema,
+    CitationSchema,
 )
 from packages.application.dto.chat import ChatRequest
 from packages.conversation.bootstrap import (
@@ -100,6 +101,15 @@ async def chat(
             conversation_id=response.conversation_id,
             response=response.response,
             model=agent.llm_model,
+            citations=[
+                CitationSchema(
+                    document_id=citation.document_id,
+                    chunk_id=citation.chunk_id,
+                    chunk_index=citation.chunk_index,
+                    score=citation.score,
+                )
+                for citation in response.citations
+            ],
         ),
     )
 

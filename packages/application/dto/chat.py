@@ -19,6 +19,13 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 
+class CitationDTO(BaseModel):
+    document_id: UUID
+    chunk_id: UUID
+    chunk_index: int
+    score: float
+
+
 class ChatResponse(BaseModel):
     conversation_id: UUID
 
@@ -27,3 +34,5 @@ class ChatResponse(BaseModel):
     assistant_message_id: UUID
 
     response: str
+
+    citations: list[CitationDTO] = Field(default_factory=list)

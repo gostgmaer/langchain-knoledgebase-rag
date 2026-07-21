@@ -73,6 +73,8 @@ class GraphState(TypedDict, total=False):
     search_results: list[SearchResult]
     context: list[str]
     citations: list[Citation]
+    rewritten_query: str | None
+    expanded_queries: list[str]
 
     #
     # Tools

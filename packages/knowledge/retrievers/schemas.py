@@ -21,6 +21,8 @@ class RetrievalRequest:
 
     filters: SearchFilter
 
+    query: str = ""
+
     options: SearchOptions | None = None
 
 

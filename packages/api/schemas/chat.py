@@ -32,6 +32,24 @@ class ChatRequestSchema(BaseModel):
     stream: bool = False
 
 
+class CitationSchema(BaseModel):
+    """
+    A single retrieved-chunk citation backing part of the response.
+    """
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    document_id: UUID
+
+    chunk_id: UUID
+
+    chunk_index: int
+
+    score: float
+
+
 class ChatResponseSchema(BaseModel):
     """
     Chat response.
@@ -48,3 +66,5 @@ class ChatResponseSchema(BaseModel):
     model: str
 
     usage: dict[str, int] = Field(default_factory=dict)
+
+    citations: list[CitationSchema] = Field(default_factory=list)

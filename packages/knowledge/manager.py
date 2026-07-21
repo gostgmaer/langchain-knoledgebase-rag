@@ -67,6 +67,7 @@ class KnowledgeManager:
         request = RetrievalRequest(
             query_embedding=query_embedding,
             filters=filters,
+            query=query,
             options=options,
         )
 

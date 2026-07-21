@@ -65,6 +65,19 @@ class BaseVectorStore(ABC):
         """
 
     @abstractmethod
+    async def list_chunks(
+        self,
+        *,
+        filters: SearchFilter,
+        limit: int = 500,
+    ) -> list[SearchResult]:
+        """
+        Fetch a bounded pool of chunks matching filters, unranked by
+        similarity. Used as the candidate pool for keyword-based
+        (BM25) scoring in hybrid retrieval.
+        """
+
+    @abstractmethod
     async def delete_chunk(
         self,
         tenant_id: UUID,

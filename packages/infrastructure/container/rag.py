@@ -11,10 +11,9 @@ from packages.knowledge.loaders.manager import DocumentLoaderManager
 from packages.knowledge.manager import KnowledgeManager
 from packages.knowledge.pipelines.ingestion import IngestionPipeline
 from packages.knowledge.processors.cleaner import DocumentCleaner
+from packages.knowledge.reranking.cross_encoder import CrossEncoderReranker
+from packages.knowledge.retrievers.factory import RetrieverFactory
 from packages.knowledge.retrievers.manager import RetrieverManager
-from packages.knowledge.retrievers.providers.similarity import (
-    SimilarityRetriever,
-)
 from packages.knowledge.splitters.factory import SplitterFactory
 from packages.knowledge.splitters.markdown import MarkdownDocumentSplitter
 from packages.knowledge.splitters.recursive import RecursiveDocumentSplitter
@@ -114,14 +113,21 @@ class RAGContainer(
         document_repository=repositories.document,
     )
 
-    similarity_retriever = providers.Singleton(
-        SimilarityRetriever,
+    # Lazy, not eager — constructed on first real use so that the
+    # cross-encoder's ~90MB model download doesn't happen at app
+    # startup / dev server boot.
+    reranker = providers.Singleton(
+        CrossEncoderReranker,
+    )
+
+    retriever = providers.Singleton(
+        RetrieverFactory.create,
         vector_store=vectorstore,
     )
 
     retriever_manager = providers.Singleton(
         RetrieverManager,
-        retriever=similarity_retriever,
+        retriever=retriever,
     )
 
     knowledge_manager = providers.Factory(

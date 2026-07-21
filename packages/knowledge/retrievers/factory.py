@@ -19,7 +19,7 @@ class RetrieverFactory:
         vector_store: VectorStoreManager,
     ) -> BaseRetriever:
 
-        strategy = getattr(settings, "retrieval_strategy", "similarity").lower()
+        strategy = settings.rag.retrieval_strategy.lower()
 
         if strategy == "similarity":
             return SimilarityRetriever(vector_store)

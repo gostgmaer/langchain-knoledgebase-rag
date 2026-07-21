@@ -45,6 +45,17 @@ class VectorStoreManager:
             options=options,
         )
 
+    async def list_chunks(
+        self,
+        *,
+        filters: SearchFilter,
+        limit: int = 500,
+    ) -> list[SearchResult]:
+        return await self.store.list_chunks(
+            filters=filters,
+            limit=limit,
+        )
+
     async def count(
         self,
         tenant_id: UUID,

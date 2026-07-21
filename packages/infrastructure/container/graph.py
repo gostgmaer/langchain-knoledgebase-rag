@@ -17,6 +17,7 @@ from packages.prompts.builder import PromptBuilder
 from packages.prompts.system import get_base_system_prompt
 
 from packages.planner.planner import GraphPlanner
+from packages.planner.query_analyzer import QueryAnalyzer
 from packages.graph.nodes.load_memory import LoadMemoryNode
 from packages.graph.nodes.retrieve import RetrieveNode
 from packages.graph.nodes.tool import GraphToolNode
@@ -76,8 +77,14 @@ class GraphContainer(containers.DeclarativeContainer):
     # request-scoped session exists — and then every later request would
     # silently reuse that one stale, never-committed session forever.
 
+    query_analyzer = providers.Factory(
+        QueryAnalyzer,
+        llm=ai.manager,
+    )
+
     planner = providers.Factory(
         GraphPlanner,
+        query_analyzer=query_analyzer,
     )
 
     load_memory = providers.Factory(
@@ -88,6 +95,7 @@ class GraphContainer(containers.DeclarativeContainer):
     retrieve = providers.Factory(
         RetrieveNode,
         knowledge_manager=rag.knowledge_manager,
+        reranker=rag.reranker,
     )
 
     tool = providers.Factory(

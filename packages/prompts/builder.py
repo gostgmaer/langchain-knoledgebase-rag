@@ -6,10 +6,14 @@ from __future__ import annotations
 
 from typing import Any
 
+import tiktoken
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from packages.config.loader import settings
 from packages.memory.schemas import MemoryFact
+
+_TOKENIZER = tiktoken.get_encoding("cl100k_base")
 
 
 class PromptBuilder:
@@ -18,6 +22,33 @@ class PromptBuilder:
     ChatPromptTemplate (with a MessagesPlaceholder for conversation
     history) instead of hand-concatenated f-strings.
     """
+
+    def _dedup_and_budget(self, context: list[str]) -> list[str]:
+        """
+        Drops exact-duplicate chunks (multi-query retrieval can surface
+        the same chunk more than once) and truncates to a token budget
+        so a large merged/reranked context can't blow out the prompt.
+        """
+
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for chunk in context:
+            if chunk in seen:
+                continue
+            seen.add(chunk)
+            deduped.append(chunk)
+
+        budget = settings.rag.context_token_budget
+        budgeted: list[str] = []
+        used = 0
+        for chunk in deduped:
+            tokens = len(_TOKENIZER.encode(chunk))
+            if used + tokens > budget:
+                break
+            budgeted.append(chunk)
+            used += tokens
+
+        return budgeted
 
     def build(
         self,
@@ -52,10 +83,12 @@ class PromptBuilder:
         #
 
         if context:
-            template_messages.append(
-                ("human", "Relevant knowledge:\n\n{context}")
-            )
-            variables["context"] = "\n\n".join(context)
+            budgeted_context = self._dedup_and_budget(context)
+            if budgeted_context:
+                template_messages.append(
+                    ("human", "Relevant knowledge:\n\n{context}")
+                )
+                variables["context"] = "\n\n".join(budgeted_context)
 
         #
         # Conversation

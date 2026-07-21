@@ -112,6 +112,49 @@ class PostgresVectorStore(BaseVectorStore):
             "MMR search has not been implemented."
         )
 
+    async def list_chunks(
+        self,
+        *,
+        filters: SearchFilter,
+        limit: int = 500,
+    ) -> list[SearchResult]:
+        """
+        Bounded, unranked candidate pool for keyword (BM25) scoring.
+        """
+
+        stmt = (
+            select(Embedding)
+            .options(
+                selectinload(Embedding.chunk),
+                selectinload(Embedding.model_profile),
+            )
+            .where(
+                Embedding.tenant_id == filters.tenant_id,
+                Embedding.model_profile_id == filters.model_profile_id,
+            )
+        )
+
+        if filters.document_id:
+            stmt = stmt.where(
+                Embedding.chunk.has(
+                    document_id=filters.document_id,
+                )
+            )
+
+        if filters.chunk_ids:
+            stmt = stmt.where(
+                Embedding.chunk_id.in_(filters.chunk_ids),
+            )
+
+        stmt = stmt.limit(limit)
+
+        rows = (await self.session.execute(stmt)).scalars().all()
+
+        return [
+            SearchResult(chunk=embedding.chunk, score=0.0)
+            for embedding in rows
+        ]
+
     async def add(
         self,
         embedding: Embedding,

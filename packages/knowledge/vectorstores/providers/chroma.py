@@ -117,6 +117,68 @@ class ChromaVectorStore(BaseVectorStore):
 
         return search_results
 
+    async def list_chunks(
+        self,
+        *,
+        filters: SearchFilter,
+        limit: int = 500,
+    ) -> list[SearchResult]:
+
+        conditions: list[dict[str, object]] = [
+            {"tenant_id": str(filters.tenant_id)},
+            {"model_profile_id": str(filters.model_profile_id)},
+        ]
+
+        if filters.document_id:
+            conditions.append({"document_id": str(filters.document_id)})
+
+        if filters.metadata:
+            conditions.extend(
+                {key: value} for key, value in filters.metadata.items()
+            )
+
+        where = {"$and": conditions} if len(conditions) > 1 else conditions[0]
+
+        results = self.collection.get(
+            where=where,
+            limit=limit,
+            include=[
+                "metadatas",
+                "documents",
+            ],
+        )
+
+        search_results: list[SearchResult] = []
+
+        ids = results.get("ids", [])
+        metadatas = results.get("metadatas", [])
+        contents = results.get("documents", [])
+
+        for index, chunk_id in enumerate(ids):
+
+            metadata = metadatas[index] or {}
+            content = contents[index] if index < len(contents) else ""
+
+            chunk = DocumentChunk(
+                id=UUID(chunk_id),
+                tenant_id=UUID(metadata["tenant_id"]),
+                document_id=UUID(metadata.get("document_id", chunk_id)),
+                chunk_index=int(metadata.get("chunk_index", 0)),
+                content=content,
+                token_count=int(metadata.get("token_count", 0)),
+                character_count=len(content),
+                metadata_=metadata,
+            )
+
+            search_results.append(
+                SearchResult(
+                    chunk=chunk,
+                    score=0.0,
+                )
+            )
+
+        return search_results
+
     async def add(
         self,
         embedding: Embedding,

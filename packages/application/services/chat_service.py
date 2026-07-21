@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator
 
-from packages.application.dto.chat import ChatRequest, ChatResponse
+from packages.application.dto.chat import ChatRequest, ChatResponse, CitationDTO
 from packages.application.dto.conversation import (
     ConversationResponse,
     CreateConversationRequest,
@@ -49,7 +49,7 @@ class ChatService:
                 request,
             )
 
-            assistant_response = await self._execute_runtime(
+            assistant_response, citations = await self._execute_runtime(
                 conversation,
                 user_message,
                 stream=False,
@@ -69,6 +69,7 @@ class ChatService:
                 user_message_id=user_message.id,
                 assistant_message_id=assistant_message.id,
                 response=assistant_response,
+                citations=citations,
             )
 
         except Exception:
@@ -176,18 +177,29 @@ class ChatService:
         conversation: ConversationResponse,
         message: Message,
         stream: bool,
-    ) -> str:
+    ) -> tuple[str, list[CitationDTO]]:
         """
         Runs the real LangGraph pipeline (planner, retrieval, tools,
         memory extraction) for this conversation and returns the
-        assistant's final response text.
+        assistant's final response text plus any citations gathered
+        during retrieval.
         """
 
         state = await self._build_state(conversation, stream)
 
         result = await self._graph.invoke(state)
 
-        return result["messages"][-1].content
+        citations = [
+            CitationDTO(
+                document_id=citation.document_id,
+                chunk_id=citation.chunk_id,
+                chunk_index=citation.chunk_index,
+                score=citation.score,
+            )
+            for citation in result.get("citations") or []
+        ]
+
+        return result["messages"][-1].content, citations
 
     async def _stream_runtime(
         self,
