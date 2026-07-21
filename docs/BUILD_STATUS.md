@@ -109,18 +109,36 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 | 5 — LangGraph | 9 | 6 | 0 | 0 | 3 | **66.7%** ▲▲▲▲▲▲ |
 | 6 — Session Management | 4 | 2 | 1 | 0 | 1 | **50.0%** ▲▲▲ |
 | 7 — Memory | 5 | 5 | 0 | 0 | 0 | **100%** ▲▲▲▲ |
-| 8 — Document Processing | 15 | 9 | 2 | 0 | 4 | **60.0%** ▲▲▲▲▲▲▲▲▲ |
+| 8 — Document Processing | 15 | 15 | 0 | 0 | 0 | **100%** ▲▲▲▲▲▲▲▲▲▲ |
 | 9 — Production Retrieval ⭐ | 13 | 4 | 1 | 0 | 8 | **30.8%** ▲▲▲▲ |
 | 10 — Tools | 6 | 4 | 0 | 0 | 2 | **66.7%** ▲▲▲▲▲ |
 | 11 — Human in the Loop | 3 | 0 | 0 | 0 | 3 | **0.0%** |
 | 12 — Background Jobs | 5 | 1 | 1 | 0 | 3 | **20.0%** |
 | 13 — Production hardening | 5 | 3 | 0 | 0 | 2 | **60.0%** |
-| 14 — APIs | 7 | 1 | 1 | 0 | 5 | **14.3%** ▲ |
+| 14 — APIs | 7 | 2 | 1 | 0 | 4 | **28.6%** ▲▲ |
 | 15 — Testing | 4 | 0 | 0 | 0 | 4 | **0.0%** |
 | 16 — Deployment | 3 | 0 | 3 | 0 | 0 | **0.0%** |
-| **Total** | **119** | **63** | **16** | **0** | **40** | **52.9%** ▲▲▲▲▲▲▲▲▲▲▲ |
+| **Total** | **119** | **70** | **14** | **0** | **35** | **58.8%** ▲▲▲▲▲▲▲▲▲▲▲▲ |
 
-**New all-time high — 52.9%, up from 50.4%. Real IAM, by explicit request: `packages/sdk/iam/` — a client SDK for an external IAM microservice that had never once been exercised — is now wired into a genuine authentication middleware, with working RBAC.**
+**New all-time high — 58.8%, up from 52.9%. Document Processing (Phase 8) reaches 100% — the second full phase this project has ever had, and the first with a real, load-bearing HTTP route behind it.**
+
+Asked to complete the phase, six items were still Partial/Pending: Metadata Extraction, Markdown-aware chunking, Semantic chunking, Async indexing, Incremental indexing, and Batch indexing. Two decisions made explicitly with the user before building, since the remaining items required real architectural choices: **async indexing uses FastAPI `BackgroundTasks`**, not the already-installed-but-fully-dead `arq` dependency (zero new infrastructure, satisfies "off the request path" — wiring `arq` for real is Phase 12 territory, not this one); and **a real document persistence layer + `POST /api/v1/documents` route were built**, since without them Incremental Indexing has no way to detect a repeat upload, and none of this work would be provable through the running app rather than direct Python calls.
+
+Building that persistence layer surfaced two more real, never-exercised bugs (same "written, never run" pattern as `packages/knowledge/` and `packages/sdk/iam/` earlier this session): `DocumentRepository.get_by_filename` filtered a column (`Document.filename`) that doesn't exist — the real column is `file_name`; `KnowledgeBaseRepository.list_enabled` filtered a column (`KnowledgeBase.enabled`) that also doesn't exist — the real column is `status`. Both fixed, plus a new tenant-scoped `get_by_tenant_and_name` (the existing `get_by_name` wasn't tenant-scoped at all — a cross-tenant leak). A `packages/knowledge/bootstrap.py` was added, mirroring the existing `packages/conversation/bootstrap.py` get-or-create idiom, to auto-provision a default `KnowledgeBase` per tenant — nothing in the app had ever created one before.
+
+**Semantic chunking is hand-rolled**, not `langchain_experimental.SemanticChunker` (not installed, and not worth adding for a fairly small algorithm with a history of breaking changes in that package): sentences are embedded in one real batch call, consecutive-sentence cosine distances are computed in pure Python, and chunks break at the 95th-percentile distance via stdlib `statistics.quantiles`. Verified live on genuinely mixed-topic text (a robotics paragraph followed by a cooking recipe) — it correctly split at the topic boundary, not at an arbitrary size cutoff. **Markdown-aware chunking** uses `langchain_text_splitters.MarkdownHeaderTextSplitter` (already installed, no new dependency) in a two-stage split — header-aware first, then a recursive character cap within each section — attaching the section heading as real chunk metadata.
+
+**Batch indexing** was a real bug, not just an inefficiency: `IngestionPipeline._embed()` called `embed_query()` once per chunk in a loop. Replaced with a single real `aembed_documents()` batch call — verified live with a call-count check: 20 chunks, exactly 1 embedding API call, not 20.
+
+**Incremental indexing, proven live, not asserted:** `ingest()` now computes a real SHA-256 checksum of the uploaded file before doing any work, and checks it against existing `Document` rows scoped to the knowledge base. Uploading the same file twice returns `skipped=True` and zero new chunks on the second call, reusing the same `document_id` — confirmed live via two real HTTP uploads through the running app.
+
+An important DI-lifetime detail, given this session's history with exactly this bug class: `ingestion_pipeline` and `knowledge_manager` now depend on `repositories.document`, which is request-scoped (built on a per-request DB session). Both were changed from `providers.Singleton` to `providers.Factory` in the same pass — getting this wrong would have silently orphaned every `Document` status update into a session nothing ever commits, the exact bug fixed earlier this session for the memory pipeline.
+
+**Verified live, full pipeline, through the real DI-wired app:** `POST /api/v1/documents` accepts a real multipart upload, returns `202 Accepted` immediately (before embedding work starts), and the background task correctly flips the `Document` row's status `PENDING → PROCESSING → READY`. A real chat request afterward correctly retrieved and cited the uploaded content by exact figures ("payload capacity of 88 kilograms and a battery life of 14 hours"). Full regression re-run and still passing: cross-conversation memory recall, tool-calling (`847 * 293 = 248,171`), and real SSE streaming. Full import sweep clean (397 OK, same 11 pre-existing failures — installing `python-multipart`, a genuinely missing dependency FastAPI's file-upload support requires, fixed one new failure that appeared and then resolved during this pass, not a regression left behind).
+
+Document Processing (Phase 8) moves from 60.0% to **100%** — the second full phase this project has ever completed, after Memory (Phase 7). The new Upload API also moves APIs (Phase 14) from 14.3% to 28.6%, though Documents/Search/Knowledge-Base APIs remain Pending (list/fetch/delete for documents specifically wasn't built — only create, matching the roadmap's own narrower "Upload API" definition versus its separate, still-open "Documents API" one).
+
+**Previous update — real IAM, by explicit request: `packages/sdk/iam/` — a client SDK for an external IAM microservice that had never once been exercised — is now wired into a genuine authentication middleware, with working RBAC.**
 
 `packages/sdk/iam/{auth,user,tennets}.py` all constructed their HTTP client with `base_url=str(settings.url)` — but `IAMSettings`' real field is `base_url`, not `url`. `AttributeError` on the first call, confirming (same pattern as `packages/knowledge/` this session) that this SDK had never actually been run. Fixed in all three files. Also found and fixed the shared `create_http_client()` factory (`packages/infrastructure/http/client.py`, itself dead code until now): it passed `http2=True`, but the `h2` package isn't installed — would have failed the moment anything actually called it.
 
@@ -243,6 +261,22 @@ All four registered tools (Calculator, Weather, Web Search, News) are now indivi
 
 **Fails open by explicit design**, since no real IAM backend is reachable in this environment (`localhost:3000` refuses connections; `.env`'s IAM secrets are placeholders): a missing, invalid, or IAM-unreachable token leaves the existing default-tenant/default-user fallback untouched rather than rejecting the request. Verified live and specifically: `AuthService.resolve()` against the real, genuinely unreachable configured URL logs a warning and returns `None` rather than raising; a real chat request with a bogus `Authorization: Bearer` header produced exactly that log line and still completed correctly end to end, including a real tool call, proving the fail-open path doesn't disturb existing behavior.
 
+### Document Processing — Phase 8 complete, 100%, the second full phase this project has had
+| Item | Evidence |
+|---|---|
+| **Metadata Extraction — Done** | Real `author`/`page`/`title` from PDF (`PyPDFLoader` natively surfaces these) and DOCX (added via `python-docx` core properties, since `Docx2txtLoader` only extracts text); real `token_count` via `tiktoken` (was hardcoded `0`); `page_number`/`section` populated on chunks from loader/splitter metadata; `ingested_at` timestamp on every document. |
+| **Markdown-aware chunking — Done, first time ever** | `MarkdownDocumentSplitter` (`packages/knowledge/splitters/markdown.py`, previously an empty stub) — two-stage split via `langchain_text_splitters.MarkdownHeaderTextSplitter` then a recursive character cap. Verified live: real `#`/`##` heading text attached as chunk metadata, genuine section boundaries confirmed on real multi-section Markdown. |
+| **Semantic chunking — Done, first time ever** | `SemanticDocumentSplitter` (`packages/knowledge/splitters/semantic.py`, new), hand-rolled rather than `langchain_experimental.SemanticChunker` (not installed, avoided deliberately). Embeds all sentences in one real batch call, breaks chunks at the 95th-percentile consecutive-sentence cosine distance. Verified live on genuinely mixed-topic text (robotics paragraph → cooking recipe) — correctly split exactly at the topic boundary, not at an arbitrary size cutoff. |
+| **Async indexing — Done, first time ever** | `POST /api/v1/documents` (new route, `packages/api/routers/documents.py`, previously a stub) schedules ingestion via FastAPI `BackgroundTasks` and returns `202 Accepted` before embedding work starts. Verified live: response returns immediately; `Document.status` transitions `PENDING → PROCESSING → READY` in the background. |
+| **Incremental indexing — Done, first time ever, proven not asserted** | `ingest()` computes a real SHA-256 checksum before doing any work and checks it against existing `Document` rows. Verified live: uploading the identical file twice — second call returns `skipped=True`, zero new chunks, same `document_id` reused. |
+| **Batch indexing — Done** | `_embed()` now makes one real `aembed_documents()` batch call instead of looping `embed_query()` per chunk. Verified live via a call-count check: a 20-chunk document produced exactly 1 embedding API call, not 20. |
+
+**Getting here required building a document persistence layer that never existed** — before this pass, nothing in the app had ever created a `KnowledgeBase` or `Document` row; ingestion wrote straight to the vector store. Found two more real, never-exercised repository bugs along the way (same "written, never run" pattern as `packages/knowledge/` and `packages/sdk/iam/`): `DocumentRepository.get_by_filename` filtered a nonexistent `Document.filename` column (real column: `file_name`); `KnowledgeBaseRepository.list_enabled` filtered a nonexistent `KnowledgeBase.enabled` column (real column: `status`). Both fixed. A new `packages/knowledge/bootstrap.py` auto-provisions a default `KnowledgeBase` per tenant, mirroring the existing `packages/conversation/bootstrap.py` idiom.
+
+**A DI-lifetime detail worth flagging given this session's history with exactly this bug class:** `ingestion_pipeline` and `knowledge_manager` now depend on `repositories.document` (request-scoped). Both were changed from `providers.Singleton` to `providers.Factory` — the same fix applied to the memory pipeline earlier this session; getting it wrong here would have silently orphaned every `Document` status update into a session nothing ever commits.
+
+**Verified live, full pipeline, through the real running app** (not just direct Python): a real multipart upload → real background ingestion → real chat request afterward correctly retrieved and cited the uploaded content by exact figures. Full regression (memory recall, tool-calling, streaming) still passes. Full import sweep clean; `python-multipart` (a genuinely missing FastAPI file-upload dependency) installed along the way.
+
 ### Memory
 | Item | Evidence |
 |---|---|
@@ -355,18 +389,6 @@ All four registered tools (Calculator, Weather, Web Search, News) are now indivi
 | Semantic memory, episodic memory, user preferences, user facts | No long-term memory code found anywhere (grep for these terms returns nothing) |
 | Persistent (non-in-memory) checkpointing | `GraphCheckpointFactory` only wraps `MemorySaver` — nothing survives a process restart; "Future" Postgres/Redis branches are commented out |
 
-### Document Processing (Phase 8) — remaining gaps
-| Item | Status |
-|---|---|
-| Metadata Extraction | Partial: `BaseDocumentLoader.normalize_metadata()` captures `source`/`filename`/`extension`/`loader` — no author, page/section detail, or timestamps yet |
-| Markdown-aware chunking | `packages/knowledge/splitters/markdown.py` is an empty stub file |
-| Semantic chunking | No embedding-similarity-based splitter exists |
-| Async indexing | `IngestionPipeline.ingest()` still runs synchronously on the request path — nothing pushes it to a background worker/queue yet |
-| Incremental indexing | No change-detection logic — every ingest is a full add, not a diff against a previous version |
-| Batch indexing | Partial: `IngestionPipeline._embed()` calls `embed_query()` once per chunk in a loop, not a real batched `embed_documents()` call — works, but N API calls instead of 1 |
-
-**What changed:** by explicit request, `packages/knowledge/` — not `packages/rag/` — is now the canonical, live-wired document-processing implementation. It was a ~70-file, never-successfully-run second implementation; fixed file-by-file rather than replaced (see the summary section above for the full list of bugs found and fixed: broken loader constructors, a stray misplaced `__init__`, wrong config attributes, missing methods, mismatched schemas, a ChromaDB compatibility bug). All 5 roadmap-named formats (PDF, DOCX, Markdown, HTML, TXT) plus JSON and CSV as a bonus are now genuinely verified loading real content. Parsing, Cleaning, Recursive chunking, and Multiple Embedding Providers all move from unverified/broken to Done. `packages/rag/` remains in the codebase, untouched, but is no longer in the live call path.
-
 ### Production Retrieval (Phase 9 — the roadmap's ⭐ centerpiece) — remaining gaps
 | Item | Status |
 |---|---|
@@ -401,12 +423,12 @@ All four registered tools (Calculator, Weather, Web Search, News) are now indivi
 | Retry policies | `tenacity` is a declared dependency; `infrastructure/http/retry.py` is a **1-line stub** with an unimplemented `@retry` TODO |
 
 ### APIs (Phase 14)
-**3 of 9 planned routers are now real and registered** (`conversations.py` joined `chat.py`/`health.py` this session) — but each only covers part of its resource's lifecycle, not a full CRUD surface. Confirmed by reading `packages/api/routers/__init__.py` directly:
+**4 of 9 planned routers are now real and registered** (`documents.py` joined `chat.py`/`conversations.py`/`health.py` this pass) — but each only covers part of its resource's lifecycle, not a full CRUD surface. Confirmed by reading `packages/api/routers/__init__.py` directly:
 
 ```python
 from packages.api.routers.chat import router as chat_router
 from packages.api.routers.conversations import router as conversation_router
-# from .documents import router as document_router
+from packages.api.routers.documents import router as document_router
 # from .feedback import router as feedback_router
 from packages.api.routers.health import router as health_router
 # from .knowledge_bases import router as knowledge_base_router
@@ -418,24 +440,27 @@ from packages.api.routers.health import router as health_router
 api_router.include_router(health_router)
 api_router.include_router(chat_router)
 api_router.include_router(conversation_router)
-# ... and 6 more, all commented out
+api_router.include_router(document_router)
+# ... and 5 more, all commented out
 ```
 
-**Chat router — Done for its one route, still just one route.** `POST /api/v1/chat` now genuinely works end to end — real conversation, real LLM response, real persistence (see the Done section's milestone above). `conversation_id` is now optional (auto-provisions a default conversation when omitted), and `X-Tenant-ID`/`X-User-ID` fall back to fixed default UUIDs when omitted, specifically to make this testable without hand-crafting headers first. Still missing, unchanged: history/streaming/delete routes (see the table below — streaming's `stream` field is still silently ignored).
+**Chat router — Done for its one route, still just one route.** `POST /api/v1/chat` now genuinely works end to end — real conversation, real LLM response, real persistence (see the Done section's milestone above). `conversation_id` is now optional (auto-provisions a default conversation when omitted), and `X-Tenant-ID`/`X-User-ID` fall back to fixed default UUIDs when omitted, specifically to make this testable without hand-crafting headers first. Still missing, unchanged: history/delete routes (see the table below — streaming itself is genuinely wired now, see LangGraph/Phase 5, just no separate route beyond the existing `stream: true` flag).
 
-**Conversation router — new this pass, real, but create-only.** `packages/api/routers/conversations.py` now defines `POST /conversations`, confirmed live: creates a real, persisted `Conversation` against a per-tenant auto-provisioned default `Agent` (see the Done section's "Milestone this session" for the full account). Per this phase's own acceptance bar ("full resource lifecycle... at minimum create + read... a router that only implements one verb... is partial, not done"), this stays **Partial** — there's still no `GET /conversations/{id}`, no list, no delete.
+**Conversation router — create-only.** `packages/api/routers/conversations.py` defines `POST /conversations`, confirmed live: creates a real, persisted `Conversation` against a per-tenant auto-provisioned default `Agent`. Per this phase's own acceptance bar ("full resource lifecycle... at minimum create + read... a router that only implements one verb... is partial, not done"), this stays **Partial** — there's still no `GET /conversations/{id}`, no list, no delete.
+
+**Document router — new this pass, real, but upload-only.** `packages/api/routers/documents.py` (previously a 1-line stub) defines `POST /documents`, confirmed live: accepts a real multipart upload, schedules background ingestion, and returns `202 Accepted` immediately. This satisfies the roadmap's own narrower **Upload API** definition ("accept a document upload and kick off Phase 8/12's processing pipeline") — that item is **Done**. The separate, broader **Documents API** item ("manage uploaded documents — list, fetch metadata, delete, view processing status") stays **Pending** — no read/list/delete route exists yet, only create.
 
 | Missing route | Evidence it's expected but absent |
 |---|---|
 | `GET /chat/{conversation_id}` or similar — fetch conversation/message history | No such route in `chat.py`; the only way to read back messages is directly from the DB |
 | `DELETE /chat/{conversation_id}` — end/delete a conversation | Not present |
 | `GET /conversations/{id}`, `GET /conversations`, `DELETE /conversations/{id}` | `conversations.py` only has the create route; read/list/delete don't exist |
+| `GET /documents/{id}`, `GET /documents`, `DELETE /documents/{id}` | `documents.py` only has the upload route; read/list/delete don't exist |
 
-The remaining 6 unregistered router files are still **single-line comment stubs** (verified by reading each file directly):
+The remaining 5 unregistered router files are still **single-line comment stubs** (verified by reading each file directly):
 
 | File | Full contents |
 |---|---|
-| `packages/api/routers/documents.py` | `# Router documents` |
 | `packages/api/routers/feedback.py` | `# Router feedback` |
 | `packages/api/routers/knowledge_bases.py` | `# Router knowledge bases` |
 | `packages/api/routers/models.py` | `# Router models` |
@@ -443,7 +468,7 @@ The remaining 6 unregistered router files are still **single-line comment stubs*
 | `packages/api/routers/search.py` | `# Router search` |
 | `packages/api/routers/tools.py` | `# Router tools` |
 
-**Practical impact:** a conversation can now genuinely be created over HTTP and chatted with end-to-end — verified live with real Gemini responses, real persistence, real tool-calling, real cross-conversation memory recall, and (as of this pass) real SSE streaming. What's still missing on the routing surface is just breadth, not defects: no history/listing route, no delete. `cli.py` still always sends `stream: false` — the server-side streaming path works, but the bundled CLI client doesn't use it yet.
+**Practical impact:** a conversation can now genuinely be created over HTTP and chatted with end-to-end — verified live with real Gemini responses, real persistence, real tool-calling, real cross-conversation memory recall, real SSE streaming, and (as of this pass) a real document upload that a chat request can then retrieve and cite by exact figures. What's still missing on the routing surface is just breadth, not defects: no history/listing routes for conversations or documents, no delete.
 
 ### Testing (Phase 15)
 | Item | Status |
@@ -479,7 +504,7 @@ These don't map to a `docs/mvpRAG.md` checklist item, but they're real gaps that
 Local `.env` holds live-looking keys (OpenAI, Google, Groq, Serper, Tavily, OpenWeather, NewsAPI, a Postgres password, and a placeholder-looking `JWT_SECRET=dev-secret-key-...`). Confirmed via `git log --all -- .env` and `git ls-files` that `.env` has **never been committed** — only the blank `.env.example` is tracked, and `.gitignore` correctly excludes `.env`/`.env.local`. Not a repo leak, but worth rotating any key that's been shared in plaintext during a review like this one, and worth double-checking `JWT_SECRET` gets replaced with a real secret before JWT validation is ever wired up (see Phase 2 gap).
 
 ### 4. Input validation — better than expected, but narrow
-`packages/api/schemas/chat.py:8-27`'s `ChatRequestSchema` does enforce `message: str = Field(min_length=1, max_length=10000)` and `ConfigDict(extra="forbid")` — so basic length limiting exists. There is no prompt-injection-specific filtering (length limiting is the only defense), and there's nothing to check on the upload side since `packages/api/schemas/document.py` and `routers/documents.py` are still one-line stubs (see Phase 14).
+`packages/api/schemas/chat.py:8-27`'s `ChatRequestSchema` does enforce `message: str = Field(min_length=1, max_length=10000)` and `ConfigDict(extra="forbid")` — so basic length limiting exists. There is no prompt-injection-specific filtering (length limiting is the only defense). The upload route (`packages/api/routers/documents.py`, real as of this pass — see Phase 8/14) does not enforce `settings.storage.max_file_size` or restrict content-type/extension — any file the loader factory recognizes is accepted at any size.
 
 ### 5. Async session handling — partially fixed, now committed
 - **Fixed, committed:** `packages/api/dependencies.py`'s `get_db_session` is now an async generator — `try: yield session / finally: await session.close()` — so the per-request session actually closes now.
@@ -538,5 +563,6 @@ Chat works end to end now — the priorities below are genuinely the *next* laye
 9. ~~Add streaming and history routes~~ — **Streaming done.** Real SSE streaming now works end-to-end (see LangGraph section above). **History route still missing** — `GET /chat/{conversation_id}` doesn't exist yet, explicitly "ideally," not blocking, per the roadmap.
 10. **Audit other `providers.Singleton` DI wiring for the same session-capture bug** that broke memory — anything else in the graph/service layer that was Singleton and touches a per-request-scoped dependency (DB session, etc.) is worth a specific check, now that this pattern is known to fail silently rather than loudly.
 11. ~~Implement Prompt Templates, Output Parsers, LCEL~~ — **Done.** Phase 4 (LangChain) is now at 70% (7/10) — see the LangChain section above.
+12. ~~Complete Document Processing (metadata, markdown/semantic chunking, async/incremental/batch indexing)~~ — **Done.** Phase 8 is now fully complete (15/15, 100%) — see the Document Processing section above.
 
-**Fixed this session:** the DB session `Resource`→`Factory` bug and the connection-leak/multi-session risks it could have introduced; the `model_profiles.vector` schema drift; the repository-writes-never-commit bug; the conversations router (stub → real, working, idempotent `POST /conversations`); replacing `ConversationManager`'s flow with `packages/application/services/chat_service.py`'s `ChatService`, 9 further real bugs across that stack — resulting in the first fully working `POST /api/v1/chat` round trip this project has ever had; real tool-calling (`LLMNode` was never binding tools to the model at all); real long-term memory — a genuine `memories` table, real pgvector search, and a significant `Singleton`-caching-a-pre-request-session bug fixed along the way; real `ChatPromptTemplate`/LCEL/`BaseOutputParser` usage across `PromptBuilder` and the memory extraction/summarization chains, surfacing one more real bug (`LLMManager` isn't a `Runnable`, fixed via `.model`); a checkpointer silently rebuilt empty every request plus an earlier msgpack-allowlist fix that had never actually worked; real custom reducers and real end-to-end SSE streaming; and, most recently, making `packages/knowledge/` — a ~70-file implementation that had never successfully run — into the canonical, live-wired document-processing/RAG stack, fixing well over a dozen distinct bugs across loaders, embeddings, vectorstores, and retrievers in the process. See the milestone section at the top of this document for the full account of each. **Fixed in earlier passes, holding steady:** `SafeCalculator`'s `ast.Num` and `dataclass(slots=True)`/`__dict__` crashes.
+**Fixed this session:** the DB session `Resource`→`Factory` bug and the connection-leak/multi-session risks it could have introduced; the `model_profiles.vector` schema drift; the repository-writes-never-commit bug; the conversations router (stub → real, working, idempotent `POST /conversations`); replacing `ConversationManager`'s flow with `packages/application/services/chat_service.py`'s `ChatService`, 9 further real bugs across that stack — resulting in the first fully working `POST /api/v1/chat` round trip this project has ever had; real tool-calling (`LLMNode` was never binding tools to the model at all); real long-term memory — a genuine `memories` table, real pgvector search, and a significant `Singleton`-caching-a-pre-request-session bug fixed along the way; real `ChatPromptTemplate`/LCEL/`BaseOutputParser` usage across `PromptBuilder` and the memory extraction/summarization chains, surfacing one more real bug (`LLMManager` isn't a `Runnable`, fixed via `.model`); a checkpointer silently rebuilt empty every request plus an earlier msgpack-allowlist fix that had never actually worked; real custom reducers and real end-to-end SSE streaming; making `packages/knowledge/` — a ~70-file implementation that had never successfully run — into the canonical, live-wired document-processing/RAG stack; real IAM via `packages/sdk/iam/` (also never-run before this session) wired into a genuine `AuthenticationMiddleware` with working RBAC; and, most recently, completing Document Processing end to end — real metadata extraction, markdown/semantic chunking, and genuinely async/incremental/batched indexing through a brand-new `POST /api/v1/documents` route and document persistence layer, closing Phase 8 to 100%. See the milestone section at the top of this document for the full account of each. **Fixed in earlier passes, holding steady:** `SafeCalculator`'s `ast.Num` and `dataclass(slots=True)`/`__dict__` crashes.

@@ -99,6 +99,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         settings=settings,
         ai=ai,
         services=services,
+        repositories=repositories,
     )
 
     memory = providers.Container(

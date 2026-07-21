@@ -25,7 +25,27 @@ class DocumentRepository(BaseRepository[Document]):
         """Return a document by filename."""
         stmt = (
             select(Document)
-            .where(Document.filename == filename)
+            .where(Document.file_name == filename)
+        )
+
+        return await self.scalar(stmt)
+
+    async def get_by_checksum(
+        self,
+        knowledge_base_id: UUID,
+        checksum: str,
+    ) -> Document | None:
+        """
+        Return a document by content checksum, scoped to a knowledge
+        base. Used to detect a re-upload of unchanged content so
+        ingestion can skip re-embedding it.
+        """
+        stmt = (
+            select(Document)
+            .where(
+                Document.knowledge_base_id == knowledge_base_id,
+                Document.checksum == checksum,
+            )
         )
 
         return await self.scalar(stmt)

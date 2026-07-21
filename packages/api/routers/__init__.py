@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, FastAPI
 
 from packages.api.routers.chat import router as chat_router
 from packages.api.routers.conversations import router as conversation_router
+from packages.api.routers.documents import router as document_router
 
-# from .documents import router as document_router
 # from .feedback import router as feedback_router
 from packages.api.routers.health import router as health_router
 from packages.api.security import get_bearer_token, get_tenant_id
@@ -29,8 +29,8 @@ api_router = APIRouter(
 api_router.include_router(health_router)
 api_router.include_router(chat_router)
 api_router.include_router(conversation_router)
+api_router.include_router(document_router)
 # api_router.include_router(knowledge_base_router)
-# api_router.include_router(document_router)
 # api_router.include_router(search_router)
 # api_router.include_router(prompt_router)
 # api_router.include_router(model_router)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 
@@ -9,13 +10,19 @@ from uuid import UUID
 # Ingestion
 # ============================================================
 
+ChunkingStrategy = Literal["auto", "recursive", "markdown", "semantic"]
+
+
 @dataclass(slots=True)
 class IngestionRequest:
     tenant_id: UUID
     model_profile_id: UUID
+    knowledge_base_id: UUID
 
     file: Path
     document_name: str
+
+    chunking_strategy: ChunkingStrategy = "auto"
 
     metadata: dict[str, object] = field(default_factory=dict)
 
@@ -25,6 +32,7 @@ class IngestionResponse:
     document_id: UUID
     chunk_count: int
     embedding_count: int
+    skipped: bool = False
 
 
 # ============================================================

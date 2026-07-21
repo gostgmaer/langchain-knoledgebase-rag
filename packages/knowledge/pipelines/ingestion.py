@@ -1,44 +1,57 @@
 from __future__ import annotations
 
+import hashlib
+import mimetypes
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+import tiktoken
 from langchain_core.documents import Document as LangChainDocument
 
+from packages.domain.enums.document_status import DocumentStatus
+from packages.domain.models.document import Document
 from packages.domain.models.document_chunk import DocumentChunk
 from packages.domain.models.embedding import Embedding
 
+from packages.infrastructure.repositories.document import DocumentRepository
 from packages.knowledge.embeddings.manager import EmbeddingManager
 from packages.knowledge.loaders.manager import DocumentLoaderManager
 from packages.knowledge.processors.base import DocumentProcessor
 from packages.knowledge.schemas import IngestionRequest, IngestionResponse
-from packages.knowledge.splitters.base import BaseSplitter
+from packages.knowledge.splitters.factory import SplitterFactory
 from packages.knowledge.vectorstores.manager import VectorStoreManager
+
+_TOKENIZER = tiktoken.get_encoding("cl100k_base")
 
 
 class IngestionPipeline:
     """
-    Handles the complete document ingestion workflow: load, clean,
-    split, embed, and store into the configured vector store.
+    Handles the complete document ingestion workflow: checksum-based
+    change detection, load, clean, split, embed, and store into the
+    configured vector store.
 
-    Note: this stores chunks/embeddings in the vector store only. It
-    does not yet persist a durable `documents`/`document_chunks` row
-    in Postgres — that requires a KnowledgeBase + File subsystem that
-    doesn't exist yet (see docs/BUILD_STATUS.md Phase 8).
+    Chunk content is the vector store's responsibility, same as
+    before — the Document row created here is bookkeeping for
+    identity/checksum/status only, so a repeat upload of unchanged
+    content can be detected and skipped (incremental indexing)
+    without restructuring the already-working search path.
     """
 
     def __init__(
         self,
         loader: DocumentLoaderManager,
         transformer: DocumentProcessor,
-        splitter: BaseSplitter,
+        splitter_factory: SplitterFactory,
         embedding_manager: EmbeddingManager,
         vector_store: VectorStoreManager,
+        document_repository: DocumentRepository,
     ) -> None:
         self.loader = loader
         self.transformer = transformer
-        self.splitter = splitter
+        self.splitter_factory = splitter_factory
         self.embedding_manager = embedding_manager
         self.vector_store = vector_store
+        self.document_repository = document_repository
 
     # ============================================================
     # Public
@@ -49,24 +62,53 @@ class IngestionPipeline:
         request: IngestionRequest,
     ) -> IngestionResponse:
 
-        loaded_documents = await self._load(request)
+        checksum = self._checksum(request.file)
 
-        cleaned_documents = await self._clean(loaded_documents)
+        existing = await self.document_repository.get_by_checksum(
+            request.knowledge_base_id,
+            checksum,
+        )
+        if existing is not None:
+            return IngestionResponse(
+                document_id=existing.id,
+                chunk_count=0,
+                embedding_count=0,
+                skipped=True,
+            )
 
-        chunked_documents = await self._split(cleaned_documents)
-
-        document_id = uuid4()
-
-        embeddings = await self._embed(
-            chunked_documents,
+        document = await self._create_document_row(
             request,
-            document_id,
+            checksum,
         )
 
-        await self.vector_store.store.add_many(embeddings)
+        try:
+            loaded_documents = await self._load(request)
+
+            cleaned_documents = await self._clean(loaded_documents)
+
+            chunked_documents = await self._split(
+                cleaned_documents,
+                request,
+            )
+
+            embeddings = await self._embed(
+                chunked_documents,
+                request,
+                document.id,
+            )
+
+            await self.vector_store.store.add_many(embeddings)
+
+            document.status = DocumentStatus.READY
+            await self.document_repository.session.flush()
+
+        except Exception:
+            document.status = DocumentStatus.FAILED
+            await self.document_repository.session.flush()
+            raise
 
         return IngestionResponse(
-            document_id=document_id,
+            document_id=document.id,
             chunk_count=len(chunked_documents),
             embedding_count=len(embeddings),
         )
@@ -94,10 +136,7 @@ class IngestionPipeline:
         self,
         document_id: UUID,
     ) -> bool:
-        raise NotImplementedError(
-            "Existence check by document_id requires durable document "
-            "storage, not yet implemented."
-        )
+        return await self.document_repository.exists(document_id)
 
     async def count(
         self,
@@ -109,11 +148,45 @@ class IngestionPipeline:
     # Private
     # ============================================================
 
+    @staticmethod
+    def _checksum(path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    async def _create_document_row(
+        self,
+        request: IngestionRequest,
+        checksum: str,
+    ) -> Document:
+
+        mime_type, _ = mimetypes.guess_type(request.file.name)
+
+        document = Document(
+            knowledge_base_id=request.knowledge_base_id,
+            tenant_id=request.tenant_id,
+            title=request.document_name,
+            file_id=uuid4(),
+            file_name=request.document_name,
+            mime_type=mime_type or "application/octet-stream",
+            extension=request.file.suffix.lower(),
+            size_bytes=request.file.stat().st_size,
+            checksum=checksum,
+            status=DocumentStatus.PROCESSING,
+            metadata_=request.metadata,
+        )
+
+        return await self.document_repository.create(document)
+
     async def _load(
         self,
         request: IngestionRequest,
     ) -> list[LangChainDocument]:
-        return await self.loader.load(request.file)
+        documents = await self.loader.load(request.file)
+
+        ingested_at = datetime.now(UTC).isoformat()
+        for document in documents:
+            document.metadata.setdefault("ingested_at", ingested_at)
+
+        return documents
 
     async def _clean(
         self,
@@ -124,8 +197,13 @@ class IngestionPipeline:
     async def _split(
         self,
         documents: list[LangChainDocument],
+        request: IngestionRequest,
     ) -> list[LangChainDocument]:
-        return await self.splitter.split(documents)
+        splitter = self.splitter_factory.create(
+            strategy=request.chunking_strategy,
+            file_extension=request.file.suffix.lower(),
+        )
+        return await splitter.split(documents)
 
     async def _embed(
         self,
@@ -134,12 +212,25 @@ class IngestionPipeline:
         document_id: UUID,
     ) -> list[Embedding]:
 
+        if not documents:
+            return []
+
+        vectors = await self.embedding_manager.client.aembed_documents(
+            [document.page_content for document in documents]
+        )
+
         embeddings: list[Embedding] = []
 
-        for index, document in enumerate(documents):
+        for index, (document, vector) in enumerate(
+            zip(documents, vectors, strict=True)
+        ):
 
-            vector = await self.embedding_manager.embed_query(
-                document.page_content,
+            page = document.metadata.get("page")
+
+            section = (
+                document.metadata.get("h1")
+                or document.metadata.get("h2")
+                or document.metadata.get("h3")
             )
 
             chunk = DocumentChunk(
@@ -147,8 +238,10 @@ class IngestionPipeline:
                 tenant_id=request.tenant_id,
                 document_id=document_id,
                 chunk_index=index,
+                page_number=(page + 1) if isinstance(page, int) else None,
+                section=section,
                 content=document.page_content,
-                token_count=0,
+                token_count=len(_TOKENIZER.encode(document.page_content)),
                 character_count=len(document.page_content),
                 metadata_=document.metadata,
             )
