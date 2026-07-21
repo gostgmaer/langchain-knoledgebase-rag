@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 from dependency_injector import containers, providers
-from packages.agent.prompt import PromptBuilder
-from packages.agent.runtime import AgentRuntime
 from packages.infrastructure.container.chat_service import ChatServiceContainer
 from packages.infrastructure.container.conversation import ConversationContainer
 
@@ -68,20 +66,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
         settings=settings,
     )
 
-    prompt_builder = providers.Singleton(
-        PromptBuilder,
-    )
-
     tools = providers.Container(
         ToolsContainer,
         settings=settings,
-    )
-
-    agent_runtime = providers.Singleton(
-        AgentRuntime,
-        llm=ai.manager,
-        prompt_builder=prompt_builder,
-        tools=tools.manager,
     )
 
     #

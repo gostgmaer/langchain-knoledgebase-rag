@@ -372,3 +372,11 @@ Asked to implement Phase 9 in full after a status check. 4/13 items were already
 - Full import sweep clean across every touched module. No new errors or tracebacks in the server log across the full test session.
 
 Production Retrieval (Phase 9) moves from 30.8% to **100%** — the third full phase this project has ever completed, after Memory (Phase 7) and Document Processing (Phase 8). **Overall score: 66.4%, a new all-time high.**
+
+---
+
+## Removed the legacy `packages/rag/` and `packages/agent/` packages
+
+Asked to remove unnecessary RAG file/folders. Traced `packages/rag/` — the entire pre-`packages/knowledge/` RAG implementation (19 files: `manager.py`, `pipeline.py`, `retriever.py`, `indexer.py`, `loader.py`, `splitter.py`, `embeddings.py`, `vectorstore.py`, plus `builders/`/`pipelines/` subpackages) — and found exactly one reference to it anywhere outside itself: `packages/agent/context.py` importing `Citation`/`Context` from `packages.rag.schemas`. Tracing further, `packages/agent/` (`context.py`, `prompt.py`, `response.py`, `runtime.py`) was itself dead: `packages/infrastructure/container/application.py` constructed `prompt_builder`/`agent_runtime` DI providers from it, but nothing downstream — no router, no service — ever consumed either provider. Deleted both packages together via `git rm`, and removed the now-dead imports and provider wiring from `application.py`.
+
+**Verified, not just assumed safe:** full DI container construction still succeeds end to end (`ApplicationContainer().init_resources()`, `chat_service.chat_service()`, `rag.retriever_manager()` all still resolve correctly); a full `packages/` import sweep shows the identical pre-existing failure set as before (403/426 OK, down from 428/451 — the 25-file drop matches the two deleted packages exactly, zero new failures); a live `POST /api/v1/chat` request against the running server still returns `200` with a correct response. `docs/UNUSED_FILES.md` updated to mark the deletion and correct several other entries that had gone stale relative to `packages/knowledge/`'s current live status.
