@@ -1,9 +1,7 @@
-# Empty file
 #!/bin/sh
 set -e
 
-echo 
-"'''Waiting for PostgreSQL..."
+echo "Waiting for PostgreSQL..."
 
 until pg_isready \
     -h "$POSTGRES_HOST" \
@@ -15,5 +13,4 @@ done
 
 echo "PostgreSQL is ready."
 
-exec 
-"$@"
+exec "$@"

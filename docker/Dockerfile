@@ -1,4 +1,3 @@
-# Empty file
 # ============================================================
 # Stage 1 - Builder
 # ============================================================
@@ -53,13 +52,6 @@ HEALTHCHECK \
     --timeout=5s \
     --start-period=20s \
     --retries=3 \
-CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"
 
-CMD [
-    "uvicorn",
-    "packages.api.app:app",
-    "--host",
-    "0.0.0.0",
-    "--port",
-    "8000"
-]
+CMD ["uvicorn", "packages.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,8 +1,8 @@
 dev:
-	docker compose -f docker/compose/docker-compose.dev.yml up -d
+	docker compose -f docker-compose.dev.yml up -d
 
 prod:
-	docker compose -f docker/compose/docker-compose.prod.yml up -d
+	docker compose -f docker-compose.prod.yml up -d
 
 stop:
 	docker compose down
