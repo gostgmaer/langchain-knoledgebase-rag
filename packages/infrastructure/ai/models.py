@@ -33,6 +33,7 @@ class SupportedModel(StrEnum):
     GEMMA_3_4B = "gemma-3-4b-it"
     GEMMA_3_12B = "gemma-3-12b-it"
     GEMMA_3_27B = "gemma-3-27b-it"
+    GEMMA_4_31B = "gemma-4-31b-it"
 
     GEMMA_3N_E2B = "gemma-3n-e2b-it"
     GEMMA_3N_E4B = "gemma-3n-e4b-it"
