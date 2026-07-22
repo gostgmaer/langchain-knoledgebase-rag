@@ -25,6 +25,32 @@ class ServiceToken(BaseModel):
     expires_in: int = Field(alias="expiresIn")
 
 
+class RefreshedToken(BaseModel):
+    """
+    `POST /auth/refresh` response. Endpoint and request shape
+    (`{"refreshToken": "..."}`) confirmed live against
+    https://iam.easydev.in — a garbage token correctly returns `401
+    "Invalid refresh token"`, and a `refresh_token` (snake_case) body
+    key is rejected outright with a `400` DTO error, confirming the
+    request field name. The **success** shape below is inferred from
+    this service's consistent camelCase convention (`ServiceToken`
+    above, `CurrentUser`, JWKS, JWT claims), not yet confirmed live —
+    no valid refresh token was available to test with. `refresh_token`
+    is optional since it's unconfirmed whether this service rotates
+    refresh tokens on use or returns the same one back.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    access_token: str = Field(alias="accessToken")
+
+    refresh_token: str | None = Field(default=None, alias="refreshToken")
+
+    token_type: str = Field(default="Bearer", alias="tokenType")
+
+    expires_in: int = Field(alias="expiresIn")
+
+
 class CurrentUser(BaseModel):
     """
     `GET /auth/me` — confirmed live against https://iam.easydev.in with

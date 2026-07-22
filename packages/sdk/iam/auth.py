@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from http import HTTPMethod
-
 import httpx
 
 from packages.config.iam import IAMSettings
 from packages.sdk.common.base_client import BaseClient
 
 from .endpoints import IAMEndpoints
-from .models import CurrentUser, IntrospectionResponse, ServiceToken
+from .models import CurrentUser, IntrospectionResponse, RefreshedToken, ServiceToken
 
 
 class IAMAuthSDK(BaseClient):
@@ -45,6 +43,25 @@ class IAMAuthSDK(BaseClient):
         )
 
         return ServiceToken.model_validate(self._unwrap(response))
+
+    async def refresh_token(
+        self,
+        refresh_token: str,
+    ) -> RefreshedToken:
+        """
+        Exchange a refresh token for a new access token. Field name is
+        `refreshToken` (camelCase) — confirmed live, see
+        `IAMEndpoints.REFRESH`'s docstring for how.
+        """
+
+        response = await self._post(
+            IAMEndpoints.REFRESH,
+            json={
+                "refreshToken": refresh_token,
+            },
+        )
+
+        return RefreshedToken.model_validate(self._unwrap(response))
 
     async def introspect(
         self,

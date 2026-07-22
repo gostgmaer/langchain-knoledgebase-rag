@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, FastAPI
 
+from packages.api.routers.auth import router as auth_router
 from packages.api.routers.chat import router as chat_router
 from packages.api.routers.conversations import router as conversation_router
 from packages.api.routers.documents import router as document_router
@@ -27,6 +28,7 @@ api_router = APIRouter(
 # api_router = APIRouter(prefix="/api/v1")
 
 api_router.include_router(health_router)
+api_router.include_router(auth_router)
 api_router.include_router(chat_router)
 api_router.include_router(conversation_router)
 api_router.include_router(document_router)
