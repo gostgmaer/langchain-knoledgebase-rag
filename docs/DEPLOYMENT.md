@@ -11,7 +11,8 @@ The root-level `docker-compose.yml` is the one with real, complete content — f
 ```bash
 cp .env.example .env
 # fill in at minimum: GOOGLE_API_KEY (or another provider's key + AI_DEFAULT_PROVIDER),
-# POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB (must match the credentials embedded in DATABASE_URL)
+# POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB (must match the credentials embedded in DATABASE_URL),
+# UPLOAD_SERVICE_URL (see step 7 below — document upload genuinely depends on this now)
 
 docker compose up -d --build
 ```
@@ -23,6 +24,7 @@ What happens:
 4. `api` builds from `docker/Dockerfile` (a two-stage build: `uv sync --locked --no-dev` in a builder stage, then just the resulting `.venv` copied into a slim runtime image, running as a non-root `app` user) and serves on `:8000`.
 5. On its own startup (inside the container, same as running locally), the app's `lifespan()` (`packages/api/lifespan.py`) creates the `vector` Postgres extension and runs `Base.metadata.create_all()` — **this is schema-creation, not a real migration system**; see §3.
 6. Still at startup, `lifespan()` also sets up a real, Postgres-backed LangGraph checkpointer (`langgraph-checkpoint-postgres`, wrapped via `ThreadedPostgresSaver` — see `docs/ARCHITECTURE_TUTORIAL.md` §13) so conversation state survives a restart. This works correctly both inside the container (Linux) and running `uvicorn packages.api.app:app` bare on native Windows — the startup log should show `Persistent (Postgres-backed) checkpointer ready.` in both. If it instead shows `Could not set up persistent checkpointer, falling back to in-memory`, that means Postgres itself is unreachable — worth investigating like any other connection failure, not a platform difference to shrug off.
+7. **Document uploads (`POST /api/v1/documents`) now depend on a real, separate Upload Service being reachable** (`packages/sdk/upload/`, fixed and wired in this pass — see `docs/CHANGELOG.md`) — it's the durable store for uploaded file bytes, deliberately kept off this app's own disk/container filesystem so files don't accumulate there indefinitely. Set `UPLOAD_SERVICE_URL` to wherever that service actually runs; it is **not** one of the five services in this `docker-compose.yml` and isn't started by `docker compose up` here. `UPLOAD_SERVICE_URL` now correctly points at the real, running Upload Service (`https://fms.easydev.in`) — an unreachable or misconfigured one makes `POST /api/v1/documents` fail outright with a `502`, rather than silently falling back to local storage. **Worth knowing about the real service specifically**: it maintains its own file-type allowlist and rejects `text/plain` uploads (`400`) even though this project's own ingestion pipeline otherwise supports plain-text files — that request will fail at the Upload Service step, not silently succeed.
 
 Check it's actually up:
 ```bash

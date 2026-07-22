@@ -20,3 +20,5 @@ class DocumentUploadResponseSchema(BaseModel):
 
     status: str
     document_name: str
+    file_id: str
+    """The Upload Service's own file ID — a Mongo ObjectId string, not a UUID."""

@@ -132,6 +132,22 @@ class BaseClient:
                 raise SDKException(message)
 
     @staticmethod
+    def _unwrap(response: httpx.Response) -> Any:
+        """
+        Every EasyDev service response observed so far wraps its real
+        payload in a `{success, message, data, ...}` envelope — pulls
+        `data` back out so callers can validate it directly against
+        their own model, instead of the envelope itself.
+        """
+
+        body = response.json()
+
+        if isinstance(body, dict) and "data" in body:
+            return body["data"]
+
+        return body
+
+    @staticmethod
     def _extract_error_message(
         response: httpx.Response,
     ) -> str:

@@ -164,7 +164,7 @@ class IngestionPipeline:
             knowledge_base_id=request.knowledge_base_id,
             tenant_id=request.tenant_id,
             title=request.document_name,
-            file_id=uuid4(),
+            file_id=request.file_id or str(uuid4()),
             file_name=request.document_name,
             mime_type=mime_type or "application/octet-stream",
             extension=request.file.suffix.lower(),

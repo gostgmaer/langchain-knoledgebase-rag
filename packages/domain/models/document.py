@@ -53,8 +53,11 @@ class Document(BaseModel):
 
     description: Mapped[str | None] = mapped_column(Text)
 
-    file_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True),
+    # The Upload Service's own file ID (packages/sdk/upload/) — a Mongo
+    # ObjectId string against the real service, not a UUID, so this
+    # can't be a UUID column even though every other *_id column here is.
+    file_id: Mapped[str] = mapped_column(
+        String(64),
         nullable=False,
     )
 

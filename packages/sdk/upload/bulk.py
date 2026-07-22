@@ -13,7 +13,14 @@ from .models import (
 
 
 class UploadBulkSDK(BaseClient):
-    """Bulk upload operations."""
+    """
+    Bulk upload operations — CONFIRMED NOT PART OF THE REAL SERVICE.
+    `file-upload-service/docs/INTEGRATION_GUIDE.md` §7's full endpoint
+    list has no `/api/files/bulk/*` routes at all (single-file
+    operations only: rename, update, replace, delete each take one
+    `:id`). Calling any method here against the real service will
+    404. Kept only in case a future version adds this.
+    """
 
     async def delete(
         self,
@@ -27,7 +34,7 @@ class UploadBulkSDK(BaseClient):
         )
 
         return BulkOperationResponse.model_validate(
-            response.json(),
+            self._unwrap(response),
         )
 
     async def permanent_delete(
@@ -42,7 +49,7 @@ class UploadBulkSDK(BaseClient):
         )
 
         return BulkOperationResponse.model_validate(
-            response.json(),
+            self._unwrap(response),
         )
 
     async def update_metadata(
@@ -59,7 +66,7 @@ class UploadBulkSDK(BaseClient):
         )
 
         return BulkOperationResponse.model_validate(
-            response.json(),
+            self._unwrap(response),
         )
 
     async def create_signed_urls(
@@ -75,5 +82,5 @@ class UploadBulkSDK(BaseClient):
 
         return [
             SignedUrl.model_validate(item)
-            for item in response.json()
+            for item in self._unwrap(response)
         ]

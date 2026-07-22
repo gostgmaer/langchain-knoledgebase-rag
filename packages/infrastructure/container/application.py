@@ -17,6 +17,7 @@ from packages.infrastructure.container.repositories import RepositoryContainer
 from packages.infrastructure.container.services import ServiceContainer
 from packages.infrastructure.container.settings import SettingsContainer
 from packages.infrastructure.container.tools import ToolsContainer
+from packages.infrastructure.container.upload import UploadContainer
 
 
 class ApplicationContainer(containers.DeclarativeContainer):
@@ -55,6 +56,14 @@ class ApplicationContainer(containers.DeclarativeContainer):
 
     iam = providers.Container(
         IAMContainer,
+    )
+
+    #
+    # Upload Service
+    #
+
+    upload = providers.Container(
+        UploadContainer,
     )
 
     #

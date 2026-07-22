@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from packages.config.upload import UploadSettings
+from packages.config.upload_service import UploadServiceSettings
 
 from .bulk import UploadBulkSDK
 from .files import UploadFilesSDK
@@ -15,7 +15,7 @@ class UploadClient:
     def __init__(
         self,
         client: httpx.AsyncClient,
-        settings: UploadSettings,
+        settings: UploadServiceSettings,
     ) -> None:
 
         self.files = UploadFilesSDK(
