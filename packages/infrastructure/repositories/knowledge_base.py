@@ -70,6 +70,36 @@ class KnowledgeBaseRepository(BaseRepository[KnowledgeBase]):
 
         return await self.scalars(stmt)
 
+    async def list_by_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[KnowledgeBase]:
+        """Return all of a tenant's knowledge bases, any status."""
+        stmt = (
+            select(KnowledgeBase)
+            .where(KnowledgeBase.tenant_id == tenant_id)
+            .offset(offset)
+            .limit(limit)
+        )
+
+        return await self.scalars(stmt)
+
+    async def count_by_tenant(
+        self,
+        tenant_id: UUID,
+    ) -> int:
+        """Count a tenant's knowledge bases, any status."""
+        stmt = (
+            select(func.count())
+            .select_from(KnowledgeBase)
+            .where(KnowledgeBase.tenant_id == tenant_id)
+        )
+
+        return int(await self.session.scalar(stmt) or 0)
+
     async def count_documents(
         self,
         knowledge_base_id,

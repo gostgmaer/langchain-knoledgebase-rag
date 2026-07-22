@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
@@ -16,7 +16,11 @@ from packages.api.dependencies import (
     require_uuid_header,
 )
 from packages.api.responses import ApiResponse
-from packages.api.schemas.document import DocumentUploadResponseSchema
+from packages.api.schemas.document import (
+    DocumentListResponseSchema,
+    DocumentResponseSchema,
+    DocumentUploadResponseSchema,
+)
 from packages.config.loader import settings
 from packages.conversation.bootstrap import ensure_default_model_profile
 from packages.domain.enums.document_status import DocumentStatus
@@ -132,6 +136,101 @@ async def upload_document(
             file_id=uploaded_file.id,
         ),
     )
+
+
+@router.get(
+    "",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[DocumentListResponseSchema],
+    summary="List documents",
+    description="Lists a tenant's documents, most recently ingested first, across every knowledge base it owns.",
+)
+async def list_documents(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    documents = container.repositories.document()
+
+    total = await documents.count_by_tenant(tenant_id)
+    rows = await documents.list_by_tenant(tenant_id, limit=limit, offset=offset)
+
+    return ApiResponse(
+        message="Documents retrieved.",
+        data=DocumentListResponseSchema(
+            total=total,
+            limit=limit,
+            offset=offset,
+            documents=[DocumentResponseSchema.model_validate(d) for d in rows],
+        ),
+    )
+
+
+@router.get(
+    "/{document_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[DocumentResponseSchema],
+    summary="Fetch a document",
+    description="Fetches a single document's metadata by ID.",
+)
+async def get_document(
+    document_id: UUID,
+    request: Request,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    documents = container.repositories.document()
+    document = await documents.get(document_id)
+
+    if document is None or document.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    return ApiResponse(
+        message="Document retrieved.",
+        data=DocumentResponseSchema.model_validate(document),
+    )
+
+
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[None],
+    summary="Delete a document",
+    description=(
+        "Deletes a document's chunks from the vector store and its "
+        "bookkeeping row from Postgres. Does not delete the underlying "
+        "file from the Upload Service — this only removes it from the "
+        "knowledge base's search index."
+    ),
+)
+async def delete_document(
+    document_id: UUID,
+    request: Request,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    documents = container.repositories.document()
+    document = await documents.get(document_id)
+
+    if document is None or document.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    knowledge_manager = container.rag.knowledge_manager()
+    await knowledge_manager.delete_document(tenant_id=tenant_id, document_id=document_id)
+    await documents.delete(document)
+
+    return ApiResponse(message="Document deleted.")
 
 
 async def _ingest_in_background(

@@ -68,6 +68,41 @@ class DocumentRepository(BaseRepository[Document]):
 
         return await self.scalars(stmt)
 
+    async def list_by_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Document]:
+        """
+        Return all documents belonging to a tenant, across every
+        knowledge base it owns — unlike `list_by_knowledge_base`, which
+        only existed for the ingestion pipeline's own per-KB needs.
+        """
+        stmt = (
+            select(Document)
+            .where(Document.tenant_id == tenant_id)
+            .order_by(desc(Document.created_at))
+            .offset(offset)
+            .limit(limit)
+        )
+
+        return await self.scalars(stmt)
+
+    async def count_by_tenant(
+        self,
+        tenant_id: UUID,
+    ) -> int:
+        """Count documents belonging to a tenant, across every knowledge base."""
+        stmt = (
+            select(func.count())
+            .select_from(Document)
+            .where(Document.tenant_id == tenant_id)
+        )
+
+        return int(await self.session.scalar(stmt) or 0)
+
     async def get_with_chunks(
         self,
         document_id: UUID,
