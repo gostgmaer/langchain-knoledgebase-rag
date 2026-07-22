@@ -66,11 +66,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
         settings=settings,
     )
 
-    tools = providers.Container(
-        ToolsContainer,
-        settings=settings,
-    )
-
     #
     # Shared Services
     #
@@ -87,6 +82,14 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ai=ai,
         services=services,
         repositories=repositories,
+    )
+
+    # Declared after `rag` — the knowledge-base/document-search tools need
+    # rag.knowledge_manager (see packages/infrastructure/container/tools.py).
+    tools = providers.Container(
+        ToolsContainer,
+        settings=settings,
+        rag=rag,
     )
 
     memory = providers.Container(

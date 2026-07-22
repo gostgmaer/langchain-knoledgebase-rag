@@ -62,6 +62,24 @@ That's it — `ToolManager.list()` is what `LLMNode` passes into `bind_tools()` 
 
 **Step 3 — Verify.** Start the server and ask the assistant to list its tools — it should now name the new one (confirming `bind_tools()` picked it up), then ask it to actually use it and confirm the live API call happens (check server logs for evidence it's a real call, not a hallucinated answer — this exact class of bug bit this project once already, see `docs/BUILD_STATUS.md`'s "10th bug" entry).
 
+**Variant: a tool that needs tenant-scoped, per-request data (a real precedent, not hypothetical).** `packages/tools/builtin/knowledge_base.py`'s `search_knowledge_base`/`search_document` tools needed `KnowledgeManager` — which is itself `providers.Factory` (session-bound) — and `tenant_id`/`model_profile_id`, which must never be LLM-visible parameters (the model should never be able to specify an arbitrary tenant to search). Two things make this shape different from `convert_currency` above:
+
+1. **Write a factory function, not a module-level `@tool`.** `make_knowledge_base_search_tool(knowledge_manager)` returns a closure-based `@tool`-decorated function, so the `KnowledgeManager` it captures is whichever instance was resolved *for this request* — never one frozen at import time.
+2. **Pull request context from graph state via `InjectedState`, not tool arguments:**
+   ```python
+   from typing import Annotated
+   from langgraph.prebuilt import InjectedState
+
+   @tool("search_knowledge_base", description="...")
+   async def search_knowledge_base(query: str, state: Annotated[dict, InjectedState]) -> dict:
+       results = await knowledge_manager.search(query=query, filters=SearchFilter(
+           tenant_id=state["tenant_id"], model_profile_id=state["model_profile_id"],
+       ))
+       ...
+   ```
+   `InjectedState`-annotated parameters are automatically excluded from the schema `bind_tools()` shows the model (verify with `tool.args` — it should only ever show `query`), and LangGraph's `ToolNode` (which `GraphToolNode` wraps) fills them in from the live graph state at call time, invisibly to the LLM. This only works when the tool runs inside a compiled `StateGraph` — calling `ToolNode.ainvoke()` bare, outside a graph, raises `Missing required config key` (worth knowing before you spend time debugging a "broken" standalone test that was never going to work outside the real graph).
+3. **Wire the factory's dependency through the container**, changing `ToolsContainer`'s `registry`/`executor`/`manager` from `Singleton` to `Factory` in the process — a shared `Singleton` registry would let two concurrent requests overwrite each other's tool closures (each bound to a different request's `KnowledgeManager`) through the registry's shared, name-keyed dict. If your new tool needs any per-request dependency, this same conversion likely applies.
+
 ---
 
 ## 2. Add a new LLM provider

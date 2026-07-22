@@ -30,21 +30,27 @@ Run these in order against a locally running server (`docs/QUICKSTART.md` has th
 - [ ] Ask "do you have persistent memory / a knowledge base?" → should describe both capabilities accurately (per the system prompt in `packages/conversation/bootstrap.py`), never claim to be stateless or session-only. **This exact question is the canary for the hallucination-loop failure mode — see §2.**
 
 ### 1.4 Tool calling
-- [ ] Ask the assistant to list its tools → should name exactly the four registered ones (`get_weather`, `get_news`, `get_google_search`, `calculator`) — no more, no less. Naming anything else is a hallucination, not a real capability (`docs/BUILD_STATUS.md`'s "10th bug" — `bind_tools()` not being called was the root cause the one time this happened for real).
+- [ ] Ask the assistant to list its tools → should name exactly the six registered ones (`get_weather`, `get_news`, `get_google_search`, `calculator`, `search_knowledge_base`, `search_document`) — no more, no less. Naming anything else is a hallucination, not a real capability (`docs/BUILD_STATUS.md`'s "10th bug" — `bind_tools()` not being called was the root cause the one time this happened for real).
 - [ ] Ask it to compute something via the calculator → confirm the *tool* did the math (check logs for `Calculator Tool Invoked`/`Calculation Successful`), not the LLM guessing.
 - [ ] Ask for the weather somewhere → confirm a real `GET api.openweathermap.org` call in logs, with plausible, specific numbers (not a suspiciously round or generic answer).
+- [ ] Explicitly ask it to search the knowledge base / a specific document mid-conversation (distinct from the automatic retrieval a normal question triggers) → confirm `search_knowledge_base`/`search_document` get invoked, not just the always-on `retrieve` node. Check `tool.args` on either (`packages/tools/builtin/knowledge_base.py`) if in doubt — should show only `query`(/`document_id`), never `tenant_id`/`model_profile_id`/`state`.
 
 ### 1.5 Streaming
 - [ ] `POST /api/v1/chat` with `"stream": true` → SSE `token` events arrive progressively, followed by exactly one `done` event.
-- [ ] After the stream completes, `GET`/query the conversation's messages directly (or ask a follow-up) → confirm the full assembled text was persisted as **one** message, not duplicated or truncated.
+- [ ] After the stream completes, `GET /api/v1/conversations/{id}/messages` (or ask a follow-up) → confirm the full assembled text was persisted as **one** message, not duplicated or truncated.
 - [ ] Confirm tool-calling and retrieval both still work over the streaming path, not just the non-streaming one — these have regressed independently of each other before.
 
-### 1.6 Multi-tenancy / auth
+### 1.6 Session management
+- [ ] `GET /api/v1/conversations/{id}` → returns the conversation's metadata; a wrong tenant or nonexistent ID both `404`.
+- [ ] `GET /api/v1/conversations/{id}/messages` → returns the full history, oldest-first, matching what was actually sent/received; try `limit`/`offset` to confirm pagination.
+- [ ] Check the startup log for `Persistent (Postgres-backed) checkpointer ready.` — should say this on every platform, including native Windows (`ThreadedPostgresSaver` sidesteps the uvicorn/psycopg-async incompatibility, see `docs/ARCHITECTURE_TUTORIAL.md` §13). `Could not set up persistent checkpointer, falling back to in-memory` means Postgres is genuinely unreachable — a real problem worth investigating, not an expected platform difference.
+
+### 1.7 Multi-tenancy / auth
 - [ ] Same query, two different `X-Tenant-ID` values, one with an uploaded document and one without → the tenant with the document gets a cited answer, the other gets none. (Confirms retrieval filters are actually tenant-scoped, not just accepted and ignored.)
 - [ ] A request with a bogus `Authorization: Bearer <garbage>` header → still completes successfully (fail-open), with a log line showing IAM resolution failed and fell back to the default identity.
 - [ ] `GET /health` → `{"database": "healthy", "redis": "healthy"}` when both are actually up; flips to `"unhealthy"`/`"degraded"` if you stop either (useful for confirming the healthcheck isn't a fake "always 200").
 
-### 1.7 Import / wiring sanity (cheapest checks, run these first when something's broken)
+### 1.8 Import / wiring sanity (cheapest checks, run these first when something's broken)
 ```python
 # Full import sweep — catches syntax errors, missing modules, broken imports across the whole tree
 import pathlib, importlib

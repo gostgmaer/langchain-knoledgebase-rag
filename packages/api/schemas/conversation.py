@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,3 +36,35 @@ class ConversationResponseSchema(BaseModel):
     user_id: UUID
     title: str | None
     status: str
+
+
+class MessageResponseSchema(BaseModel):
+    """
+    A single message within a conversation's history.
+    """
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    id: UUID
+    role: str
+    content: str
+    status: str
+    created_at: datetime
+
+
+class ConversationHistoryResponseSchema(BaseModel):
+    """
+    A page of a conversation's message history, oldest first.
+    """
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    conversation_id: UUID
+    total: int
+    limit: int
+    offset: int
+    messages: list[MessageResponseSchema]

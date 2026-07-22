@@ -1,9 +1,9 @@
 # Router conversations
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
@@ -14,7 +14,9 @@ from packages.api.dependencies import (
 from packages.api.responses import ApiResponse
 from packages.api.schemas.conversation import (
     ConversationCreateSchema,
+    ConversationHistoryResponseSchema,
     ConversationResponseSchema,
+    MessageResponseSchema,
 )
 from packages.conversation.bootstrap import (
     ensure_default_agent,
@@ -70,4 +72,92 @@ async def create_conversation(
     return ApiResponse(
         message="Conversation created.",
         data=ConversationResponseSchema.model_validate(created),
+    )
+
+
+@router.get(
+    "/{conversation_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[ConversationResponseSchema],
+    summary="Fetch a conversation",
+    description="Fetches a single conversation's metadata by ID.",
+)
+async def get_conversation(
+    conversation_id: UUID,
+    request: Request,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    conversations = container.repositories.conversation()
+
+    conversation = await conversations.get(conversation_id)
+
+    if conversation is None or conversation.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found.",
+        )
+
+    return ApiResponse(
+        message="Conversation retrieved.",
+        data=ConversationResponseSchema.model_validate(conversation),
+    )
+
+
+@router.get(
+    "/{conversation_id}/messages",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[ConversationHistoryResponseSchema],
+    summary="Fetch a conversation's message history",
+    description=(
+        "Closes Session Management's Conversation History gap — messages "
+        "were always persisted, but had no HTTP-reachable read path until "
+        "this route. Returns a page of messages oldest-first, matching the "
+        "order they're fed into the LLM as context."
+    ),
+)
+async def get_conversation_history(
+    conversation_id: UUID,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    conversations = container.repositories.conversation()
+    messages = container.repositories.message()
+
+    conversation = await conversations.get(conversation_id)
+
+    # 404 for both "doesn't exist" and "exists but belongs to another
+    # tenant" — distinguishing the two would leak whether a given
+    # conversation_id is real to a caller who doesn't own it.
+    if conversation is None or conversation.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found.",
+        )
+
+    total = await messages.count_by_conversation(conversation_id)
+
+    history = await messages.list_by_conversation(
+        conversation_id,
+        limit=limit,
+        offset=offset,
+    )
+
+    return ApiResponse(
+        message="Conversation history retrieved.",
+        data=ConversationHistoryResponseSchema(
+            conversation_id=conversation_id,
+            total=total,
+            limit=limit,
+            offset=offset,
+            messages=[
+                MessageResponseSchema.model_validate(message)
+                for message in history
+            ],
+        ),
     )
