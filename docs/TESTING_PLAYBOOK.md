@@ -13,7 +13,8 @@ Run these in order against a locally running server (`docs/QUICKSTART.md` has th
 ### 1.1 Core chat
 - [ ] `POST /api/v1/chat` with no `conversation_id`/no tenant headers → `200`, a coherent response, and a conversation auto-provisioned via `ensure_default_agent`/`ensure_default_conversation`.
 - [ ] Same conversation, second message → the response correctly references the first turn's content (proves message history / `ConversationContextBuilder` is real, not per-request-stateless).
-- [ ] `POST /api/v1/chat` with an unknown `conversation_id` → `404`, not a `500`.
+- [ ] `POST /api/v1/chat` with an unknown `conversation_id` (a real UUID that just doesn't exist yet) → `200`, and a **new** conversation is created under that exact ID — not a `404`. Confirm via `SELECT id FROM conversations WHERE id = '<uuid>';` that exactly one row exists. This changed by request; the old behavior (404 on an unknown ID) is no longer correct.
+- [ ] Time-to-first-token / response time: `planner` and `load_memory` now run concurrently (`packages/graph/builder.py`'s `START` fan-out + `join` node), and memory extraction/summarization runs as a background task after the response, not before it. A plain no-retrieval message should return in a few seconds, not 7-8+.
 
 ### 1.2 Retrieval / RAG (`docs/QUICKSTART.md` §1–5)
 - [ ] Upload a document with a distinctive, made-up product code → `202`, then background ingestion completes (`Background ingestion finished` in logs, nonzero `chunk_count`). Response's `data.file_id` should be a real UUID from the Upload Service, not a locally-generated placeholder — cross-check it against `SELECT file_id FROM documents WHERE id = '<document_id>';`, should match exactly.
@@ -32,6 +33,8 @@ Run these in order against a locally running server (`docs/QUICKSTART.md` has th
 - [ ] Ask about that fact in a **genuinely separate** conversation B, same tenant/user → correctly recalls it.
 - [ ] Confirm via direct DB query that a real row exists: `SELECT type, content FROM memories WHERE user_id = '<uuid>';`
 - [ ] Ask "do you have persistent memory / a knowledge base?" → should describe both capabilities accurately (per the system prompt in `packages/conversation/bootstrap.py`), never claim to be stateless or session-only. **This exact question is the canary for the hallucination-loop failure mode — see §2.**
+- [ ] **Memory extraction shouldn't block the response.** Extraction/summarization now runs as a background task after the response is sent (`packages/api/routers/chat.py::_extract_memory_in_background`), not as a graph node — `POST /api/v1/chat` should return as soon as the reply is ready, not after two more LLM calls. Check server logs a few seconds *after* the response arrives for the extraction/summarization to actually complete.
+- [ ] **Race-condition regression check**: fire 2-3 messages at the *same* conversation in quick succession (not simultaneously — just fast, like a real user typing quickly) → no `sqlalchemy.exc.MultipleResultsFound` in the logs, and `SELECT COUNT(*) FROM memories WHERE conversation_id = '<uuid>' AND type = 'summary';` stays at exactly 1.
 
 ### 1.4 Tool calling
 - [ ] Ask the assistant to list its tools → should name exactly the six registered ones (`get_weather`, `get_news`, `get_google_search`, `calculator`, `search_knowledge_base`, `search_document`) — no more, no less. Naming anything else is a hallucination, not a real capability (`docs/BUILD_STATUS.md`'s "10th bug" — `bind_tools()` not being called was the root cause the one time this happened for real).

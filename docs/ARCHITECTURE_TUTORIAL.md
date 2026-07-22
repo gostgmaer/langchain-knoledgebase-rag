@@ -63,10 +63,10 @@ flowchart TB
     subgraph Graph["packages/graph — LangGraph pipeline"]
         Planner["planner"]
         LoadMem["load_memory"]
+        Join["join"]
         Retrieve["retrieve"]
         LLM["llm"]
         Tool["tool"]
-        ExtractMem["extract_memory"]
     end
 
     subgraph Know["packages/knowledge — RAG stack"]
@@ -88,13 +88,17 @@ flowchart TB
     end
 
     Client --> MW --> Routers --> ChatService --> Planner
-    Planner --> LoadMem --> Retrieve --> LLM
+    ChatService --> LoadMem
+    Planner --> Join
+    LoadMem --> Join
+    Join --> Retrieve --> LLM
+    Join --> LLM
     LLM -->|tool_calls| Tool --> LLM
-    LLM -->|done| ExtractMem
+    LLM -->|done| Routers
 
     Retrieve --> KnowMgr --> Hybrid --> Rerank
     LoadMem --> MemMgr --> MemStore
-    ExtractMem --> MemMgr
+    Routers -.background task, after response.-> MemMgr
 
     Routers -.upload.-> Ingest --> Chroma
     Hybrid --> Chroma
@@ -225,17 +229,29 @@ async def invoke(self, state: GraphState) -> GraphState:
 `GraphBuilder.build()` constructs the actual state machine:
 
 ```
-START → planner → load_memory → (router.route) → retrieve|llm
-                                                       │
-                                          retrieve → llm
-                                                       │
-                                    (router.after_llm) │
-                                          tool ◄────────┤
-                                           │            │
-                                           └──► llm     extract_memory → END
+       START
+      ┌──┴──┐
+      ▼     ▼
+  planner  load_memory
+      └──┬──┘
+         ▼
+       join
+         │
+   (router.route)
+   retrieve │ llm
+      │     │
+ retrieve → llm
+         │
+  (router.after_llm)
+   tool ◄──┤
+    │      │
+    └─► llm │
+           END
 ```
 
-Six nodes (`planner`, `load_memory`, `retrieve`, `tool`, `llm`, `extract_memory`), two conditional-edge decision points (`GraphRouter.route()` after `load_memory`, `GraphRouter.after_llm()` after `llm`), compiled with a checkpointer — wired as a `Singleton` so checkpoints genuinely persist across requests within the process's lifetime (see §13 for why that mattered). The declared default is `MemorySaver` (in-memory), but `packages/api/lifespan.py` overrides it at startup with a real Postgres-backed checkpointer (`create_postgres_checkpointer()`, same file) so checkpoints survive a process restart — the `MemorySaver` default only stays active for code that constructs `ApplicationContainer()` directly without running through `lifespan()`.
+Six nodes (`planner`, `load_memory`, `join`, `retrieve`, `tool`, `llm`), two conditional-edge decision points (`GraphRouter.route()` after `join`, `GraphRouter.after_llm()` after `llm`), compiled with a checkpointer — wired as a `Singleton` so checkpoints genuinely persist across requests within the process's lifetime (see §13 for why that mattered). The declared default is `MemorySaver` (in-memory), but `packages/api/lifespan.py` overrides it at startup with a real Postgres-backed checkpointer (`create_postgres_checkpointer()`, same file) so checkpoints survive a process restart — the `MemorySaver` default only stays active for code that constructs `ApplicationContainer()` directly without running through `lifespan()`.
+
+**`planner` and `load_memory` run concurrently, not sequentially** — both have a direct edge from `START`. This wasn't always true: they used to run one after the other purely because that's the order the two `add_node` calls happened to be written in, not because `load_memory` needs anything `planner` produces (it only reads the raw last message, never the planner's rewritten query). Running them in parallel cuts whichever of the two calls is faster off every single turn's time-to-first-token. `join` is a trivial pass-through node (`packages/graph/builder.py`'s module-level `_join()`) that exists purely so `router.route()` has a single point to attach to that's guaranteed to run only after **both** branches have actually finished — LangGraph's execution model (Pregel-style supersteps) runs a node once every one of its incoming edges has fired, which is what makes this synchronization safe. A genuine bug surfaced when this was introduced: `LoadMemoryNode` used to mutate the whole `state` dict in place and return it, rather than returning a partial update like every other node — harmless under the old sequential graph (only one node ever ran per step), but under concurrent execution LangGraph read that full-object return as a competing write to *every* key in it, including `rewritten_query` (a key it never actually sets), and raised `InvalidUpdateError`. Fixed by making `LoadMemoryNode` return `{"memories": [...]}` like it always should have.
 
 ### 4.8 Node 1 — `planner` (`packages/planner/planner.py`)
 
@@ -253,9 +269,11 @@ Six nodes (`planner`, `load_memory`, `retrieve`, `tool`, `llm`, `extract_memory`
 
 ### 4.9 Node 2 — `load_memory` (`packages/graph/nodes/load_memory.py`)
 
-`LoadMemoryNode.__call__(state)`: takes the last message's content as a query, calls `MemoryManager.search(SearchMemoryRequest(query=..., tenant_id=..., user_id=...))`, and sets `state["memories"]` to the resulting list of `MemoryFact` objects. Full mechanics in §7.
+`LoadMemoryNode.__call__(state)`: takes the last message's content as a query, calls `MemoryManager.search(SearchMemoryRequest(query=..., tenant_id=..., user_id=...))`, and returns `{"memories": [...]}` — a partial state update, not a mutated copy of the whole state (see §4.7's note on why that distinction became load-bearing once this node started running concurrently with `planner`). Full mechanics in §7. Runs **in parallel with `planner`** (§4.7), both starting directly from `START`.
 
-### 4.10 Decision point — `GraphRouter.route()` (`packages/graph/router.py`)
+### 4.10 Join, then decision point — `join` and `GraphRouter.route()` (`packages/graph/builder.py`, `packages/graph/router.py`)
+
+`join` (module-level `_join(state)` in `builder.py`) does nothing but return the state unchanged — its only purpose is being the point both `planner` and `load_memory` converge on before routing, guaranteeing `route()` never reads `state["execution_plan"]` before `planner` has actually written it:
 
 ```python
 def route(self, state: GraphState) -> str:
@@ -320,22 +338,26 @@ Two design decisions worth calling out explicitly:
 def after_llm(self, state: GraphState) -> str:
     if getattr(state["messages"][-1], "tool_calls", None):
         return "tool"
-    return "extract_memory"
+    return END
 ```
 
-If the model's response includes `tool_calls` (LangChain populates this automatically when `bind_tools()` was used and the model chose to call one), route to `tool`; otherwise the turn is done, route to `extract_memory`.
+If the model's response includes `tool_calls` (LangChain populates this automatically when `bind_tools()` was used and the model chose to call one), route to `tool`; otherwise the turn is done and the graph ends here — **not** at an `extract_memory` node anymore (see the note below).
 
 ### 4.15 Node 5 (conditional) — `tool` (`packages/graph/nodes/tool.py`)
 
 `GraphToolNode` is a thin wrapper around LangGraph's prebuilt `ToolNode(tools=tool_manager.list())` — it executes whichever tool(s) the model called, appends the `ToolMessage` results to state, and the graph loops back to `llm` so the model can see the tool's output and produce a final answer.
 
-### 4.16 Node 6 — `extract_memory` (`packages/graph/nodes/extract_memory.py`)
+### 4.16 Memory extraction moved out of the graph entirely
 
-Runs once the model's final answer is ready (no more tool calls pending). Calls `MemoryManager.extract(...)` then `MemoryManager.summarize(...)` — full mechanics in §7. This is the last node; its outgoing edge goes straight to `END`.
+There used to be a sixth node here, `extract_memory`, sitting between `llm` and `END` — it ran once the model's final answer was ready and called `MemoryManager.extract()` then `.summarize()` (§7.2/§7.3) **synchronously, as part of the graph LangGraph's `invoke()` awaits to completion.** That meant every single turn's HTTP response was blocked on two more full LLM calls (fact extraction, then summarization) that have zero effect on the reply the user is actually waiting for — measured to add several real seconds to every turn, retrieval-routed or not.
+
+It's now a **background task**, scheduled by the chat router (`packages/api/routers/chat.py`'s `_extract_memory_in_background()`) *after* the response has already been sent — the same "never block the request path" pattern this codebase already used for document ingestion (`packages/api/routers/documents.py`'s `_ingest_in_background`). It reuses `ExtractMemoryNode` directly (still a real class, `packages/graph/nodes/extract_memory.py` — just no longer wired into `GraphBuilder`/`GraphNodes`, constructed instead via `container.graph.extract_memory()`), opens its **own fresh** request-scoped DB session (the original request's session may already be closed by the time a background task runs), and rebuilds the message history via `ConversationContextBuilder` rather than threading LangChain message objects out of the graph — both the user's and the assistant's messages are already committed to the DB by then, so a fresh rebuild sees exactly what the graph saw. Wired into both the non-streaming path (scheduled right after `chat_service.chat()` returns) and the streaming path (scheduled after the SSE token loop finishes, just before the terminal `"done"` event).
+
+**A real concurrency bug this move surfaced, found and fixed the same session:** `MemoryManager.summarize()` does a check-then-act — "does a summary row exist for this conversation yet? If not, create one; if so, update it." Under the old synchronous graph this was implicitly safe (one turn's whole pipeline, extraction included, always finished before the next request's turn could start). Once extraction became a background task, two turns close together in the same conversation could race: both check "no summary yet," both try to create one, corrupting the one-summary-per-conversation invariant and crashing every later summarization for that conversation with `MultipleResultsFound`. Fixed with a per-conversation `asyncio.Lock` (`packages/memory/manager.py`'s module-level `_summary_locks`) guarding the check-then-act, plus making the fetch itself defensive (`MemoryRepository.get_by_conversation_and_type()` now takes the most recently updated row instead of crashing if duplicates ever exist for any reason).
 
 ### 4.17 Back to the router — the response
 
-Once the graph run completes, `GraphManager.invoke()` returns the final `GraphState` dict. `ChatService._execute_runtime()` pulls `result["messages"][-1].content` (the assistant's text) and `result.get("citations")` out of it, and the chain unwinds back up through §4.4's `ChatService.chat()`, which persists the assistant message, commits the transaction, and returns a `ChatResponse` DTO. The router (§4.2) wraps that into the final `ChatResponseSchema` and the HTTP response goes out.
+Once the graph run completes, `GraphManager.invoke()` returns the final `GraphState` dict. `ChatService._execute_runtime()` pulls `result["messages"][-1].content` (the assistant's text) and `result.get("citations")` out of it, and the chain unwinds back up through §4.4's `ChatService.chat()`, which persists the assistant message, commits the transaction, and returns a `ChatResponse` DTO. The router (§4.2) wraps that into the final `ChatResponseSchema`, **schedules the memory-extraction background task described in §4.16**, and the HTTP response goes out — the client gets its reply without waiting on memory bookkeeping at all.
 
 ---
 
@@ -441,7 +463,7 @@ Two implementation details worth understanding:
 
 ## 7. Tutorial: The Memory Lifecycle
 
-Two separate flows: loading memory at the *start* of a turn, and extracting new memory at the *end* of one.
+Two separate flows: loading memory at the *start* of a turn (still a real graph node, running in parallel with `planner` — §4.7/§4.9), and extracting new memory at the *end* of one (no longer a graph node at all — a background task scheduled after the response is sent, §4.16).
 
 ### 7.1 Loading — `LoadMemoryNode` → `MemoryManager.search()` → `PgVectorMemoryRetriever`
 
@@ -455,6 +477,8 @@ rows = await self._repository.search_similar(tenant_id=..., user_id=..., query_v
 Embeds the current message, then does a real pgvector cosine-similarity search against the `memories` table (`packages/domain/models/memory.py`), scoped to `tenant_id`/`user_id` — so memory recall genuinely works **across separate conversations** for the same user, not just within one conversation's history. Each row maps back to a `MemoryFact` dataclass (`packages/memory/schemas.py`).
 
 ### 7.2 Extraction — `ExtractMemoryNode` → `MemoryManager.extract()` → `LLMMemoryExtractor`
+
+**Runs as a background task now, not a graph node** — see §4.16 for the full story on why and how (`packages/api/routers/chat.py`'s `_extract_memory_in_background()`, scheduled after the response is sent). `ExtractMemoryNode.__call__(state)` itself is unchanged: it still takes a plain dict with `conversation_id`/`tenant_id`/`user_id`/`messages` and calls `MemoryManager.extract()` then `.summarize()` in sequence — it just receives that dict from the chat router's background task now, constructed via `container.graph.extract_memory()`, instead of from the compiled graph passing it the live `GraphState`.
 
 `packages/memory/implementations/llm_extractor.py`'s `LLMMemoryExtractor` is a real LCEL chain:
 
@@ -470,6 +494,8 @@ self._chain = _EXTRACTION_PROMPT | llm.model | MemoryFactListParser()
 
 `packages/memory/implementations/llm_summarizer.py`: a second, simpler LCEL chain (`_SUMMARY_PROMPT | llm.model`, no structured-output parser needed since it just returns prose) that produces one running narrative summary of the conversation. `MemoryManager.summarize()` checks `get_by_conversation_and_type(conversation_id, MemoryType.SUMMARY)` first — if a summary row already exists for this conversation, it **updates it in place** rather than inserting a new one, so a long conversation accumulates one evolving summary, not an ever-growing pile of near-duplicate rows.
 
+**This check-then-act is guarded by a per-conversation `asyncio.Lock`** (`packages/memory/manager.py`'s module-level `_summary_locks: dict[UUID, asyncio.Lock]`). It wasn't always — this raced for real once extraction became a background task (§4.16): two turns close together in the same conversation could both read "no summary yet" before either had created one, both insert a row, and permanently break every later summarization for that conversation (`get_by_conversation_and_type()` crashing with `MultipleResultsFound` once two rows existed). The lock is process-wide and keyed by `conversation_id` on purpose — `MemoryManager` itself is a per-call `providers.Factory`, so a lock stored as an instance attribute wouldn't serialize anything, a fresh instance (and a fresh lock) would be constructed every call. `MemoryRepository.get_by_conversation_and_type()` (`packages/infrastructure/repositories/memory.py`) is also defensive now regardless — it takes the most recently updated row via `.order_by(updated_at.desc()).limit(1)` instead of `scalar_one_or_none()`-and-crash, so even a duplicate that somehow slips past the lock degrades gracefully instead of breaking the conversation permanently.
+
 ---
 
 ## 8. Tutorial: The Streaming Lifecycle
@@ -477,13 +503,14 @@ self._chain = _EXTRACTION_PROMPT | llm.model | MemoryFactListParser()
 ### 8.1 Router — `_sse_events()` (`packages/api/routers/chat.py`)
 
 ```python
-async def _sse_events(chat_service, chat_request, conversation_id):
+async def _sse_events(chat_service, chat_request, conversation_id, background_tasks, container, tenant_id, user_id, system_prompt):
     async for token in chat_service.stream(chat_request):
         yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+    background_tasks.add_task(_extract_memory_in_background, container, conversation_id, tenant_id, user_id, system_prompt)
     yield f"data: {json.dumps({'type': 'done', 'conversation_id': str(conversation_id)})}\n\n"
 ```
 
-Wrapped in a `StreamingResponse(media_type="text/event-stream")` when `payload.stream` is true.
+Wrapped in a `StreamingResponse(media_type="text/event-stream")` when `payload.stream` is true. Memory extraction (§4.16) is scheduled here too, right after the token loop finishes and just before the terminal `"done"` event — streaming turns get the same "don't block on memory bookkeeping" treatment as non-streaming ones. Citations are **not** included in either event type — a known, documented gap (`ChatService.stream()` never threads them through), not an oversight in this specific change.
 
 ### 8.2 `ChatService.stream()` (`packages/application/services/chat_service.py`)
 
@@ -689,5 +716,15 @@ Not everything under `packages/` is reachable from a live request. This section 
 **Then the user pointed `UPLOAD_SERVICE_URL` at the real, running Upload Service (`https://fms.easydev.in`), and its actual API contract turned out to be substantially different from what the SDK assumed** — worth understanding in detail since it's the second time this session a "should just work" integration needed live probing to catch: the real service is Mongo-backed (confirmed via its own `/health/ready`), so file IDs are 24-character hex ObjectId strings, never UUIDs; every response wraps its real payload in `{success, message, data, ...}`, so the SDK's models were validating against the wrong level of the response entirely; the multipart upload field is named `files` (not `file`, even for one file); and field names throughout are camelCase (`tenantId`, `originalName`, `storageKey`, `mimeType`, `createdAt`, ...) with materially different fields than first assumed (no `bucket`/`object_key`/`checksum`/`version`/`is_deleted` — instead a single `storageKey`, a `status` string, and a nested `metadata` object). All fixed: `UploadedFile` (`packages/sdk/upload/models.py`) rewritten with Pydantic field aliases to match the real names; a new `BaseClient._unwrap()` (`packages/sdk/common/base_client.py`) pulls `data` out of the envelope for every SDK call; `uploads.py`'s multipart field corrected. Because `Document.file_id` was a Postgres `uuid` column and the real IDs aren't valid UUIDs, the column itself was migrated to `VARCHAR(64)` (`ALTER TABLE documents ALTER COLUMN file_id TYPE VARCHAR(64) USING file_id::text` — this project's established manual-migration idiom, see `docs/DEPLOYMENT.md` §3; all pre-existing rows' placeholder values survived the cast as strings). The real service also maintains its own file-type allowlist — confirmed live that `application/pdf` is accepted but `text/plain`/`application/octet-stream` are rejected with `415` — so `packages/api/routers/documents.py` now distinguishes a genuine connectivity failure (`502`) from the service actively rejecting the file (`400`, with its real message surfaced, e.g. `"File type text/plain not allowed"`), rather than collapsing both into one generic error. **Verified live against the real service**, not a stand-in this time: a real PDF upload returned a real Mongo ObjectId `file_id`, the app's logs show a genuine `201 Created` from `https://fms.easydev.in`, ingestion completed normally, and `Document.file_id` in Postgres matched the returned ID exactly.
 
 **Then checked against `file-upload-service/docs/INTEGRATION_GUIDE.md`** — the real service's own written contract, one directory over from this repo — rather than relying only on live probing. This caught a real, more serious bug live probing alone hadn't: **nothing was sending `X-Tenant-Id`/`X-User-Id` at all**, so every upload had been landing under the service's own default tenant (`DEFAULT_TENANT_ID`, "easydev"), not this app's real per-tenant ID — multi-tenant isolation was silently bypassed at the Upload Service layer. Fixed by making `tenant_id` a required argument on `UploadUploadsSDK.upload()` and threading `tenant_id`/optional `user_id` through every method via new `packages/sdk/upload/_headers.py::identity_headers()`; `documents.py` now passes the request's real IDs through. Verified live: uploading under a distinct tenant and then listing files scoped to that exact tenant on the real service shows the file; listing with no tenant filter shows only the pre-existing default-tenant files.
+
+**Chat latency: measured, root-caused, and fixed in three separate passes, each catching a real bug the previous one didn't.** Reported symptom: both the API and `cli.py` felt slow to reply. Measured directly rather than guessed: a plain "thanks" message with no retrieval took **7.9s**; a retrieval-routed one took **12.0s**.
+
+1. **`extract_memory` moved out of the graph (§4.16).** It used to sit between `llm` and `END`, and `ChatService._execute_runtime()`'s `await self._graph.invoke(state)` waited for it — meaning every turn's response was blocked on two extra LLM calls (fact extraction, then summarization) that have zero bearing on the reply itself. Moved to a background task, mirroring the "never block the request path" pattern already used for document ingestion. **Result: 7.9s → 3.2s** for the no-retrieval case.
+2. **That move surfaced a real race condition**, not introduced by bad luck but by removing the accidental serialization the old synchronous design provided: `MemoryManager.summarize()`'s check-then-act (§7.3) could now run twice concurrently for the same conversation. Fixed with a per-conversation lock, confirmed by deliberately firing back-to-back messages at the same conversation and watching it hold.
+3. **`planner`/`load_memory` parallelized (§4.7)**, since `load_memory` never actually depended on `planner`'s output — that ordering was an artifact of source-code order, not a real dependency. This is what surfaced the `LoadMemoryNode` full-state-mutation bug described in §4.7/§4.9 — a second real, pre-existing bug the first two passes hadn't touched, caught only because the new topology exercised it. Verified genuinely concurrent (not just "still fast") via direct instrumentation: `planner` and `load_memory` starting within 2ms of each other on a real run.
+
+**Separately, stress-testing the fixes above with three genuinely simultaneous requests to the same conversation** (not just fast-but-sequential ones) surfaced a *different*, still-open concurrency issue: `sqlalchemy.exc.InvalidRequestError: Session is already flushing` on one of the three. This is unrelated to the memory-extraction race above — it's about the request-scoped DB session itself under true parallel requests to one conversation — and is a **known, currently-unfixed gap**, flagged rather than silently left, not yet root-caused.
+
+**Also fixed the same session, smaller but real:** `POST /api/v1/chat` used to `404` if given a `conversation_id` that didn't exist yet. By request, it now creates a new conversation under that exact client-supplied ID instead — useful for clients that want to mint their own conversation handles without a separate `POST /conversations` round-trip first. Only auto-creation via an *omitted* `conversation_id` (§4.3's `ensure_default_conversation`) existed before; this is a second, independent creation path for an explicit ID that doesn't resolve.
 
 Also caught and fixed, all confirmed against real requests: `RenameFileRequest` sent the wrong field name (`filename` instead of the real `name`); `UpdateMetadataRequest` was flat instead of nesting most fields under `metadata` with `originalName`/`category` at the top level (needed `by_alias=True` on `.model_dump()` too — aliases apply to parsing but not serialization without it); `rename()`/`update_metadata()` were both unwrapping the response envelope one level too shallow (the guide documents these two specifically as `{file: {...}, requestId}`, not the bare object every read endpoint returns); `list_files()` crashed the server's own validation by sending an empty `search` param when none was given. Found two gotchas the guide itself doesn't mention: `GET /api/files/:id` needs `X-User-Id` despite being documented as optional (404s without it on a file that demonstrably exists), and `GET /api/files/:id/transactions` requires separate admin authentication the guide doesn't describe. Added a real `replace()` method (`PUT /api/files/:id/replace`, a documented endpoint with no prior SDK support). Confirmed definitively — the guide's endpoint list is exhaustive — that presigned-upload/multipart-chunking and all of `bulk.py`'s bulk operations have no corresponding real endpoint at all; both were already flagged as speculative, now confirmed as such rather than hedged.

@@ -255,6 +255,12 @@ class GraphContainer(containers.DeclarativeContainer):
         tool_manager=tools.manager,
     )
 
+    # No longer wired into `nodes`/the compiled graph — it's constructed
+    # directly by packages/api/routers/chat.py as a background task
+    # after the response is sent, inside a fresh request-scoped session
+    # (same reasoning as the comment atop this class: this Factory
+    # depends on a per-request DB session that doesn't exist anymore by
+    # the time a background task runs, unless it's resolved fresh).
     extract_memory = providers.Factory(
         ExtractMemoryNode,
         memory_manager=memory.manager,
@@ -267,7 +273,6 @@ class GraphContainer(containers.DeclarativeContainer):
         retrieve=retrieve,
         tool=tool,
         llm=llm,
-        extract_memory=extract_memory,
     )
 
     router = providers.Factory(

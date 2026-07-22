@@ -24,6 +24,8 @@ This class does NOT know anything about:
 
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict
 from uuid import UUID
 
 from langchain_core.messages import BaseMessage
@@ -40,6 +42,20 @@ from packages.memory.schemas import (
 )
 from packages.memory.store import MemoryStore
 from packages.memory.summarizer import MemorySummarizer
+
+# `MemoryManager` is a per-call `providers.Factory` (see
+# packages/infrastructure/container/graph.py's own comment on why), so
+# a lock stored as an instance attribute wouldn't serialize anything —
+# a fresh instance, and a fresh lock, is constructed every call. This
+# is process-wide on purpose: summarize()'s check-then-act (below)
+# raced for real once memory extraction moved out of the blocking
+# graph path into a background task (packages/api/routers/chat.py) —
+# two turns close together in the same conversation could both see "no
+# summary yet" and both INSERT one, corrupting the one-summary-per-
+# conversation invariant permanently (every later fetch then raises
+# `MultipleResultsFound`). Keyed by conversation_id so unrelated
+# conversations still summarize fully in parallel.
+_summary_locks: dict[UUID, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 class MemoryManager:
@@ -151,20 +167,21 @@ class MemoryManager:
             messages=messages,
         )
 
-        existing = await self._store.get_by_conversation_and_type(
-            conversation_id,
-            MemoryType.SUMMARY,
-        )
+        async with _summary_locks[conversation_id]:
+            existing = await self._store.get_by_conversation_and_type(
+                conversation_id,
+                MemoryType.SUMMARY,
+            )
 
-        if existing is not None:
-            await self._store.update(
-                existing.id,
-                UpdateMemoryRequest(content=summary.content),
-            )
-        else:
-            await self._store.create(
-                self._to_create_request(summary)
-            )
+            if existing is not None:
+                await self._store.update(
+                    existing.id,
+                    UpdateMemoryRequest(content=summary.content),
+                )
+            else:
+                await self._store.create(
+                    self._to_create_request(summary)
+                )
 
         return summary
 

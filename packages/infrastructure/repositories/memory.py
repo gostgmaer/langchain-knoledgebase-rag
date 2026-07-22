@@ -42,11 +42,28 @@ class MemoryRepository(BaseRepository[Memory]):
         conversation_id: UUID,
         type: MemoryType,
     ) -> Memory | None:
-        stmt = select(Memory).where(
-            Memory.conversation_id == conversation_id,
-            Memory.type == type,
+        """
+        "One per conversation" (e.g. a running summary) is an app-level
+        invariant, not a DB constraint — `MemoryManager.summarize()`
+        guards against creating duplicates going forward (see its own
+        per-conversation lock), but this stays defensive rather than
+        `scalar_one_or_none()`-and-crash: takes the most recently
+        updated row if more than one somehow exists, instead of raising
+        `MultipleResultsFound` and breaking every future call for that
+        conversation until someone manually cleans up the DB.
+        """
+
+        stmt = (
+            select(Memory)
+            .where(
+                Memory.conversation_id == conversation_id,
+                Memory.type == type,
+            )
+            .order_by(Memory.updated_at.desc())
+            .limit(1)
         )
-        return await self.scalar(stmt)
+        results = await self.scalars(stmt)
+        return results[0] if results else None
 
     async def delete_by_conversation(
         self,

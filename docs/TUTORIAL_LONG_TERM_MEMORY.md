@@ -127,6 +127,8 @@ async def __call__(self, state):
 
 `LoadMemoryNode` searches for anything relevant to the *current* message and stuffs it into `state["memories"]`, which `PromptBuilder` later folds into the system prompt so the LLM sees it as context. `ExtractMemoryNode` runs after the response is generated, asking a separate LLM call "what from this exchange is worth remembering long-term," and saves whatever it decides.
 
+> **Update, later pass:** both of these snippets are slightly out of date about *where* each node runs from, though neither node's own logic changed. `LoadMemoryNode` now returns `{"memories": [...]}` (a partial state update) instead of mutating and returning the whole `state` dict shown above — it started running *concurrently* with the planner rather than after it, and the old mutate-the-whole-object pattern broke under that concurrency (see `docs/CHANGELOG.md`'s "chat felt slow" entry). `ExtractMemoryNode` is no longer called from inside the graph at all — the two LLM calls it makes were blocking every chat response for no reason, so it's now a background task the chat router schedules *after* the response is already sent (`packages/api/routers/chat.py`). Its own `__call__(state)` signature and logic are unchanged; only the caller and the timing changed. The DI-lifetime lesson in this section (§4, below) is unaffected either way — `extract_memory` still needs to be a `Factory`, for the same request-scoped-session reason, whether it's invoked from the graph or from a background task's own fresh session.
+
 ---
 
 ## 5. Three bugs, three lessons — found only by actually testing it
@@ -229,7 +231,7 @@ SELECT type, content, importance FROM memories ORDER BY created_at DESC;
 | Orchestrator | `packages/memory/manager.py` | Ties store/extractor/summarizer/retriever together |
 | Extraction (semantic) | `packages/memory/implementations/llm_extractor.py` | Asks an LLM what atomic facts are worth remembering |
 | Summarization (episodic) | `packages/memory/implementations/llm_summarizer.py` | Asks an LLM to summarize the whole conversation so far |
-| Graph nodes | `packages/graph/nodes/{load_memory,extract_memory}.py` | Where this runs inside a chat turn |
+| Graph nodes | `packages/graph/nodes/{load_memory,extract_memory}.py` | `load_memory` runs inside the graph (concurrently with `planner`); `extract_memory` no longer does — it's called from `packages/api/routers/chat.py` as a background task after the response is sent |
 | DI wiring | `packages/infrastructure/container/{memory,graph}.py` | How all of the above get constructed — and where the `Singleton`/`Factory` lesson lives |
 
 ---

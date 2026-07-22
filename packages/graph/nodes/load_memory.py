@@ -15,7 +15,22 @@ class LoadMemoryNode:
     async def __call__(
         self,
         state,
-    ):
+    ) -> dict:
+        """
+        Returns a partial update (`{"memories": [...]}`), not the whole
+        mutated `state` object. Mutating and returning the full state
+        happened to work under the graph's old strictly-sequential
+        topology (only one node ever ran per step, so there was never
+        a second write to reconcile it against) but broke the moment
+        `planner` started running concurrently with this node
+        (packages/graph/builder.py's `planner`/`load_memory` fan-out):
+        LangGraph read this node's full-state return as a competing
+        write to every key in it, including `rewritten_query` — a key
+        this node never actually sets — and raised `InvalidUpdateError`
+        ("Can receive only one value per step") since planner was
+        writing that same key in the same step. Every node should
+        return only the keys it actually changed.
+        """
 
         query = state["messages"][-1].content
 
@@ -27,9 +42,9 @@ class LoadMemoryNode:
             )
         )
 
-        state["memories"] = [
-            result.memory
-            for result in response.results
-        ]
-
-        return state
+        return {
+            "memories": [
+                result.memory
+                for result in response.results
+            ]
+        }
