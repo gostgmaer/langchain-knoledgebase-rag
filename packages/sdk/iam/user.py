@@ -32,5 +32,5 @@ class IAMUsersSDK(BaseClient):
         )
 
         return User.model_validate(
-            response.json(),
+            self._unwrap(response),
         )

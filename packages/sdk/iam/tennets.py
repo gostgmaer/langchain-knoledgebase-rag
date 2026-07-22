@@ -32,5 +32,5 @@ class IAMTenantsSDK(BaseClient):
         )
 
         return Tenant.model_validate(
-            response.json(),
+            self._unwrap(response),
         )

@@ -44,7 +44,7 @@ class IAMAuthSDK(BaseClient):
             },
         )
 
-        return ServiceToken.model_validate(response.json())
+        return ServiceToken.model_validate(self._unwrap(response))
 
     async def introspect(
         self,
@@ -63,7 +63,7 @@ class IAMAuthSDK(BaseClient):
         )
 
         return IntrospectionResponse.model_validate(
-            response.json(),
+            self._unwrap(response),
         )
 
     async def get_current_user(
@@ -80,5 +80,5 @@ class IAMAuthSDK(BaseClient):
         )
 
         return CurrentUser.model_validate(
-            response.json(),
+            self._unwrap(response),
         )

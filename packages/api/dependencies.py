@@ -10,6 +10,7 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import Depends, HTTPException, Request, status
 
 from packages.infrastructure.ai.manager import LLMManager
+from packages.config.loader import settings
 from packages.conversation.manager import ConversationManager
 from packages.graph.manager import GraphManager
 from packages.infrastructure.container import ApplicationContainer
@@ -135,22 +136,35 @@ async def get_current_user(
 
 def require_permission(code: str):
     """
-    FastAPI dependency factory: raises 403 if a verified current user
-    lacks the given permission code. No-ops (fail-open) when there's
-    no verified user at all, matching AuthenticationMiddleware's
-    fail-open design — enforcement only turns on once real auth flows.
+    FastAPI dependency factory: raises 401 if no verified user is
+    present, 403 if they lack the given permission code. `roles`/
+    `permissions` on `CurrentUser` are plain string codes (e.g.
+    `"user:read"`), matching the real IAM service's JWT claim shape
+    (`packages/sdk/iam/models.py`), not `{id, name, code}` objects.
+
+    Gated behind `settings.features.enable_rbac` — a master kill-switch
+    (`ENABLE_RBAC` in `.env`, default off). While off, this no-ops
+    entirely regardless of whether a route uses it, so attaching
+    `Depends(require_permission(...))` to a route today is inert until
+    the flag flips on — deliberately, since the real IAM integration
+    (`packages/sdk/iam/`) was only just corrected against the live
+    service and hasn't been verified end-to-end with real credentials
+    yet (see `docs/CHANGELOG.md`).
     """
 
     async def _check(
         current_user: CurrentUser | None = Depends(get_current_user),
     ) -> None:
-        if current_user is None:
+        if not settings.features.enable_rbac:
             return
 
-        if not any(
-            permission.code == code
-            for permission in current_user.permissions
-        ):
+        if current_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required.",
+            )
+
+        if code not in current_user.permissions:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing required permission: {code}",
@@ -165,13 +179,16 @@ def require_role(code: str):
     async def _check(
         current_user: CurrentUser | None = Depends(get_current_user),
     ) -> None:
-        if current_user is None:
+        if not settings.features.enable_rbac:
             return
 
-        if not any(
-            role.code == code
-            for role in current_user.roles
-        ):
+        if current_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required.",
+            )
+
+        if code not in current_user.roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing required role: {code}",

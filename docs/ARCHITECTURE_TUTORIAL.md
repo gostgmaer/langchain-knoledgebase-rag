@@ -562,8 +562,14 @@ async def resolve(self, access_token):
 
 `packages/sdk/iam/client.py`'s `IAMClient` is a facade composing three sub-clients, all built on a shared `httpx.AsyncClient` (`packages/infrastructure/http/client.py`'s `create_http_client()`) and `packages.config.iam.IAMSettings`:
 
-- **`IAMAuthSDK`** (`auth.py`) — `get_current_user(access_token)` calls the real IAM `/me` endpoint with the bearer token, returning a `CurrentUser` Pydantic model (`id`, `tenant_id`, `roles`, `permissions`). Also has `get_service_token()` (client-credentials grant) and `introspect(session_id)` for session validation.
+- **`IAMAuthSDK`** (`auth.py`) — `get_current_user(access_token)` calls the real IAM `/auth/me` endpoint with the bearer token, returning a `CurrentUser` Pydantic model. Also has `get_service_token()` (client-credentials grant) and `introspect(session_id)` for session validation.
 - **`IAMUsersSDK`** (`user.py`), **`IAMTenantsSDK`** (`tennets.py`) — user/tenant management endpoints, not exercised on the hot chat path.
+
+**Fixed against the real, live IAM service** (`https://iam.easydev.in`, confirmed reachable via `/health`, JWKS, and `/.well-known/openid-configuration`) — the same class of contract mismatch found earlier with the Upload Service: every response wraps its payload in `{success, data, ...}` (now unwrapped via `BaseClient._unwrap()`, the same helper the Upload SDK uses), and `CurrentUser` originally modeled `roles`/`permissions` as nested `{id, name, code}` objects when the real service's JWT claims (confirmed via `openid-configuration`'s `claims_supported`) — and `/auth/me`, which returns that same claims shape — carry them as **plain string codes** (e.g. `"super_admin"`, `"user:read"`).
+
+**`GET /auth/me` fully confirmed live with a real access token** (a genuine `super_admin` session) — not just the error paths. The envelope-unwrap and string-code fixes both hold against real data: a real 157-entry `permissions` list, `roles: ["super_admin"]`. One real discrepancy found by decoding the JWT and calling `/auth/me` side by side: the JWT's own claim for the user's ID is `sub`, but `/auth/me`'s HTTP response calls the same value `id` — `CurrentUser.id` uses `AliasChoices("id", "sub")` to handle both. `require_permission()`/`require_role()` were then exercised directly against this real, fully-parsed user (`enable_rbac` forced on in-process for the test) — a real permission the user has, a permission they don't, a real role, and a fake role all resolved exactly as expected. This is the first time any part of this chain was proven against real production data rather than a synthetic test.
+
+**Still not confirmed live**: the success-response shape for `/auth/token` (client-credentials) and `/auth/introspect`, since real `IAM_CLIENT_ID`/`IAM_CLIENT_SECRET` weren't available yet at the time of this pass — `ServiceToken`/`IntrospectionResponse` remain modeled from the service's documented convention, flagged in-code as inferred rather than verified, same as before.
 
 ### 9.4 Permission enforcement — `require_permission()`/`require_role()` (`packages/api/dependencies.py`)
 
@@ -572,14 +578,18 @@ FastAPI dependency **factories** (not dependencies themselves — you call them 
 ```python
 def require_permission(code: str):
     async def _check(current_user: CurrentUser | None = Depends(get_current_user)):
+        if not settings.features.enable_rbac:
+            return  # master kill-switch — off by default
         if current_user is None:
-            return  # fail open — no verified user, no enforcement
-        if not any(p.code == code for p in current_user.permissions):
+            raise HTTPException(401, "Authentication required.")
+        if code not in current_user.permissions:
             raise HTTPException(403, f"Missing required permission: {code}")
     return _check
 ```
 
-Used as `Depends(require_permission("documents:write"))` on a route. Consistently fails open — matches `AuthenticationMiddleware`'s design: enforcement is additive once real auth is flowing, never a hard requirement that would break the API when IAM isn't configured.
+Used as `Depends(require_permission("documents:write"))` on a route — `code` is checked via plain string containment now (`current_user.permissions: list[str]`), not `.code` attribute comparison against an object, matching the real JWT-claims shape from §9.3.
+
+**Gated behind `settings.features.enable_rbac`** (`ENABLE_RBAC` in `.env`, default `false` — `packages/config/features.py`), a master kill-switch independent of whether any route actually uses `require_permission`/`require_role`. While off, both no-op unconditionally, same as before. This exists because the real IAM integration was only just corrected against the live service and hasn't been verified end-to-end with real client credentials yet — flipping it on is a deliberate, separate step once that's done, not an automatic side effect of fixing the SDK. `AuthenticationMiddleware`'s own identity resolution (§9.1/§9.2) is unaffected by this flag either way — it still resolves and fails open exactly as before regardless of whether RBAC enforcement is armed.
 
 ### 9.5 Swagger discoverability — `packages/api/security.py`
 

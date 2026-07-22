@@ -17,6 +17,8 @@ class IAMEndpoints:
     # Service-to-service authentication.
     TOKEN = "/auth/token"
 
+    SESSION = "/auth/session"
+
     # Validate an existing session and retrieve fresh roles/permissions.
     INTROSPECT = "/auth/introspect"
 
