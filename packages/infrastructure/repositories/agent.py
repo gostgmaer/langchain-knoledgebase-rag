@@ -45,8 +45,37 @@ class AgentRepository(BaseRepository[Agent]):
     async def list_enabled(self) -> list[Agent]:
         stmt = (
             select(Agent)
-            .where(Agent.enabled.is_(True))
+            .where(Agent.is_active.is_(True))
             .order_by(Agent.name)
         )
 
         return await self.scalars(stmt)
+
+    async def list_by_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Agent]:
+        stmt = (
+            select(Agent)
+            .where(Agent.tenant_id == tenant_id)
+            .order_by(Agent.name)
+            .offset(offset)
+            .limit(limit)
+        )
+
+        return await self.scalars(stmt)
+
+    async def count_by_tenant(
+        self,
+        tenant_id: UUID,
+    ) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(Agent)
+            .where(Agent.tenant_id == tenant_id)
+        )
+
+        return int(await self.session.scalar(stmt) or 0)

@@ -8,6 +8,7 @@ from packages.infrastructure.repositories.conversation import ConversationReposi
 from packages.infrastructure.repositories.document import DocumentRepository
 from packages.infrastructure.repositories.document_chunk import DocumentChunkRepository
 from packages.infrastructure.repositories.embedding import EmbeddingRepository
+from packages.infrastructure.repositories.feedback import FeedbackRepository
 from packages.infrastructure.repositories.knowledge_base import KnowledgeBaseRepository
 from packages.infrastructure.repositories.memory import MemoryRepository
 from packages.infrastructure.repositories.message import MessageRepository
@@ -76,5 +77,10 @@ class RepositoryContainer(
 
     memory = providers.Factory(
         MemoryRepository,
+        session=session,
+    )
+
+    feedback = providers.Factory(
+        FeedbackRepository,
         session=session,
     )

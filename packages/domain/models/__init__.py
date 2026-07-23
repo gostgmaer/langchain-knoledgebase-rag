@@ -7,6 +7,7 @@ from .conversation import Conversation
 from .document import Document
 from .document_chunk import DocumentChunk
 from .embedding import Embedding
+from .feedback import Feedback
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .message import Message
@@ -26,6 +27,7 @@ __all__ = [
     "Document",
     "DocumentChunk",
     "Embedding",
+    "Feedback",
     "KnowledgeBase",
     "Memory",
     "Message",
