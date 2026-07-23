@@ -12,6 +12,7 @@ from packages.infrastructure.container.database import DatabaseContainer
 from packages.infrastructure.container.graph import GraphContainer
 from packages.infrastructure.container.iam import IAMContainer
 from packages.infrastructure.container.memory import MemoryContainer
+from packages.infrastructure.container.queue import QueueContainer
 from packages.infrastructure.container.rag import RAGContainer
 from packages.infrastructure.container.repositories import RepositoryContainer
 from packages.infrastructure.container.services import ServiceContainer
@@ -64,6 +65,15 @@ class ApplicationContainer(containers.DeclarativeContainer):
 
     upload = providers.Container(
         UploadContainer,
+    )
+
+    #
+    # Background job queue (arq) — producer side only, see
+    # packages/infrastructure/container/queue.py
+    #
+
+    queue = providers.Container(
+        QueueContainer,
     )
 
     #

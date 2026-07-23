@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 
+from arq.connections import RedisSettings as ArqRedisSettings
+from arq.connections import create_pool
 from dependency_injector import providers
 from fastapi import FastAPI
 
@@ -71,6 +73,23 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Could not render graph.png: %s", exc)
 
+    # Producer-side pool for enqueuing jobs onto the real arq queue
+    # (packages/worker/) — e.g. document ingestion, see
+    # packages/api/routers/documents.py. Same non-fatal idiom as the
+    # checkpointer above: document.py falls back to running ingestion
+    # in-process via BackgroundTasks when this stays None.
+    queue_pool = None
+    try:
+        queue_pool = await create_pool(ArqRedisSettings.from_dsn(settings.redis.url))
+        container.queue.pool.override(providers.Object(queue_pool))
+        logger.info("Job queue ready — document ingestion will enqueue onto arq.")
+    except Exception as exc:
+        logger.warning(
+            "Could not connect to Redis for the job queue, falling back to "
+            "in-process ingestion: %s",
+            exc,
+        )
+
     try:
         yield
 
@@ -84,6 +103,10 @@ async def lifespan(app: FastAPI):
             # through this checkpointer.
             await asyncio.to_thread(checkpointer_conn.close)
         container.graph.checkpointer.reset_override()
+
+        if queue_pool is not None:
+            await queue_pool.aclose()
+        container.queue.pool.reset_override()
 
         engine = container.database.engine()
         await engine.dispose()

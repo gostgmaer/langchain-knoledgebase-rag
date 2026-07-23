@@ -121,12 +121,22 @@ async def upload_document(
         chunking_strategy=chunking_strategy,
     )
 
-    background_tasks.add_task(
-        _ingest_in_background,
-        container,
-        ingestion_request,
-        scratch_path,
-    )
+    pool = container.queue.pool()
+    if pool is not None:
+        # Real queued ingestion (packages/worker/jobs.py::ingest_document_job)
+        # — gets retry on failure via the worker's max_tries, unlike the
+        # in-process fallback below.
+        await pool.enqueue_job("ingest_document_job", ingestion_request, str(scratch_path))
+    else:
+        # Redis was unreachable at API startup (packages/api/lifespan.py) —
+        # degrade to running ingestion in-process rather than failing the
+        # upload outright.
+        background_tasks.add_task(
+            _ingest_in_background,
+            container,
+            ingestion_request,
+            scratch_path,
+        )
 
     return ApiResponse(
         message="Document accepted for background ingestion.",
@@ -239,12 +249,15 @@ async def _ingest_in_background(
     scratch_path: Path,
 ) -> None:
     """
-    Runs the real ingestion pipeline after the response has already
-    been sent. Opens its own fresh request-scoped session rather than
-    reusing the original request's — that session may already be
-    closed by the time this runs, since background tasks execute
-    after the response, not necessarily before request-scoped
-    dependency cleanup.
+    Fallback ingestion path, used only when the arq job queue was
+    unreachable at API startup (see the `pool is None` branch in
+    `upload_document` above and packages/api/lifespan.py) — otherwise
+    packages/worker/jobs.py::ingest_document_job handles this instead,
+    with real retry on failure. Opens its own fresh request-scoped
+    session rather than reusing the original request's — that session
+    may already be closed by the time this runs, since background
+    tasks execute after the response, not necessarily before
+    request-scoped dependency cleanup.
     """
 
     try:

@@ -6,17 +6,28 @@ from arq import cron, run_worker
 from arq.connections import RedisSettings as ArqRedisSettings
 
 from packages.config.loader import settings
+from packages.infrastructure.container import ApplicationContainer
 from packages.shared.logging import configure_logger, get_logger
-from packages.worker.jobs import cleanup_orphaned_scratch_files
+from packages.worker.jobs import cleanup_orphaned_scratch_files, ingest_document_job
 
 logger = get_logger(__name__)
 
 
 async def _on_startup(ctx: dict[str, Any]) -> None:
+    # One long-lived container per worker process, mirroring how
+    # packages/api/lifespan.py builds exactly one for the API process.
+    # Job functions (packages/worker/jobs.py) pull it back out of `ctx`
+    # and open their own request_scoped_session per job — the same
+    # per-call session-scoping every background task in this app uses.
+    ctx["container"] = ApplicationContainer()
     logger.info("Worker started", queue_prefix=settings.queue.prefix)
 
 
 async def _on_shutdown(ctx: dict[str, Any]) -> None:
+    container: ApplicationContainer | None = ctx.get("container")
+    if container is not None:
+        engine = container.database.engine()
+        await engine.dispose()
     logger.info("Worker shutting down")
 
 
@@ -27,14 +38,15 @@ class WorkerSettings:
     despite `arq` being a declared dependency the whole time
     (docs/BUILD_STATUS.md's Background Jobs (Phase 12) gap).
 
-    Document ingestion and memory extraction deliberately stay on
-    FastAPI `BackgroundTasks` (packages/api/routers/documents.py,
-    packages/api/routers/chat.py) rather than moving onto this queue —
-    both are already built, tested, and verified working this session;
-    migrating them here would trade that for durability/retry the
-    roadmap doesn't require yet, at real regression risk to something
-    that already works. This worker is for genuinely new background
-    work instead, starting with a real, if modest, first job.
+    Document ingestion (packages/api/routers/documents.py) now enqueues
+    onto this queue as `ingest_document_job`, with real retry (via
+    `max_tries` below) on failure — falling back to running in-process
+    via FastAPI `BackgroundTasks` only if Redis was unreachable at API
+    startup, the same "degrade instead of crash" idiom used for the
+    Postgres checkpointer. Memory extraction (packages/api/routers/chat.py)
+    deliberately stays on `BackgroundTasks` — it's already proven
+    working and doesn't need retry/durability the way a multi-step
+    ingestion pipeline does.
 
     Run via `arq packages.worker.main.WorkerSettings` (arq's own CLI —
     what production/Docker should use, docker/Dockerfile.worker) or
@@ -42,7 +54,7 @@ class WorkerSettings:
     same thing through `run_worker()` below.
     """
 
-    functions = [cleanup_orphaned_scratch_files]
+    functions = [cleanup_orphaned_scratch_files, ingest_document_job]
 
     cron_jobs = [
         # 4x/day is arbitrary but reasonable for a defense-in-depth
