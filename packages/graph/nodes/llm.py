@@ -11,7 +11,7 @@ from packages.prompts.builder import PromptBuilder
 from packages.chat.chat_service import ChatService
 from packages.chat.request import ChatRequest
 from packages.chat.response import ChatResponse
-from packages.shared.messages import normalize_message_content
+from packages.shared.messages import normalize_message_content, sanitize_tool_call_args
 from packages.tools.manager import ToolManager
 
 
@@ -63,6 +63,7 @@ class LLMNode:
             response = await self._chat.chat(request)
 
         response.message.content = normalize_message_content(response.message.content)
+        sanitize_tool_call_args(response.message)
 
         state["messages"].append(response.message)
         state["usage"] = response.usage or {}

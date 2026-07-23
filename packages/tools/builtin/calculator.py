@@ -346,6 +346,15 @@ def calculator(expression: str) -> dict:
 
         result = calculator_engine.evaluate(expression)
 
+        # `**`/`factorial` have no built-in size limit and can produce
+        # a result thousands of digits long. Checked via `bit_length()`
+        # (never converts to a string) so this never trips CPython's
+        # own int-to-str digit-count guard first — that raises a
+        # ValueError with a confusing "set_int_max_str_digits()"
+        # message instead of the clean one below.
+        if isinstance(result, int) and abs(result).bit_length() > 10_000:
+            raise OverflowError
+
         response = CalculatorSuccess(
             success=True,
             tool="calculator",
