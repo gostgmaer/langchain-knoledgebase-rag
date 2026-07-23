@@ -50,6 +50,31 @@ class DocumentRepository(BaseRepository[Document]):
 
         return await self.scalar(stmt)
 
+    async def get_current_by_tenant_kb_and_filename(
+        self,
+        tenant_id: UUID,
+        knowledge_base_id: UUID,
+        file_name: str,
+    ) -> Document | None:
+        """
+        Return the live version of a document lineage — the one
+        Document row with `is_current=True` for this tenant/knowledge
+        base/filename. Used by the ingestion pipeline to detect a
+        re-upload with *changed* content (a checksum miss against an
+        existing filename), distinct from a brand-new document.
+        """
+        stmt = (
+            select(Document)
+            .where(
+                Document.tenant_id == tenant_id,
+                Document.knowledge_base_id == knowledge_base_id,
+                Document.file_name == file_name,
+                Document.is_current.is_(True),
+            )
+        )
+
+        return await self.scalar(stmt)
+
     async def list_by_knowledge_base(
         self,
         knowledge_base_id: UUID,

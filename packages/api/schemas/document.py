@@ -25,6 +25,8 @@ class DocumentUploadResponseSchema(BaseModel):
     document_name: str
     file_id: str
     """The Upload Service's own file ID — a Mongo ObjectId string, not a UUID."""
+    upload_job_id: UUID
+    """Poll GET /api/v1/upload-jobs/{id} for real pipeline progress."""
 
 
 class DocumentResponseSchema(BaseModel):
@@ -44,6 +46,7 @@ class DocumentResponseSchema(BaseModel):
     extension: str
     size_bytes: int
     status: str
+    is_current: bool
     created_at: datetime
     updated_at: datetime
 
@@ -59,3 +62,28 @@ class DocumentListResponseSchema(BaseModel):
     limit: int
     offset: int
     documents: list[DocumentResponseSchema]
+
+
+class DocumentVersionResponseSchema(BaseModel):
+    """One entry in a document's version lineage."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    document_id: UUID
+    version_number: int
+    superseded_at: datetime | None
+    is_current: bool = False
+    """Set by the router, not read from the DB row directly — True for the one entry whose superseded_at is still null."""
+
+
+class DocumentVersionListResponseSchema(BaseModel):
+    """A document's full version history, oldest first."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    root_document_id: UUID
+    versions: list[DocumentVersionResponseSchema]

@@ -49,7 +49,7 @@ class ChatService:
                 request,
             )
 
-            assistant_response, citations = await self._execute_runtime(
+            assistant_response, citations, raw_response = await self._execute_runtime(
                 conversation,
                 user_message,
                 stream=False,
@@ -58,6 +58,7 @@ class ChatService:
             assistant_message = await self._save_assistant_message(
                 conversation,
                 assistant_response,
+                raw_response,
             )
 
             await self._update_conversation(conversation)
@@ -95,8 +96,9 @@ class ChatService:
             )
 
             chunks: list[str] = []
+            raw_response: dict = {}
 
-            async for token in self._stream_runtime(conversation, user_message):
+            async for token in self._stream_runtime(conversation, user_message, raw_response):
                 chunks.append(token)
                 yield token
 
@@ -105,6 +107,7 @@ class ChatService:
             await self._save_assistant_message(
                 conversation,
                 assistant_response,
+                raw_response,
             )
 
             await self._update_conversation(conversation)
@@ -177,12 +180,13 @@ class ChatService:
         conversation: ConversationResponse,
         message: Message,
         stream: bool,
-    ) -> tuple[str, list[CitationDTO]]:
+    ) -> tuple[str, list[CitationDTO], dict]:
         """
         Runs the real LangGraph pipeline (planner, retrieval, tools,
         memory extraction) for this conversation and returns the
-        assistant's final response text plus any citations gathered
-        during retrieval.
+        assistant's final response text, any citations gathered during
+        retrieval, and the raw provider response metadata (for
+        AIResponse — see _save_assistant_message).
         """
 
         state = await self._build_state(conversation, stream)
@@ -199,33 +203,57 @@ class ChatService:
             for citation in result.get("citations") or []
         ]
 
-        return result["messages"][-1].content, citations
+        final_message = result["messages"][-1]
+        raw_response = {
+            "response_metadata": getattr(final_message, "response_metadata", None) or {},
+            "additional_kwargs": getattr(final_message, "additional_kwargs", None) or {},
+            "usage_metadata": getattr(final_message, "usage_metadata", None) or {},
+        }
+
+        return final_message.content, citations, raw_response
 
     async def _stream_runtime(
         self,
         conversation: ConversationResponse,
         message: Message,
+        raw_response: dict,
     ) -> AsyncIterator[str]:
         """
         Same pipeline as _execute_runtime(), but yields each token
         chunk pushed by LLMNode's stream writer as it arrives, instead
-        of waiting for the full graph run to finish.
+        of waiting for the full graph run to finish. `raw_response` is
+        mutated in place with the one "metadata" event LLMNode emits
+        after the token loop ends — stream_mode="custom" never
+        surfaces the final graph state directly, so this is the only
+        way the raw provider response reaches the caller once
+        streaming completes.
         """
 
         state = await self._build_state(conversation, stream=True)
 
         async for event in self._graph.stream(state):
-            if isinstance(event, dict) and event.get("type") == "token":
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") == "token":
                 yield event["content"]
+            elif event.get("type") == "metadata":
+                raw_response["response_metadata"] = event.get("response_metadata", {})
+                raw_response["additional_kwargs"] = event.get("additional_kwargs", {})
 
     async def _save_assistant_message(
         self,
         conversation: ConversationResponse,
         response: str,
+        raw_response: dict | None = None,
     ) -> Message:
+        agent = await self._uow.agents.get(conversation.agent_id)
+
         return await self._message_service.create_assistant_message(
             conversation_id=conversation.id,
             content=response,
+            provider=agent.llm_provider if agent else None,
+            model=agent.llm_model if agent else None,
+            raw_response=raw_response,
         )
 
     async def _update_conversation(

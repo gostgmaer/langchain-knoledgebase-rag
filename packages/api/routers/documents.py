@@ -20,10 +20,13 @@ from packages.api.schemas.document import (
     DocumentListResponseSchema,
     DocumentResponseSchema,
     DocumentUploadResponseSchema,
+    DocumentVersionListResponseSchema,
+    DocumentVersionResponseSchema,
 )
 from packages.config.loader import settings
 from packages.conversation.bootstrap import ensure_default_model_profile
 from packages.domain.enums.document_status import DocumentStatus
+from packages.domain.models.upload_job import UploadJob
 from packages.infrastructure.container import ApplicationContainer
 from packages.knowledge.bootstrap import ensure_default_knowledge_base
 from packages.knowledge.schemas import ChunkingStrategy, IngestionRequest
@@ -121,12 +124,28 @@ async def upload_document(
         chunking_strategy=chunking_strategy,
     )
 
+    upload_jobs = container.repositories.upload_job()
+    upload_job = await upload_jobs.create(
+        UploadJob(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            file_name=file.filename,
+        )
+    )
+
     pool = container.queue.pool()
     if pool is not None:
         # Real queued ingestion (packages/worker/jobs.py::ingest_document_job)
         # — gets retry on failure via the worker's max_tries, unlike the
         # in-process fallback below.
-        await pool.enqueue_job("ingest_document_job", ingestion_request, str(scratch_path))
+        job = await pool.enqueue_job(
+            "ingest_document_job",
+            ingestion_request,
+            str(scratch_path),
+            str(upload_job.id),
+        )
+        upload_job.job_id = job.job_id if job is not None else None
+        await upload_jobs.update(upload_job)
     else:
         # Redis was unreachable at API startup (packages/api/lifespan.py) —
         # degrade to running ingestion in-process rather than failing the
@@ -136,6 +155,7 @@ async def upload_document(
             container,
             ingestion_request,
             scratch_path,
+            upload_job.id,
         )
 
     return ApiResponse(
@@ -144,6 +164,7 @@ async def upload_document(
             status=DocumentStatus.PENDING,
             document_name=file.filename,
             file_id=uploaded_file.id,
+            upload_job_id=upload_job.id,
         ),
     )
 
@@ -208,6 +229,65 @@ async def get_document(
     )
 
 
+@router.get(
+    "/{document_id}/versions",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[DocumentVersionListResponseSchema],
+    summary="List a document's version history",
+    description=(
+        "Lists every version in this document's re-upload lineage, oldest "
+        "first. A document that has never been re-uploaded with changed "
+        "content has an empty list here — versioning only starts once a "
+        "second upload with the same filename but different content arrives."
+    ),
+)
+async def list_document_versions(
+    document_id: UUID,
+    request: Request,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    documents = container.repositories.document()
+    document = await documents.get(document_id)
+
+    if document is None or document.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    document_versions = container.repositories.document_version()
+    own_version = await document_versions.get_by_document(document_id)
+
+    if own_version is None:
+        return ApiResponse(
+            message="This document has no version history yet.",
+            data=DocumentVersionListResponseSchema(
+                root_document_id=document_id,
+                versions=[],
+            ),
+        )
+
+    rows = await document_versions.list_by_root(own_version.root_document_id)
+
+    return ApiResponse(
+        message="Document versions retrieved.",
+        data=DocumentVersionListResponseSchema(
+            root_document_id=own_version.root_document_id,
+            versions=[
+                DocumentVersionResponseSchema(
+                    document_id=v.document_id,
+                    version_number=v.version_number,
+                    superseded_at=v.superseded_at,
+                    is_current=v.superseded_at is None,
+                )
+                for v in rows
+            ],
+        ),
+    )
+
+
 @router.delete(
     "/{document_id}",
     status_code=status.HTTP_200_OK,
@@ -247,6 +327,7 @@ async def _ingest_in_background(
     container: ApplicationContainer,
     ingestion_request: IngestionRequest,
     scratch_path: Path,
+    upload_job_id: UUID,
 ) -> None:
     """
     Fallback ingestion path, used only when the arq job queue was
@@ -262,6 +343,11 @@ async def _ingest_in_background(
 
     try:
         async with request_scoped_session(container):
+            upload_jobs = container.repositories.upload_job()
+            upload_job = await upload_jobs.get(upload_job_id)
+            if upload_job is not None:
+                await upload_jobs.mark_running(upload_job)
+
             pipeline = container.rag.ingestion_pipeline()
             response = await pipeline.ingest(ingestion_request)
 
@@ -272,12 +358,24 @@ async def _ingest_in_background(
                 chunk_count=response.chunk_count,
             )
 
+            if upload_job is not None:
+                await upload_jobs.mark_succeeded(upload_job, response.document_id)
+
     except Exception as exc:
         logger.exception(
             "Background ingestion failed",
             document_name=ingestion_request.document_name,
             error=str(exc),
         )
+
+        try:
+            async with request_scoped_session(container):
+                upload_jobs = container.repositories.upload_job()
+                upload_job = await upload_jobs.get(upload_job_id)
+                if upload_job is not None:
+                    await upload_jobs.mark_failed(upload_job, str(exc))
+        except Exception:
+            logger.exception("Could not record upload job failure")
 
     finally:
         scratch_path.unlink(missing_ok=True)

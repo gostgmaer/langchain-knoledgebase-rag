@@ -87,6 +87,21 @@ class LLMNode:
             writer({"type": "token", "content": normalize_message_content(chunk.content)})
             final = chunk if final is None else final + chunk
 
+        # The non-streaming path's caller (ChatService._execute_runtime)
+        # reads response_metadata/additional_kwargs straight off
+        # result["messages"][-1] — but GraphManager.stream()'s
+        # stream_mode="custom" only ever surfaces writer events, never
+        # the final graph state, so streaming needs this pushed
+        # through explicitly or that data is unreachable after the
+        # loop ends.
+        writer(
+            {
+                "type": "metadata",
+                "response_metadata": getattr(final, "response_metadata", None) or {},
+                "additional_kwargs": getattr(final, "additional_kwargs", None) or {},
+            }
+        )
+
         return ChatResponse(
             message=final,
             usage=getattr(final, "usage_metadata", None) or {},

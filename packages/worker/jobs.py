@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from packages.api.dependencies import request_scoped_session
 from packages.config.loader import settings
@@ -63,6 +64,7 @@ async def ingest_document_job(
     ctx: dict[str, Any],
     ingestion_request: IngestionRequest,
     scratch_path: str,
+    upload_job_id: str,
 ) -> dict[str, Any]:
     """
     Real document ingestion (load, clean, chunk, embed, store), run as
@@ -73,14 +75,24 @@ async def ingest_document_job(
     long-lived `ApplicationContainer`, set up once in
     packages/worker/main.py's `_on_startup` — `request_scoped_session`
     gives this job its own fresh DB session/transaction, same as every
-    other background task in this app.
+    other background task in this app. `upload_job_id` identifies the
+    real UploadJob row (packages/domain/models/upload_job.py) to update
+    as this job progresses — looked up by our own primary key, not
+    arq's job id, so the fallback in-process path can update the exact
+    same kind of row without ever touching arq.
     """
 
     container: ApplicationContainer = ctx["container"]
     path = Path(scratch_path)
+    job_uuid = UUID(upload_job_id)
 
     try:
         async with request_scoped_session(container):
+            upload_jobs = container.repositories.upload_job()
+            upload_job = await upload_jobs.get(job_uuid)
+            if upload_job is not None:
+                await upload_jobs.mark_running(upload_job)
+
             pipeline = container.rag.ingestion_pipeline()
             response = await pipeline.ingest(ingestion_request)
 
@@ -90,6 +102,9 @@ async def ingest_document_job(
                 skipped=response.skipped,
                 chunk_count=response.chunk_count,
             )
+
+            if upload_job is not None:
+                await upload_jobs.mark_succeeded(upload_job, response.document_id)
 
             return {
                 "document_id": str(response.document_id),
@@ -103,6 +118,16 @@ async def ingest_document_job(
             document_name=ingestion_request.document_name,
             error=str(exc),
         )
+
+        try:
+            async with request_scoped_session(container):
+                upload_jobs = container.repositories.upload_job()
+                upload_job = await upload_jobs.get(job_uuid)
+                if upload_job is not None:
+                    await upload_jobs.mark_failed(upload_job, str(exc))
+        except Exception:
+            logger.exception("Could not record upload job failure")
+
         raise
 
     finally:

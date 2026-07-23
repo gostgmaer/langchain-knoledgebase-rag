@@ -111,6 +111,7 @@ class RAGContainer(
         embedding_manager=embeddings,
         vector_store=vectorstore,
         document_repository=repositories.document,
+        document_version_repository=repositories.document_version,
     )
 
     # Lazy, not eager — constructed on first real use so that the

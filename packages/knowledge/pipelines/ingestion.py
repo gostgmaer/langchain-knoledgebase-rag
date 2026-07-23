@@ -11,9 +11,11 @@ from langchain_core.documents import Document as LangChainDocument
 from packages.domain.enums.document_status import DocumentStatus
 from packages.domain.models.document import Document
 from packages.domain.models.document_chunk import DocumentChunk
+from packages.domain.models.document_version import DocumentVersion
 from packages.domain.models.embedding import Embedding
 
 from packages.infrastructure.repositories.document import DocumentRepository
+from packages.infrastructure.repositories.document_version import DocumentVersionRepository
 from packages.knowledge.embeddings.manager import EmbeddingManager
 from packages.knowledge.loaders.manager import DocumentLoaderManager
 from packages.knowledge.processors.base import DocumentProcessor
@@ -45,6 +47,7 @@ class IngestionPipeline:
         embedding_manager: EmbeddingManager,
         vector_store: VectorStoreManager,
         document_repository: DocumentRepository,
+        document_version_repository: DocumentVersionRepository,
     ) -> None:
         self.loader = loader
         self.transformer = transformer
@@ -52,6 +55,7 @@ class IngestionPipeline:
         self.embedding_manager = embedding_manager
         self.vector_store = vector_store
         self.document_repository = document_repository
+        self.document_version_repository = document_version_repository
 
     # ============================================================
     # Public
@@ -76,10 +80,23 @@ class IngestionPipeline:
                 skipped=True,
             )
 
+        # Looked up *before* creating the new row — once the new
+        # Document exists it also defaults `is_current=True` and
+        # shares the same file_name, so this lookup has to happen
+        # first or it can no longer tell old from new.
+        previous = await self.document_repository.get_current_by_tenant_kb_and_filename(
+            request.tenant_id,
+            request.knowledge_base_id,
+            request.document_name,
+        )
+
         document = await self._create_document_row(
             request,
             checksum,
         )
+
+        if previous is not None:
+            await self._track_version(previous, document)
 
         try:
             loaded_documents = await self._load(request)
@@ -151,6 +168,55 @@ class IngestionPipeline:
     @staticmethod
     def _checksum(path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    async def _track_version(
+        self,
+        previous: Document,
+        new: Document,
+    ) -> None:
+        """
+        Records that `new` supersedes `previous` — same tenant/
+        knowledge-base/filename, different (already-confirmed-not-a-
+        checksum-match) content. `previous` is never deleted, just
+        flipped to `is_current=False`; a DocumentVersion row is
+        created for it too if this is the first time it's ever been
+        superseded (it won't have one yet on a document's second
+        upload).
+        """
+
+        previous.is_current = False
+        await self.document_repository.update(previous)
+
+        previous_version = await self.document_version_repository.get_by_document(
+            previous.id,
+        )
+
+        if previous_version is not None:
+            root_document_id = previous_version.root_document_id
+        else:
+            root_document_id = previous.id
+            await self.document_version_repository.create(
+                DocumentVersion(
+                    document_id=previous.id,
+                    root_document_id=root_document_id,
+                    version_number=1,
+                    superseded_at=datetime.now(UTC),
+                )
+            )
+
+        next_version_number = (
+            await self.document_version_repository.max_version_number(root_document_id)
+            + 1
+        )
+
+        await self.document_version_repository.create(
+            DocumentVersion(
+                document_id=new.id,
+                root_document_id=root_document_id,
+                version_number=next_version_number,
+                superseded_at=None,
+            )
+        )
 
     async def _create_document_row(
         self,

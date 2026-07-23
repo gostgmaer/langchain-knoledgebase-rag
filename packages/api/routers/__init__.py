@@ -15,6 +15,7 @@ from packages.api.routers.models import router as model_router
 from packages.api.routers.prompts import router as prompt_router
 from packages.api.routers.search import router as search_router
 from packages.api.routers.tools import router as tool_router
+from packages.api.routers.upload_jobs import router as upload_job_router
 from packages.api.security import get_bearer_token, get_tenant_id
 
 api_router = APIRouter(
@@ -39,6 +40,7 @@ api_router.include_router(model_router)
 api_router.include_router(prompt_router)
 api_router.include_router(tool_router)
 api_router.include_router(feedback_router)
+api_router.include_router(upload_job_router)
 
 
 def register_routers(app: FastAPI) -> None:

@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import (
     BIGINT,
     JSON,
+    Boolean,
     Enum,
     ForeignKey,
     Index,
@@ -93,6 +94,16 @@ class Document(BaseModel):
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(DocumentStatus),
         default=DocumentStatus.PENDING,
+        nullable=False,
+    )
+
+    # True for whichever Document row is the live version of this
+    # tenant/knowledge-base/filename lineage. Flips to False the
+    # moment a re-upload with changed content creates a new row —
+    # see packages/domain/models/document_version.py.
+    is_current: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
         nullable=False,
     )
 
