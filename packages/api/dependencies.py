@@ -81,7 +81,18 @@ async def request_scoped_session(
         await session.rollback()
         raise
     finally:
-        current_session.reset(token)
+        try:
+            current_session.reset(token)
+        except ValueError:
+            # A cancelled/superseded request (e.g. a client aborting a
+            # fetch) can have this cleanup run via a task/Context other
+            # than the one `.set()` was called from, which makes
+            # `.reset()` raise rather than actually resetting anything.
+            # Harmless to skip — the closing below is what actually
+            # matters, and skipping it (the original bug here) is what
+            # was leaking a connection out of the pool on every one of
+            # these instead.
+            pass
         await session.close()
 
 

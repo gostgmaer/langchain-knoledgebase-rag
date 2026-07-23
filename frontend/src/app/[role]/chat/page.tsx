@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useConversationHistory } from "@/hooks/use-conversation-history";
 import { useConversationMessages } from "@/hooks/use-api";
 import { streamChat } from "@/lib/api/client";
+import { conversations } from "@/lib/api/resources";
 import type { Message } from "@/lib/api/types";
 import { useSession } from "@/lib/session";
 
@@ -58,11 +59,25 @@ export default function ChatPage() {
     } catch {
       toast.error("Chat request failed — is the backend running?");
     } finally {
-      setPendingAssistant(null);
       setSending(false);
-      await queryClient.invalidateQueries({
-        queryKey: ["conversation-messages", session?.tenantId, conversationId],
-      });
+      // Explicit fetch + setQueryData rather than invalidateQueries/
+      // refetchQueries: both only refetch queries React Query
+      // considers "active" at the exact moment they're called, which
+      // this one intermittently wasn't, leaving the just-sent
+      // exchange invisible until the next full remount. A direct
+      // fetch has no such condition to race.
+      if (session) {
+        try {
+          const fresh = await conversations.messages(
+            { tenantId: session.tenantId, userId: session.userId },
+            conversationId,
+          );
+          queryClient.setQueryData(["conversation-messages", session.tenantId, conversationId], fresh);
+        } catch {
+          // Best-effort refresh — the next natural fetch will catch up.
+        }
+      }
+      setPendingAssistant(null);
     }
   }
 
