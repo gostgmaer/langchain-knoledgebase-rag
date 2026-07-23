@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 from uuid import UUID
 
-from dependency_injector import providers
 from dependency_injector.wiring import Provide, inject
 from fastapi import Depends, HTTPException, Request, status
 
@@ -14,6 +13,7 @@ from packages.config.loader import settings
 from packages.conversation.manager import ConversationManager
 from packages.graph.manager import GraphManager
 from packages.infrastructure.container import ApplicationContainer
+from packages.infrastructure.database.session import current_session
 from packages.memory.manager import MemoryManager
 from packages.sdk.iam.models import CurrentUser
 from packages.tools.manager import ToolManager
@@ -50,11 +50,21 @@ async def request_scoped_session(
     container: ApplicationContainer,
 ) -> AsyncIterator[AsyncSession]:
     """
-    Opens one session for the lifetime of a single request and overrides
-    the whole DI tree onto it, so every repository/memory-store construction
-    reached from this request shares one session instead of each opening
-    its own (which either leaks a connection or breaks shared-transaction
-    consistency across repos touched in the same request).
+    Opens one session for the lifetime of a single request and binds it
+    onto `current_session` (packages/infrastructure/database/session.py),
+    so every repository/memory-store construction reached from this
+    request shares one session instead of each opening its own (which
+    either leaks a connection or breaks shared-transaction consistency
+    across repos touched in the same request).
+
+    Bound via a ContextVar rather than a container-level provider
+    override: the container is one shared, process-wide instance, and
+    two requests (or worker jobs — this is also used by
+    packages/worker/jobs.py) running concurrently in the same event
+    loop would otherwise stomp on each other's override, closing a
+    session another task's already-resolved repositories are still
+    using mid-flight. A ContextVar is isolated per-asyncio-Task, which
+    is what actually makes concurrent use of the same container safe.
 
     Commits once at the end of a successful request, rolls back on
     exception. Repositories (packages/infrastructure/repositories/base.py)
@@ -63,7 +73,7 @@ async def request_scoped_session(
     the actual transaction boundary.
     """
     session = container.database.session()
-    container.database.session.override(providers.Object(session))
+    token = current_session.set(session)
     try:
         yield session
         await session.commit()
@@ -71,7 +81,7 @@ async def request_scoped_session(
         await session.rollback()
         raise
     finally:
-        container.database.session.reset_override()
+        current_session.reset(token)
         await session.close()
 
 

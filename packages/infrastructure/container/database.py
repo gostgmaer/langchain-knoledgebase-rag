@@ -2,8 +2,8 @@ from dependency_injector import providers,containers
 
 from packages.infrastructure.database.engine import create_database_engine
 from packages.infrastructure.database.session import (
-    create_session,
     create_session_factory,
+    resolve_session,
 )
 from packages.infrastructure.repositories.unit_of_work import UnitOfWork
 
@@ -23,7 +23,7 @@ class DatabaseContainer(containers.DeclarativeContainer):
     )
 
     session = providers.Factory(
-        create_session,
+        resolve_session,
         session_factory=session_factory,
     )
 
