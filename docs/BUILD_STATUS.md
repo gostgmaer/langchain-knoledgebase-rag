@@ -113,14 +113,14 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 | 9 — Production Retrieval ⭐ | 13 | 13 | 0 | 0 | 0 | **100%** ▲▲▲▲▲▲▲▲▲▲▲▲▲ |
 | 10 — Tools | 6 | 6 | 0 | 0 | 0 | **100%** ▲▲▲▲▲▲▲▲ |
 | 11 — Human in the Loop | 3 | 0 | 0 | 0 | 3 | **0.0%** |
-| 12 — Background Jobs | 5 | 1 | 1 | 0 | 3 | **20.0%** |
+| 12 — Background Jobs | 5 | 2 | 1 | 0 | 2 | **40.0%** ▲▲ |
 | 13 — Production hardening | 5 | 3 | 0 | 0 | 2 | **60.0%** |
 | 14 — APIs | 7 | 6 | 0 | 0 | 1 | **85.7%** ▲▲▲▲▲▲ |
 | 15 — Testing | 4 | 0 | 0 | 0 | 4 | **0.0%** |
 | 16 — Deployment | 3 | 0 | 3 | 0 | 0 | **0.0%** |
-| **Total** | **119** | **87** | **11** | **0** | **21** | **73.1%** ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ |
+| **Total** | **119** | **88** | **11** | **0** | **20** | **73.9%** ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ |
 
-**New all-time high — 73.1%, up from 70.6%. APIs (Phase 14) jumps from 42.9% to 85.7%** — Documents API (list/fetch/delete), Knowledge Base API, and Search API all went from Pending to Done in one pass, leaving only Feedback API (needs a new domain model + migration, deliberately deferred pending user confirmation) as the phase's one remaining gap. Session Management (Phase 6) reaches 100% — the fifth full phase this project has ever had, after Memory, Document Processing, Production Retrieval, and Tools.
+**New all-time high — 73.9%, up from 73.1%. Background Jobs (Phase 12) goes from 20.0% to 40.0%** — a real `arq` worker with a real, cron-scheduled job now exists, replacing a `while True: sleep(30)` heartbeat that had `arq` as a declared dependency the whole time but never used it. Two confirmed-with-the-user architecture decisions kept this pass bounded rather than open-ended: document ingestion and memory extraction deliberately **stay** on FastAPI `BackgroundTasks`, not migrated onto this queue — both already work and are tested, and moving them would trade that for durability/retry the roadmap doesn't require yet, at real regression risk; and OCR (Phase 12's third checklist item) is deliberately deferred, since it's a new capability needing its own dependency decision, not just wiring. Also this pass: **APIs (Phase 14) jumped from 42.9% to 85.7%** — Documents API (list/fetch/delete), Knowledge Base API, and Search API all went from Pending to Done, leaving only Feedback API (needs a new domain model + migration, deliberately deferred pending user confirmation). Session Management (Phase 6) reaches 100% — the fifth full phase this project has ever had, after Memory, Document Processing, Production Retrieval, and Tools.
 
 **Production Retrieval (Phase 9), completed this pass.** Asked to implement the phase in full after a status check, the 8 genuinely-unimplemented items (Query Classification, Query Rewriting, Query Expansion, Hybrid Search, BM25, Re-ranking, Prompt Construction, Citation Generation) plus Context Building's Partial state were all closed in one pass. Two real architectural decisions were made with the user before building: **hybrid search uses `rank_bm25`** (small, pure-Python) over an in-memory candidate pool fetched from the vector store per search, fused with dense results via reciprocal rank fusion (`score = Σ 1/(k + rank)`, `k=60`) — accepted trade-off: the BM25 index rebuilds from scratch on every call, fine at current scale, would need persisting at real production scale; and **re-ranking uses a real cross-encoder** (`sentence-transformers`' `cross-encoder/ms-marco-MiniLM-L-6-v2`), not a lightweight heuristic — accepted trade-off: a one-time ~90MB model download on first use (lazy-loaded via DI so it doesn't slow down app startup), plus real per-call latency on every retrieval-routed turn.
 
@@ -260,6 +260,7 @@ All four registered tools (Calculator, Weather, Web Search, News) are now indivi
 |---|---|
 | Configuration management | Unaffected. |
 | Redis connectivity — recovered, most solid proof yet | Confirmed live via the health endpoint: `"redis":"healthy"` against a real, reachable Redis in this environment. |
+| Real `arq` job queue — first time ever | `packages/worker/main.py`'s previous `while True: logger.info("heartbeat"); sleep(30)` replaced with a real `arq.WorkerSettings` — `redis_settings` built from `settings.redis.url` via `arq`'s own `RedisSettings.from_dsn()`, `max_jobs`/`max_tries` sourced from the already-existing (but previously unused) `QueueSettings.concurrency`/`.max_retries`. New `packages/worker/jobs.py::cleanup_orphaned_scratch_files` — the first real job, a defense-in-depth sweep of `settings.storage.temp_directory` for anything older than an hour (real ingestion scratch files are deleted within seconds by `documents.py`'s own `finally` block; this only catches what survives a crash mid-ingestion) — registered both as an on-demand function and a `cron_jobs` entry (4x/day). **Verified**: `WorkerSettings` constructs correctly end to end (real parsed `RedisSettings(host='127.0.0.1', port=6379, database=0, ...)`, real `CronJob` object), and the job function itself directly exercised — given a fresh file and an artificially 2-hour-aged one, correctly deleted only the aged one (`checked=2, deleted=1`). **Not yet verified**: an actual live run through Redis (enqueue → worker picks up → job executes) — Redis wasn't reachable in this environment at the time (same pre-existing environment gap as Postgres elsewhere in this doc). `docker/Dockerfile.worker`'s existing `CMD ["python", "-m", "packages.worker.main"]` needed no change — `main()` calls `arq.run_worker(WorkerSettings)` directly, the documented programmatic equivalent of arq's own CLI. |
 
 ### IAM
 | Item | Evidence |
@@ -431,11 +432,12 @@ All four registered tools (Calculator, Weather, Web Search, News) are now indivi
 |---|---|
 | Interrupt, resume, approval workflow | No code found anywhere (grep for `interrupt`/`Command(resume=` returns nothing relevant) |
 
-### Background Jobs (Phase 12)
+### Background Jobs (Phase 12) — 20.0% → 40.0%
 | Item | Status |
 |---|---|
-| Queue — upgraded, but still a heartbeat, not a worker | A real `packages/worker/` process now exists (`0615b25`): `main.py` logs `"Worker started."` then loops `logger.info("Worker heartbeat..."); time.sleep(30)` forever. `docker/Dockerfile.worker`'s `CMD ["python","-m","packages.worker.main"]` correctly matches this module's entrypoint — the *deployment wiring* is right. But there is no `arq`/Celery/RQ integration at all despite `arq>=0.28.0` being a declared dependency — it's a process that stays alive, not a job queue that does anything. |
-| Document indexing, embedding generation, OCR jobs | None exist yet — nothing to queue anyway until Phase 8/9 retrieval work lands |
+| ~~Queue — upgraded, but still a heartbeat, not a worker~~ | **Done, later pass.** `packages/worker/main.py` now defines a real `arq.WorkerSettings` (real `redis_settings`, real `functions`/`cron_jobs`) run via `run_worker()` — see the Background jobs/Production section above for the full account, including what's verified vs. still pending a live Redis connection. |
+| Document indexing, embedding generation | Not re-graded this pass, left as previously scored (Document Indexing: Partial) — both already run async and batched via `packages/api/routers/documents.py`'s `BackgroundTasks` path, confirmed live back in the Document Processing (Phase 8) pass, just not through the (now-real) `arq` queue specifically. Deliberately not migrated onto it this pass — see the note above. |
+| OCR | Still doesn't exist — deliberately deferred this pass rather than started, since it needs its own dependency decision (local `pytesseract`+`tesseract` binary vs. a cloud OCR API) on top of the worker build-out. |
 
 ### Production hardening (Phase 13)
 | Item | Status |
