@@ -7,13 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DEFAULT_TENANT_ID, useSession } from "@/lib/session";
+import { useSession } from "@/lib/session";
 
 const HISTORY_KEY = "rag-console-tenant-history";
 
 export default function TenantsPage() {
   const { session, setViewingTenant } = useSession();
-  const [draft, setDraft] = useState(session?.tenantId ?? DEFAULT_TENANT_ID);
+  const [draft, setDraft] = useState(session?.tenantId ?? "");
   const [history, setHistory] = useState<string[]>([]);
 
   useEffect(() => {

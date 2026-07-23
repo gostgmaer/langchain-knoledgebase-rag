@@ -74,6 +74,9 @@ export interface ChatResponseData {
 // Documents
 // ---------------------------------------------------------------
 
+// Matches packages/knowledge/schemas.py's ChunkingStrategy literal.
+export type ChunkingStrategy = "auto" | "recursive" | "markdown" | "semantic";
+
 export interface DocumentUploadResponse {
   status: string;
   document_name: string;
@@ -158,10 +161,13 @@ export interface SearchResult {
   score: number;
 }
 
+// Matches packages/api/schemas/search.py's SearchRequestSchema, which
+// forbids extra fields — "limit", not "top_k" (a genuinely different
+// concept from ModelProfile's LLM-sampling top_k below).
 export interface SearchRequest {
   query: string;
   document_id?: string | null;
-  top_k?: number;
+  limit?: number;
 }
 
 export interface SearchResponse {

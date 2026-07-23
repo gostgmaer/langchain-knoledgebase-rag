@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentListResponse,
   ChatResponseData,
+  ChunkingStrategy,
   Conversation,
   CreateAgentRequest,
   CreateKnowledgeBaseRequest,
@@ -78,12 +79,13 @@ export const documents = {
     apiFetch<DocumentVersionListResponse>(`/documents/${id}/versions`, identity),
   delete: (identity: Identity, id: string) =>
     apiFetch<null>(`/documents/${id}`, identity, { method: "DELETE" }),
-  upload: (identity: Identity, file: File) => {
+  upload: (identity: Identity, file: File, chunkingStrategy?: ChunkingStrategy) => {
     const formData = new FormData();
     formData.append("file", file);
     return apiFetch<DocumentUploadResponse>("/documents", identity, {
       method: "POST",
       formData,
+      query: { chunking_strategy: chunkingStrategy },
     });
   },
 };

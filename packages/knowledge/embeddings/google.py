@@ -13,6 +13,8 @@ from packages.shared.logging import get_logger
 from packages.knowledge.schema.chunk import KnowledgeChunk
 
 from .base import EmbeddingProvider
+from .rate_limited import RateLimitedEmbeddings
+from .rate_limiter import EmbeddingRateLimiter
 
 logger = get_logger(__name__)
 
@@ -21,10 +23,20 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
 
     def __init__(self) -> None:
 
-        self._client = GoogleGenerativeAIEmbeddings(
+        raw_client = GoogleGenerativeAIEmbeddings(
             model=settings.rag.embedding_model,
             google_api_key=settings.ai.google_api_key,
         )
+
+        # Gemini's own free-tier quota (100 requests/min) is what a
+        # backlog of concurrent ingestion jobs blew through in practice —
+        # cap below it here so this app degrades to a bounded wait instead
+        # of a 429 the moment several documents queue up at once.
+        limiter = EmbeddingRateLimiter(
+            max_requests=settings.rag.embedding_rate_limit_requests_per_minute,
+            max_tokens=settings.rag.embedding_rate_limit_tokens_per_minute,
+        )
+        self._client = RateLimitedEmbeddings(wrapped=raw_client, limiter=limiter)
 
     @property
     def client(self) -> Embeddings:

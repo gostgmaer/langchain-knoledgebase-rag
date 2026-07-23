@@ -17,6 +17,7 @@ import {
   uploadJobs,
 } from "@/lib/api/resources";
 import type {
+  ChunkingStrategy,
   CreateAgentRequest,
   CreateKnowledgeBaseRequest,
   CreateModelProfileRequest,
@@ -116,7 +117,8 @@ export function useUploadDocument() {
   const identity = useIdentity();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (file: File) => documents.upload(identity!, file),
+    mutationFn: ({ file, chunkingStrategy }: { file: File; chunkingStrategy?: ChunkingStrategy }) =>
+      documents.upload(identity!, file, chunkingStrategy),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["documents", identity?.tenantId] }),
   });
 }

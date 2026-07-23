@@ -18,7 +18,7 @@ export function SearchView() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
-    runSearch.mutate({ query: query.trim(), top_k: 10 });
+    runSearch.mutate({ query: query.trim(), limit: 10 });
   }
 
   return (

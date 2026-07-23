@@ -36,3 +36,14 @@ class RAGSettings(BaseSettings):
     max_results: int = Field(default=5, alias="RAG_MAX_RESULTS")
     context_token_budget: int = Field(default=4000, alias="RAG_CONTEXT_TOKEN_BUDGET")
     min_relevance_score: float = Field(default=0.0, alias="RAG_MIN_RELEVANCE_SCORE")
+
+    # Self-imposed cap on outgoing embedding calls, kept under whatever the
+    # provider enforces server-side (Gemini's free tier is 100 requests/min)
+    # so a backlog of queued ingestion jobs runs out of *our own* budget
+    # with a clean wait instead of a 429 from the provider.
+    embedding_rate_limit_requests_per_minute: int = Field(
+        default=90, alias="EMBEDDING_RATE_LIMIT_REQUESTS_PER_MINUTE"
+    )
+    embedding_rate_limit_tokens_per_minute: int = Field(
+        default=30_000, alias="EMBEDDING_RATE_LIMIT_TOKENS_PER_MINUTE"
+    )

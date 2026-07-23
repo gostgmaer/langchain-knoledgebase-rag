@@ -58,8 +58,8 @@ export function Topbar() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => {
-            logout();
+          onClick={async () => {
+            await logout();
             router.push("/");
           }}
           aria-label="Log out"
