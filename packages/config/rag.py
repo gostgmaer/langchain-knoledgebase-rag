@@ -22,6 +22,20 @@ class RAGSettings(BaseSettings):
     )
     chroma_directory: str = Field(default="./storage/chroma", alias="CHROMA_DIRECTORY")
 
+    # Chroma's embedded PersistentClient is single-process only — opening
+    # it independently from both the API server and the arq worker (two
+    # real OS processes, both touching the same on-disk directory) causes
+    # intermittent HNSW query corruption under concurrent access
+    # ("Error executing plan: Internal error: Error finding id"), not a
+    # permanently broken index — a query that fails on one process can
+    # succeed a moment later on another. Setting both of these switches to
+    # a real `chroma run` server instead, which both processes then talk
+    # to over HTTP — the one process that actually owns the on-disk data.
+    # Left unset (the default) preserves the original embedded-client
+    # behavior for anyone not running that server.
+    chroma_server_host: str | None = Field(default=None, alias="CHROMA_SERVER_HOST")
+    chroma_server_port: int | None = Field(default=None, alias="CHROMA_SERVER_PORT")
+
     chunk_size: int = Field(default=1000, alias="CHUNK_SIZE")
     chunk_overlap: int = Field(default=200, alias="CHUNK_OVERLAP")
     chunk_separators: list[str] = [

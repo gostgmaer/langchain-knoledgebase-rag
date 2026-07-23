@@ -23,6 +23,18 @@ from packages.knowledge.vectorstores.providers.chroma import ChromaVectorStore
 
 
 def _build_chroma_client() -> chromadb.ClientAPI:
+    # HttpClient when a dedicated `chroma run` server is configured — see
+    # packages/config/rag.py's chroma_server_host/port docstring for why:
+    # the embedded PersistentClient corrupts query results under
+    # concurrent multi-process access (this app's API server and arq
+    # worker are separate processes, both touching the same on-disk
+    # directory). Falls back to the embedded client when unset.
+    if app_settings.rag.chroma_server_host and app_settings.rag.chroma_server_port:
+        return chromadb.HttpClient(
+            host=app_settings.rag.chroma_server_host,
+            port=app_settings.rag.chroma_server_port,
+        )
+
     return chromadb.PersistentClient(
         path=app_settings.rag.chroma_directory,
     )
