@@ -716,3 +716,13 @@ Asked directly whether to revisit the "keep ingestion on `BackgroundTasks`" deci
 **Verified**: full import sweep clean (392/402 modules, same 10 pre-existing failures — confirms no circular import from `packages.worker.jobs` now importing `packages.api.dependencies.request_scoped_session`, despite that crossing what would otherwise be a worker→api layering boundary). `ApplicationContainer()` constructs cleanly with `queue.pool()` correctly defaulting to `None`. `WorkerSettings.functions` correctly lists both jobs; `_on_startup`/`_on_shutdown` correctly construct and dispose a real container. FastAPI app still builds its OpenAPI schema with both document routes intact. **Not verified live**: an actual HTTP upload enqueuing a job and the worker picking it up and ingesting it — both Postgres and Redis remain unreachable in this dev environment (confirmed via a direct socket check on `5432`/`6379`), the same pre-existing environment gap flagged throughout every recent pass, not something this change caused.
 
 Document Indexing and Embedding Generation (Phase 12) both move from Partial/Pending to Done, since both now run through Phase 12's own real queue rather than just an async mechanism outside it. Background Jobs (Phase 12): **40.0% → 80.0%**. Overall score: **73.9% → 75.6%**.
+
+---
+
+## IAM's own gaps list was stale — Refresh Token Validation had already been built
+
+Prompted by the phase table itself (`2 — IAM | 7 | 5 | 1 | 0 | 1 | 71.4%`). The one "Pending" item, Refresh Token Validation, was flagged in `docs/BUILD_STATUS.md`'s own gaps section as "no refresh flow exists" — false, and out of sync with the CHANGELOG's own record two passes back ("Refresh token validation — added, no flow existed at all before this," plus the later gateway-routing verification pass). Re-checked the actual code rather than trusting the doc: `IAMEndpoints.REFRESH`, `RefreshedToken`, `IAMAuthSDK.refresh_token()`, and `POST /api/v1/auth/refresh` all exist and are real, live-verified on the error path (through both IAM directly and the gateway).
+
+Re-graded to **Partial**, not Done and not Pending — the mechanism is real, but the actual success-response shape (a valid refresh token producing a new access token) has never been exercised, since no valid refresh token has ever been available in this environment to test with, only the error path. Moved out of the "Pending — not implemented" gaps table into IAM's own Done/Partial evidence table with that caveat spelled out.
+
+No code changed. IAM (Phase 2) item breakdown: `5 done · 1 partial · 1 pending` → `5 done · 2 partial · 0 pending` — the phase's own `% Done` figure is unchanged (71.4%), since partial items still don't count as done, but the breakdown is now accurate instead of stale.
