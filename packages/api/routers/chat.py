@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from packages.api.dependencies import (
@@ -18,9 +18,12 @@ from packages.api.responses import ApiResponse
 from packages.api.schemas.chat import (
     ChatRequestSchema,
     ChatResponseSchema,
+    ChatResumeRequestSchema,
     CitationSchema,
+    PendingApprovalSchema,
+    PendingToolCallSchema,
 )
-from packages.application.dto.chat import ChatRequest
+from packages.application.dto.chat import ChatRequest, ChatResponse
 from packages.conversation.bootstrap import (
     ensure_default_agent,
     ensure_default_conversation,
@@ -130,30 +133,114 @@ async def chat(
 
     response = await chat_service.chat(chat_request)
 
-    background_tasks.add_task(
-        _extract_memory_in_background,
-        container,
-        response.conversation_id,
-        tenant_id,
-        user_id,
-        agent.system_prompt,
-    )
+    if response.pending_approval is None:
+        # Memory extraction only makes sense once the turn actually
+        # produced a real assistant reply — a paused-on-approval
+        # response has no completed turn to summarize/extract facts
+        # from yet (see resume() below, which schedules it instead).
+        background_tasks.add_task(
+            _extract_memory_in_background,
+            container,
+            response.conversation_id,
+            tenant_id,
+            user_id,
+            agent.system_prompt,
+        )
 
     return ApiResponse(
-        message="Chat completed successfully.",
-        data=ChatResponseSchema(
-            conversation_id=response.conversation_id,
-            response=response.response,
-            model=agent.llm_model,
-            citations=[
-                CitationSchema(
-                    document_id=citation.document_id,
-                    chunk_id=citation.chunk_id,
-                    chunk_index=citation.chunk_index,
-                    score=citation.score,
-                )
-                for citation in response.citations
-            ],
+        message=(
+            "Tool call approval required."
+            if response.pending_approval is not None
+            else "Chat completed successfully."
+        ),
+        data=_to_response_schema(response, agent.llm_model),
+    )
+
+
+@router.post(
+    "/{conversation_id}/resume",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[ChatResponseSchema],
+    summary="Approve or reject a pending tool call",
+    description=(
+        "Resumes a conversation previously paused by the tool-approval "
+        "gate (see POST /chat's response.pending_approval) — Phase 11 "
+        "(Human in the Loop)'s approval workflow. Non-streaming only."
+    ),
+)
+async def resume(
+    conversation_id: UUID,
+    payload: ChatResumeRequestSchema,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+    user_id = require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID)
+
+    conversations = container.repositories.conversation()
+    conversation = await conversations.get(conversation_id)
+
+    if conversation is None or conversation.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found.",
+        )
+
+    agents = container.repositories.agent()
+    agent = await agents.get(conversation.agent_id)
+
+    chat_service = container.chat_service.chat_service()
+
+    response = await chat_service.resume(conversation_id, payload.approved)
+
+    if response.pending_approval is None:
+        background_tasks.add_task(
+            _extract_memory_in_background,
+            container,
+            response.conversation_id,
+            tenant_id,
+            user_id,
+            agent.system_prompt,
+        )
+
+    return ApiResponse(
+        message=(
+            "Tool call approval required."
+            if response.pending_approval is not None
+            else "Chat completed successfully."
+        ),
+        data=_to_response_schema(response, agent.llm_model),
+    )
+
+
+def _to_response_schema(response: ChatResponse, model: str) -> ChatResponseSchema:
+    return ChatResponseSchema(
+        conversation_id=response.conversation_id,
+        response=response.response,
+        model=model,
+        citations=[
+            CitationSchema(
+                document_id=citation.document_id,
+                chunk_id=citation.chunk_id,
+                chunk_index=citation.chunk_index,
+                score=citation.score,
+            )
+            for citation in response.citations
+        ],
+        pending_approval=(
+            PendingApprovalSchema(
+                tool_calls=[
+                    PendingToolCallSchema(
+                        id=call.id,
+                        name=call.name,
+                        args=call.args,
+                    )
+                    for call in response.pending_approval.tool_calls
+                ]
+            )
+            if response.pending_approval is not None
+            else None
         ),
     )
 
@@ -169,14 +256,24 @@ async def _sse_events(
     system_prompt: str,
 ):
     """
-    Formats each token chunk from ChatService.stream() as a
-    Server-Sent Event. One "token" event per chunk, followed by a
-    single terminal "done" event once the full response has been
-    generated and persisted.
+    Formats each event from ChatService.stream() as a Server-Sent
+    Event: "token" per chunk, then either a terminal "done" once the
+    full response has been generated and persisted, or — if the
+    tool-approval gate paused the graph mid-stream (see
+    GraphManager.stream()'s own "interrupt" event) — a terminal
+    "interrupt" event instead, with memory extraction skipped, the
+    same way the non-streaming path skips it for a pending approval.
+    Resuming a stream-paused conversation still goes through the
+    non-streaming POST /chat/{conversation_id}/resume endpoint —
+    resuming *as* a stream isn't supported, a deliberate, documented
+    scope boundary, not a silent gap.
     """
 
-    async for token in chat_service.stream(chat_request):
-        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+    async for event in chat_service.stream(chat_request):
+        if event["type"] == "interrupt":
+            yield f"data: {json.dumps({'type': 'interrupt', 'conversation_id': str(conversation_id), 'tool_calls': event['tool_calls']})}\n\n"
+            return
+        yield f"data: {json.dumps({'type': 'token', 'content': event['content']})}\n\n"
 
     background_tasks.add_task(
         _extract_memory_in_background,

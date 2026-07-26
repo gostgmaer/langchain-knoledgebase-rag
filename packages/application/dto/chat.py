@@ -26,13 +26,30 @@ class CitationDTO(BaseModel):
     score: float
 
 
+class PendingToolCallDTO(BaseModel):
+    id: str | None
+    name: str | None
+    args: dict
+
+
+class PendingApprovalDTO(BaseModel):
+    """
+    Surfaced when packages/graph/nodes/tool.py's approval gate paused
+    the graph — Phase 11 (Human in the Loop)'s approval workflow.
+    """
+
+    tool_calls: list[PendingToolCallDTO] = Field(default_factory=list)
+
+
 class ChatResponse(BaseModel):
     conversation_id: UUID
 
-    user_message_id: UUID
+    user_message_id: UUID | None = None
 
-    assistant_message_id: UUID
+    assistant_message_id: UUID | None = None
 
-    response: str
+    response: str = ""
 
     citations: list[CitationDTO] = Field(default_factory=list)
+
+    pending_approval: PendingApprovalDTO | None = None

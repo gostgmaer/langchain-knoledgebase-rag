@@ -1,12 +1,64 @@
 from __future__ import annotations
 
+import time
+from typing import Any, Awaitable, Callable
+
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from packages.graph.nodes import GraphNodes
 from packages.graph.router import GraphRouter
 from packages.graph.state import GraphState
+from packages.shared.logging import get_logger
+
+logger = get_logger(__name__)
+
+NodeFn = Callable[[GraphState], Awaitable[dict[str, Any] | GraphState]]
+
+
+def _instrumented(name: str, node: NodeFn) -> NodeFn:
+    """
+    Wraps a graph node with structured entered/exited/error events —
+    LangGraph (Phase 5)'s own "Runtime Events" gap. Wrapping at the
+    `add_node` call site (rather than inside each node class) keeps
+    this a single, generic instrumentation point instead of touching
+    every node's own implementation.
+    """
+
+    async def wrapper(state: GraphState) -> dict[str, Any] | GraphState:
+        conversation_id = state.get("conversation_id")
+        logger.info("Graph node entered", node=name, conversation_id=str(conversation_id))
+        start = time.monotonic()
+
+        try:
+            result = await node(state)
+        except GraphBubbleUp:
+            # LangGraph's own control-flow signal for interrupt()/Command —
+            # not a real error, just an early exit. Let it propagate
+            # silently; logging it as "raised" would be misleading noise
+            # on every single tool-approval pause.
+            raise
+        except Exception as exc:
+            logger.error(
+                "Graph node raised",
+                node=name,
+                conversation_id=str(conversation_id),
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            raise
+
+        logger.info(
+            "Graph node exited",
+            node=name,
+            conversation_id=str(conversation_id),
+            duration_ms=round((time.monotonic() - start) * 1000, 2),
+        )
+        return result
+
+    return wrapper
 
 
 async def _join(state: GraphState) -> GraphState:
@@ -90,12 +142,12 @@ class GraphBuilder:
         # Nodes
         #
 
-        graph.add_node("planner", self._nodes.planner)
-        graph.add_node("load_memory", self._nodes.load_memory)
-        graph.add_node("join", _join)
-        graph.add_node("retrieve", self._nodes.retrieve)
-        graph.add_node("tool", self._nodes.tool)
-        graph.add_node("llm", self._nodes.llm)
+        graph.add_node("planner", _instrumented("planner", self._nodes.planner))
+        graph.add_node("load_memory", _instrumented("load_memory", self._nodes.load_memory))
+        graph.add_node("join", _instrumented("join", _join))
+        graph.add_node("retrieve", _instrumented("retrieve", self._nodes.retrieve))
+        graph.add_node("tool", _instrumented("tool", self._nodes.tool))
+        graph.add_node("llm", _instrumented("llm", self._nodes.llm))
 
         #
         # Entry — fan out to planner and load_memory concurrently,

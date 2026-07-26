@@ -1,6 +1,13 @@
 from collections.abc import AsyncIterator
+from uuid import UUID
 
-from packages.application.dto.chat import ChatRequest, ChatResponse, CitationDTO
+from packages.application.dto.chat import (
+    ChatRequest,
+    ChatResponse,
+    CitationDTO,
+    PendingApprovalDTO,
+    PendingToolCallDTO,
+)
 from packages.application.dto.conversation import (
     ConversationResponse,
     CreateConversationRequest,
@@ -49,43 +56,124 @@ class ChatService:
                 request,
             )
 
-            assistant_response, citations, raw_response = await self._execute_runtime(
-                conversation,
-                user_message,
-                stream=False,
-            )
+            state = await self._build_state(conversation, stream=False)
+            result = await self._graph.invoke(state)
 
-            assistant_message = await self._save_assistant_message(
-                conversation,
-                assistant_response,
-                raw_response,
-            )
-
-            await self._update_conversation(conversation)
-
-            await self._uow.commit()
-
-            return ChatResponse(
-                conversation_id=conversation.id,
-                user_message_id=user_message.id,
-                assistant_message_id=assistant_message.id,
-                response=assistant_response,
-                citations=citations,
-            )
+            return await self._finalize_or_pause(conversation, user_message, result)
 
         except Exception:
             await self._uow.rollback()
             raise
 
+    async def resume(
+        self,
+        conversation_id: UUID,
+        approved: bool,
+    ) -> ChatResponse:
+        """
+        Resumes a conversation previously paused by the tool-approval
+        gate (packages/graph/nodes/tool.py) — Phase 11 (Human in the
+        Loop)'s approval workflow. No new user message is involved;
+        this responds to a pending tool call from an earlier turn, not
+        a fresh chat message. Deliberately non-streaming only, same as
+        citations — the streaming path is a documented gap, not a
+        silent omission.
+        """
+
+        try:
+            conversation = await self._conversation_service.get(conversation_id)
+
+            result = await self._graph.resume(
+                conversation_id,
+                {"approved": approved},
+            )
+
+            return await self._finalize_or_pause(conversation, None, result)
+
+        except Exception:
+            await self._uow.rollback()
+            raise
+
+    async def _finalize_or_pause(
+        self,
+        conversation: ConversationResponse,
+        user_message: Message | None,
+        result: dict,
+    ) -> ChatResponse:
+        """
+        Shared tail for both chat() and resume(): a graph run either
+        completed (a real assistant message to persist) or paused again
+        on another tool-approval gate (nothing to persist yet — the
+        checkpointer already holds everything, waiting for the next
+        resume() call).
+        """
+
+        interrupts = result.get("__interrupt__")
+
+        if interrupts:
+            pending = interrupts[0].value
+            return ChatResponse(
+                conversation_id=conversation.id,
+                user_message_id=user_message.id if user_message else None,
+                pending_approval=PendingApprovalDTO(
+                    tool_calls=[
+                        PendingToolCallDTO(**call)
+                        for call in pending.get("tool_calls", [])
+                    ]
+                ),
+            )
+
+        citations = [
+            CitationDTO(
+                document_id=citation.document_id,
+                chunk_id=citation.chunk_id,
+                chunk_index=citation.chunk_index,
+                score=citation.score,
+            )
+            for citation in result.get("citations") or []
+        ]
+
+        final_message = result["messages"][-1]
+        raw_response = {
+            "response_metadata": getattr(final_message, "response_metadata", None) or {},
+            "additional_kwargs": getattr(final_message, "additional_kwargs", None) or {},
+            "usage_metadata": getattr(final_message, "usage_metadata", None) or {},
+        }
+
+        assistant_message = await self._save_assistant_message(
+            conversation,
+            final_message.content,
+            raw_response,
+        )
+
+        await self._update_conversation(conversation)
+
+        await self._uow.commit()
+
+        return ChatResponse(
+            conversation_id=conversation.id,
+            user_message_id=user_message.id if user_message else None,
+            assistant_message_id=assistant_message.id,
+            response=final_message.content,
+            citations=citations,
+        )
+
     async def stream(
         self,
         request: ChatRequest,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[dict]:
         """
         Same flow as chat(), but streams the assistant's response
         token-by-token as it's generated instead of waiting for the
         full response. The full text is still persisted as one
         assistant message once streaming completes.
+
+        Yields `{"type": "token", "content": str}` for real content, or
+        a single terminal `{"type": "interrupt", "tool_calls": [...]}`
+        if the tool-approval gate paused the graph mid-stream — the
+        caller (packages/api/routers/chat.py's `_sse_events`) must
+        check for that type and skip persistence/the "done" event, the
+        same way it already has to for a normal completion.
         """
         try:
             conversation = await self._get_conversation(request)
@@ -97,10 +185,20 @@ class ChatService:
 
             chunks: list[str] = []
             raw_response: dict = {}
+            pending_approval: dict = {}
 
-            async for token in self._stream_runtime(conversation, user_message, raw_response):
+            async for token in self._stream_runtime(
+                conversation, user_message, raw_response, pending_approval
+            ):
                 chunks.append(token)
-                yield token
+                yield {"type": "token", "content": token}
+
+            if pending_approval:
+                yield {
+                    "type": "interrupt",
+                    "tool_calls": pending_approval.get("tool_calls", []),
+                }
+                return
 
             assistant_response = "".join(chunks)
 
@@ -175,58 +273,26 @@ class ChatService:
             "memories": [],
         }
 
-    async def _execute_runtime(
-        self,
-        conversation: ConversationResponse,
-        message: Message,
-        stream: bool,
-    ) -> tuple[str, list[CitationDTO], dict]:
-        """
-        Runs the real LangGraph pipeline (planner, retrieval, tools,
-        memory extraction) for this conversation and returns the
-        assistant's final response text, any citations gathered during
-        retrieval, and the raw provider response metadata (for
-        AIResponse — see _save_assistant_message).
-        """
-
-        state = await self._build_state(conversation, stream)
-
-        result = await self._graph.invoke(state)
-
-        citations = [
-            CitationDTO(
-                document_id=citation.document_id,
-                chunk_id=citation.chunk_id,
-                chunk_index=citation.chunk_index,
-                score=citation.score,
-            )
-            for citation in result.get("citations") or []
-        ]
-
-        final_message = result["messages"][-1]
-        raw_response = {
-            "response_metadata": getattr(final_message, "response_metadata", None) or {},
-            "additional_kwargs": getattr(final_message, "additional_kwargs", None) or {},
-            "usage_metadata": getattr(final_message, "usage_metadata", None) or {},
-        }
-
-        return final_message.content, citations, raw_response
-
     async def _stream_runtime(
         self,
         conversation: ConversationResponse,
         message: Message,
         raw_response: dict,
+        pending_approval: dict,
     ) -> AsyncIterator[str]:
         """
-        Same pipeline as _execute_runtime(), but yields each token
+        Runs the real LangGraph pipeline (planner, retrieval, tools,
+        memory extraction) for this conversation, yielding each token
         chunk pushed by LLMNode's stream writer as it arrives, instead
         of waiting for the full graph run to finish. `raw_response` is
         mutated in place with the one "metadata" event LLMNode emits
         after the token loop ends — stream_mode="custom" never
         surfaces the final graph state directly, so this is the only
         way the raw provider response reaches the caller once
-        streaming completes.
+        streaming completes. `pending_approval` is mutated the same
+        way if the tool-approval gate (packages/graph/nodes/tool.py)
+        paused the graph instead — see GraphManager.stream()'s own
+        "interrupt" event.
         """
 
         state = await self._build_state(conversation, stream=True)
@@ -239,6 +305,10 @@ class ChatService:
             elif event.get("type") == "metadata":
                 raw_response["response_metadata"] = event.get("response_metadata", {})
                 raw_response["additional_kwargs"] = event.get("additional_kwargs", {})
+            elif event.get("type") == "interrupt":
+                pending_approval["tool_calls"] = event.get("value", {}).get(
+                    "tool_calls", []
+                )
 
     async def _save_assistant_message(
         self,

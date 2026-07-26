@@ -833,3 +833,45 @@ Asked to check what was still pending overall, then to fix it and refresh the do
 **Verified**: full repo-wide import sweep clean (409 OK, same 10 pre-existing failures as documented, zero new). Full live restart from cold (Docker Desktop, Postgres/Redis containers, the dedicated Chroma server, the API server, and the worker all brought up fresh) confirmed weather tool-calling, RAG retrieval with real citations, and the IAM fail-open path all still work correctly with every change above in place.
 
 Production hardening (Phase 13): **60.0% → 100%**, all 5 items done. Overall score: **79.8% → 81.5%**.
+
+---
+
+## Foundation and LangChain re-audit — CLI and Groq confirmed Done live, OpenAI/Anthropic/Docker gaps made precise
+
+Asked to check what's pending in Foundation (Phase 1), LangGraph (Phase 5), and LangChain (Phase 4). Foundation and LangChain's "Done" evidence tables in `docs/BUILD_STATUS.md` turned out to be stale snapshots from before this project's chat pipeline ever worked end to end — one row still claimed "no live chat turn has completed end to end," long since disproven. Re-verified everything live instead of trusting the doc.
+
+**CLI (`cli.py`) — driven end to end for the first time, not just read.** Piped real input through it: tenant/user UUID prompts, a health check, a real chat message, `exit`. Health check passed, a genuine streaming response came back token-by-token, clean exit. It already met the roadmap's bar; it had just never actually been run and credited.
+
+**Provider testing — a direct script (`test_providers.py`) instantiating each `Chat*` client directly with real configured keys, bypassing the app's env-driven singleton** so no server restart or `.env` provider swap was needed. **Groq: genuinely works** — `ChatGroq` with `llama-3.3-70b-versatile` returned a real response. **OpenAI: reaches the real API correctly and gets a clean `429 insufficient_quota` back** — the code path is provably correct, the configured key's account just has no billing/quota set up, an external account issue no code change can fix. **Anthropic: `ANTHROPIC_API_KEY` is blank in `.env`**, nothing to test against.
+
+**A real, previously-undocumented gap found along the way, not fixed (out of scope for this pass): `ModelProfile.provider`/`.model` are real DB columns, but nothing anywhere actually reads them to reconfigure `LLMManager` per request** — `LLMFactory.create()` only ever reads the global `settings.ai.default_provider`/`.env`'s `LLM_PROVIDER`, set once at DI-container construction. An admin can create a `ModelProfile` row claiming "this agent uses OpenAI," and it will silently keep using whatever the global default is instead. Worth a follow-up.
+
+**Docker Compose — one real bug found and fixed.** `docker compose config` (dry validation, no containers touched) surfaced `The "POSTGRES_USER" variable is not set`. `.env.example` already had `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` (added in an earlier pass) but the real `.env` never got them — the compose-managed Postgres container would have silently self-initialized with blank credentials that don't match the app's own `DATABASE_URL`. Fixed: added matching values (`my_db_user`/`my_secure_password`/`my_database_name`) to `.env`. Re-ran `docker compose config` clean.
+
+**Docker image build — attempted 3 times, blocked by environment network flakiness, not a code bug.** `docker build -f docker/Dockerfile` failed identically each time on `COPY --from=ghcr.io/astral-sh/uv:latest` with `tls: bad record MAC` — a TLS-layer failure pulling from `ghcr.io`, unrelated to Dockerfile syntax or logic (confirmed: the failure point and error never changed across retries with Docker Desktop freshly started each time). Needs a stable network path to `ghcr.io` in this environment to actually verify; left as a genuine, documented limitation rather than claimed as Done.
+
+Foundation (Phase 1): **72.7% → 81.8%**. LangChain (Phase 4): **70.0% → 80.0%**. Overall score: **81.5% → 83.2%**.
+
+---
+
+## LangGraph (Phase 5) and Human in the Loop (Phase 11) — real Interrupt/Resume, a tool-call approval workflow, and real Runtime Events
+
+LangGraph's 3 remaining pending items — Interrupt, Resume, Runtime Events — needed a real product decision: what should actually pause the graph? Asked directly: **tool-call approval** — pause before any tool executes and wait for an explicit approve/reject. All current tools (calculator, weather, web search, news) are read-only, so this is a generic demonstration of the mechanism, not a response to any of them being individually dangerous. Building it also closes Phase 11 (Human in the Loop), previously 0% with zero code anywhere, in the same pass.
+
+**Runtime Events** (no design decision needed, built first): `packages/graph/builder.py`'s new `_instrumented()` wraps every node at its `add_node()` call site with structured entered/exited/duration/error-raised log events, explicitly excluding LangGraph's own `GraphBubbleUp` interrupt-control-flow exception from being logged as an error (it isn't one). `packages/graph/nodes/tool.py` adds per-tool-call "Tool called"/"Tool call finished" events. Verified live in real server logs throughout every test below.
+
+**Interrupt/Resume**: `GraphToolNode.__call__` now calls LangGraph's real `interrupt({"type": "tool_approval", "tool_calls": [...]})` before ever touching the real `ToolNode`. A rejection produces synthetic error `ToolMessage`s per call so the graph still routes to `llm` cleanly. `GraphManager.resume()` resumes via `Command(resume=...)` against the thread's own `thread_id` alone — no fresh state needed, since the already-built Postgres-backed checkpointer holds everything at the interrupt point, provably even across a completely separate HTTP request.
+
+**A real gap found and fixed, not left as a "documented gap":** the streaming path (`GraphManager.stream()`, `stream_mode="custom"`) surfaces nothing when `interrupt()` fires — a first live test of a tool-calling streaming request produced a stream that silently ended with zero content and a fabricated `"done"` event, no indication anything was pending. Fixed: `stream()` now checks `graph.aget_state()` after the token loop and yields an explicit `{"type": "interrupt", ...}` event if still paused; `ChatService.stream()` and the router's `_sse_events` propagate this as a real terminal SSE `"interrupt"` event. Resuming a stream-paused conversation still goes through the non-streaming resume endpoint — a deliberate, documented scope boundary (resuming *as* a stream isn't supported), not a silent gap.
+
+**New API surface**: `POST /api/v1/chat/{conversation_id}/resume` (`{"approved": true/false}`); `POST /api/v1/chat` gained an optional `pending_approval` field on its response (`ChatResponse`/`ChatResponseSchema`). Memory extraction correctly skips a paused turn and runs normally once a resume finalizes.
+
+**Verified live, real Gemini, real Postgres checkpointer:**
+- A real weather request paused with the exact pending tool call surfaced.
+- **Reject**: `{"approved": false}` produced a real, coherent LLM response acknowledging the rejection — the graph continued past it rather than erroring.
+- **Approve**: `{"approved": true}` genuinely executed the tool and returned real live weather data (Tokyo, Madrid).
+- **Cross-mode resume**: a conversation paused via the streaming endpoint was resumed via the non-streaming endpoint successfully — the checkpointer-backed design is genuinely transport-agnostic.
+- Full regression: plain chat, RAG retrieval with citations, cross-conversation memory recall, and normal streaming (no tool calls) all still pass.
+- Full repo-wide import sweep clean (409 OK, same 10 pre-existing failures, zero new).
+
+LangGraph (Phase 5): **66.7% → 100%**, all 9 items done. Human in the Loop (Phase 11): **0.0% → 100%**, all 3 items done. Overall score: **83.2% → 88.2%**, a new all-time high.
