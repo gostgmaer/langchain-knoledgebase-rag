@@ -24,18 +24,21 @@ class Embedding(BaseModel):
 
     __tablename__ = "embeddings"
 
+    # No index on `vector` itself — pgvector's HNSW/IVFFlat index types both
+    # have a hard 2000-dimension limit, and settings.embedding.dimensions
+    # (3072, Gemini's real embedding size) exceeds it; CREATE INDEX ...
+    # USING hnsw fails outright with ProgramLimitExceededError on a fresh
+    # database. This table is bookkeeping (Phase 3's "Embeddings Metadata"
+    # item — which model/dimension produced each chunk's vector), not the
+    # live similarity-search path (that's Chroma, or packages/domain/models/
+    # memory.py's `memories` table, which already skips indexing its own
+    # same-width vector column for this identical reason) — an unindexed
+    # brute-force scan here is an acceptable, consistent trade-off, not a
+    # regression.
     __table_args__ = (
         Index("ix_embedding_chunk", "chunk_id"),
         Index("ix_embedding_tenant", "tenant_id"),
         Index("ix_embedding_model_profile", "model_profile_id"),
-        Index(
-            "ix_embedding_vector",
-            "vector",
-            postgresql_using="hnsw",
-            postgresql_ops={
-                "vector": "vector_cosine_ops",
-            },
-        ),
     )
 
     tenant_id: Mapped[UUID] = mapped_column(
