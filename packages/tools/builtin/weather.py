@@ -21,6 +21,17 @@ logger = get_logger(__name__)
 client = httpx.AsyncClient(timeout=10)
 
 
+async def close_weather_client() -> None:
+    """Closes the module-level client — call from lifespan's shutdown.
+
+    This client is never recreated per-request (unlike news.py/search.py's
+    tools), so it needs an explicit close somewhere, or the underlying
+    connector/socket leaks on every process shutdown.
+    """
+
+    await client.aclose()
+
+
 # @dataclass
 # class WeatherData:
 #     city: str

@@ -11,6 +11,7 @@ from packages.api.routers.documents import router as document_router
 from packages.api.routers.feedback import router as feedback_router
 from packages.api.routers.health import router as health_router
 from packages.api.routers.knowledge_bases import router as knowledge_base_router
+from packages.api.routers.metrics import router as metrics_router
 from packages.api.routers.models import router as model_router
 from packages.api.routers.prompts import router as prompt_router
 from packages.api.routers.search import router as search_router
@@ -41,6 +42,7 @@ api_router.include_router(prompt_router)
 api_router.include_router(tool_router)
 api_router.include_router(feedback_router)
 api_router.include_router(upload_job_router)
+api_router.include_router(metrics_router)
 
 
 def register_routers(app: FastAPI) -> None:

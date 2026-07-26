@@ -15,6 +15,7 @@ from packages.infrastructure.database.base import Base
 from sqlalchemy import text
 import packages.domain.models  # noqa: F401 - Ensure models are loaded for Base.metadata
 from packages.shared.logging import configure_logger, get_logger
+from packages.tools.builtin.weather import close_weather_client
 
 
 @asynccontextmanager
@@ -107,6 +108,11 @@ async def lifespan(app: FastAPI):
         if queue_pool is not None:
             await queue_pool.aclose()
         container.queue.pool.reset_override()
+
+        # packages/tools/builtin/weather.py's client is module-level and
+        # never recreated per-request — production-readiness gap #1,
+        # a leaked connector/socket on every shutdown until now.
+        await close_weather_client()
 
         engine = container.database.engine()
         await engine.dispose()

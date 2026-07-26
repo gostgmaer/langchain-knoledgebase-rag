@@ -35,3 +35,13 @@ class APISettings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    # Production hardening's own "Rate limiting" gap — see
+    # packages/api/middleware/rate_limit.py. Per-tenant (or per-IP
+    # fallback) sliding window, requests per 60s. Default is generous
+    # enough not to trip over normal dev/browser polling traffic (job
+    # status polling, etc.) while still enforcing a real cap; 0 disables
+    # it entirely.
+    rate_limit_requests_per_minute: int = Field(
+        default=300, alias="RATE_LIMIT_REQUESTS_PER_MINUTE"
+    )

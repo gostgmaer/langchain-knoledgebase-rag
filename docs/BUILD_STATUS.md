@@ -2,6 +2,16 @@
 
 Verified against [`docs/mvpRAG.md`](./mvpRAG.md) — that file is the **target roadmap** (what's in scope for v1.0/v1.1/v2.0 and why); this file is the **reality check** (what's actually built, working, broken, or missing right now). Read them as a pair: mvpRAG.md's ✅ marks mean "in v1.0 scope," not "done" — this document is where "done" gets verified.
 
+## 🎉 Production hardening (Phase 13) reaches 100% — Rate limiting, Metrics, and Retry policies all built for real
+
+This document had gone 4 commits stale (chunking-strategy upload UI, a real search bug, a real delete bug, the actual root cause of every intermittent RAG failure this project has hit — Chroma's embedded client under concurrent multi-process access — and an embedding rate limiter, none reflected below until now; full account in `docs/CHANGELOG.md`). Asked to check what was still pending and fix it: `packages/api/middleware/rate_limit.py` and `packages/api/middleware/metrics.py` were both literal 1-line stub files, and `packages/infrastructure/http/retry.py` was too — all three built for real.
+
+**Rate limiting** — a real per-tenant (falls back to IP) sliding-window cap, `429` on overflow, `settings.api.rate_limit_requests_per_minute` (default 300/min). **Verified live: 320 rapid requests under one tenant header returned exactly 300× `200` then 20× `429`.** **Metrics** — real in-memory request/status/duration counters exposed via new `GET /api/v1/metrics`, deliberately not wired onto the already-installed-but-unused `opentelemetry-*` packages (no reachable OTLP collector in this environment — same "unprovable without real infra" situation as Docker). **Verified live: the endpoint correctly reported the 300 `200`s and 20 `429`s from the rate-limit test.** **Retry policies** — a `tenacity`-based `RetryTransport` wrapping the shared `create_http_client()` factory, retrying connection errors/timeouts/5xx with exponential backoff, finally reading `packages/config/queue.py`'s previously-unread `max_retries`/`retry_delay`. **Verified live: a deliberately invalid Bearer token through the real IAM fail-open path still resolved in ~2s**, confirming legitimate `401`s aren't retried. Along the way, a previously-undocumented leaked `httpx.AsyncClient` in `packages/tools/builtin/weather.py` (never closed on shutdown) was also fixed.
+
+Also corrected two stale claims found while reviewing this document against the current code (no code changes, doc-only): "no CORS middleware" — false, `CORSMiddleware` is genuinely wired in `packages/api/middleware/__init__.py` (predates this pass). "Persistent checkpointing" listed as pending under Memory (Phase 7) — false, `packages/infrastructure/container/graph.py`'s `ThreadedPostgresSaver` already wraps a real `PostgresSaver` (predates this pass, see its own Session Management entry below).
+
+**Production hardening (Phase 13): 60.0% → 100%, all 5 items done.** Overall score: **79.8% → 81.5%**, a new all-time high.
+
 ## 🎉 Milestone: `POST /api/v1/chat` works end to end, for the first time ever
 
 Confirmed live, twice in a row, in the same conversation: a real message in, a real Gemini-generated response out, correctly remembering the prior turn ("You asked me to say hello in exactly three words."). This is the first fully successful chat completion across every audit pass this project has had.
@@ -114,13 +124,15 @@ Counted against every individual checklist bullet in `docs/mvpRAG.md` (Phases 1�
 | 10 — Tools | 6 | 6 | 0 | 0 | 0 | **100%** ▲▲▲▲▲▲▲▲ |
 | 11 — Human in the Loop | 3 | 0 | 0 | 0 | 3 | **0.0%** |
 | 12 — Background Jobs | 5 | 4 | 0 | 0 | 1 | **80.0%** ▲▲▲▲ |
-| 13 — Production hardening | 5 | 3 | 0 | 0 | 2 | **60.0%** |
+| 13 — Production hardening | 5 | 5 | 0 | 0 | 0 | **100%** ▲▲▲▲▲▲▲▲ |
 | 14 — APIs | 7 | 7 | 0 | 0 | 0 | **100%** ▲▲▲▲▲▲▲▲▲ |
 | 15 — Testing | 4 | 0 | 0 | 0 | 4 | **0.0%** |
 | 16 — Deployment | 3 | 0 | 3 | 0 | 0 | **0.0%** |
-| **Total** | **119** | **95** | **10** | **0** | **14** | **79.8%** ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ |
+| **Total** | **119** | **97** | **10** | **0** | **12** | **81.5%** ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ |
 
-**New all-time high — 79.8%, up from 77.3%. Database (Phase 3) reaches 100%, all 12 items — Document Versions, Upload Jobs, and AI Responses all built for real**, closing the phase completely. Three real, well-scoped design decisions confirmed with the user before building (each a genuine fork, not a detail): **Document Versions add a new `DocumentVersion` table without touching the existing checksum-skip dedup behavior** — a re-upload with identical content still returns `skipped=True` exactly as before; only a re-upload with *changed* content under the same tenant/knowledge-base/filename now creates a real version record, flips the old `Document.is_current` to `False` (a new column, added live via `ALTER TABLE`, matching this session's established schema-drift-fix pattern), and links old→new via `root_document_id`/`version_number`. **Upload Jobs track the real arq job**, not just `Document.status` — a new `UploadJob` row (`QUEUED`→`RUNNING`→`SUCCEEDED`/`FAILED`) created at enqueue time and updated by whichever path actually runs the ingestion (the real worker via `packages/worker/jobs.py`, or the in-process fallback), matched by the job's own primary key rather than arq's job id so both paths update the identical row shape. New `GET /api/v1/upload-jobs/{id}` for polling. **AI Responses capture the raw provider response** — `response_metadata`/`additional_kwargs`/`usage_metadata` straight off the LangChain message object, before this app's own normalization, into a new `AIResponse` table linked 1:1 to the display-facing `Message` row. Wiring this in surfaced a real, previously-unknown gap: `ChatService._execute_runtime()` had always discarded everything but `response.content` from the assembled `AIMessage`, so none of `Message`'s own rich metadata columns (`tool_calls`, `usage_metadata`, etc.) were ever actually populated on a real chat turn — a separate, adjacent finding, noted but not fixed here since it's beyond what was asked.
+**New all-time high — 81.5%, up from 79.8%. Production hardening (Phase 13) reaches 100%, all 5 items — Rate limiting, Metrics, and Retry policies all built for real**, closing the phase completely. See the milestone entry at the top of this file for the full account; briefly: a real per-tenant/IP sliding-window `RateLimitMiddleware` (429 on overflow, verified live against 320 rapid requests), a real in-memory `MetricsMiddleware` + `GET /api/v1/metrics` (verified live against that same traffic), and a real `tenacity`-based `RetryTransport` wrapping the shared HTTP client factory (verified live against the IAM fail-open path). A previously-undocumented leaked HTTP client in the weather tool was also fixed alongside.
+
+**Previous all-time high — 79.8%, up from 77.3%. Database (Phase 3) reaches 100%, all 12 items — Document Versions, Upload Jobs, and AI Responses all built for real**, closing the phase completely. Three real, well-scoped design decisions confirmed with the user before building (each a genuine fork, not a detail): **Document Versions add a new `DocumentVersion` table without touching the existing checksum-skip dedup behavior** — a re-upload with identical content still returns `skipped=True` exactly as before; only a re-upload with *changed* content under the same tenant/knowledge-base/filename now creates a real version record, flips the old `Document.is_current` to `False` (a new column, added live via `ALTER TABLE`, matching this session's established schema-drift-fix pattern), and links old→new via `root_document_id`/`version_number`. **Upload Jobs track the real arq job**, not just `Document.status` — a new `UploadJob` row (`QUEUED`→`RUNNING`→`SUCCEEDED`/`FAILED`) created at enqueue time and updated by whichever path actually runs the ingestion (the real worker via `packages/worker/jobs.py`, or the in-process fallback), matched by the job's own primary key rather than arq's job id so both paths update the identical row shape. New `GET /api/v1/upload-jobs/{id}` for polling. **AI Responses capture the raw provider response** — `response_metadata`/`additional_kwargs`/`usage_metadata` straight off the LangChain message object, before this app's own normalization, into a new `AIResponse` table linked 1:1 to the display-facing `Message` row. Wiring this in surfaced a real, previously-unknown gap: `ChatService._execute_runtime()` had always discarded everything but `response.content` from the assembled `AIMessage`, so none of `Message`'s own rich metadata columns (`tool_calls`, `usage_metadata`, etc.) were ever actually populated on a real chat turn — a separate, adjacent finding, noted but not fixed here since it's beyond what was asked.
 
 **A second real production crash found and fixed live, mid-verification, same class as the earlier `TypeError: Integer exceeds 64-bit range` fix**: a plain non-tool-calling chat message crashed identically — but this time on the *default* long-running test conversation (88 messages accumulated across this session's own testing), not on a tool call. Root-caused as pre-existing poisoned history in that one specific conversation (predating the `sanitize_tool_call_args` fix), not a new code defect — confirmed by testing the identical request against a brand-new conversation ID, which succeeded cleanly. Left as a known artifact of this dev environment's own accumulated test data, not chased further.
 
@@ -416,10 +428,7 @@ All four registered tools (Calculator, Weather, Web Search, News) are now indivi
 ## ⚪ Pending — not implemented
 
 ### IAM (`docs/mvpRAG.md` Phase 2) — remaining gaps
-| Item | Status |
-|---|---|
-| Rate limiting | `packages/api/middleware/rate_limit.py` is still a **1-line comment stub** — a separate roadmap item (Phase 13), not part of Phase 2's own checklist, but tracked here for visibility |
-| Metrics middleware | `packages/api/middleware/metrics.py` is still a **1-line comment stub** — same note as rate limiting |
+Rate limiting and metrics middleware, previously tracked here for visibility as Phase 13 items, are now both Done — see Production hardening (Phase 13) below and the milestone entry at the top of this file. No IAM-specific gaps remain beyond Refresh Token Validation (Partial, see below).
 
 **What changed:** `packages/api/middleware/authentication.py` is a real `AuthenticationMiddleware` now, calling the real IAM SDK (`packages/sdk/iam/`, fixed — it had a `settings.url`/`base_url` bug that meant it had never once been exercised) via a new `AuthService` (`packages/auth/service.py`, the first real code in that previously-empty package) and a new `IAMContainer` (the first `packages/sdk/*` client ever wired into DI). `request.state.current_user` is now a genuinely IAM-verified identity when a valid Bearer token is presented — `get_current_user()`, `require_permission()`, and `require_role()` (`packages/api/dependencies.py`) read from it. **Fails open by explicit design**: no live IAM service is reachable in this environment, so missing/invalid tokens or an unreachable IAM fall back to the existing default-tenant/default-user behavior rather than rejecting — permission enforcement only activates once a token is actually verified. Existing routes (`chat.py`, `conversations.py`) were not retrofitted with specific required permissions — no permission taxonomy exists yet for them, and the mechanism is what this pass delivers, not a new authorization policy for those two routes.
 
@@ -433,11 +442,8 @@ All 12 checklist items are now Done — Document Versions, Upload Jobs, and AI R
 
 ### Session Management (Phase 6) — **100% complete, see the "Done" section above**
 
-### Memory (Phase 7)
-| Item | Status |
-|---|---|
-| Semantic memory, episodic memory, user preferences, user facts | No long-term memory code found anywhere (grep for these terms returns nothing) |
-| Persistent (non-in-memory) checkpointing | `GraphCheckpointFactory` only wraps `MemorySaver` — nothing survives a process restart; "Future" Postgres/Redis branches are commented out |
+### Memory (Phase 7) — **100% complete, see the "Done" section above**
+Both bullets that used to live here are stale leftovers from before the phase closed out — semantic/episodic memory, user preferences, and user facts are all in the Done table above; persistent (Postgres-backed) checkpointing is real and documented under Session Management (Phase 6)'s "Persistent Sessions" entry, not a Memory-phase item at all.
 
 ### Production Retrieval (Phase 9 — the roadmap's ⭐ centerpiece) — **100% complete, see the "Done" section above and the milestone entry at the top of this file**
 
@@ -457,37 +463,13 @@ All 12 checklist items are now Done — Document Versions, Upload Jobs, and AI R
 | ~~Document indexing, embedding generation~~ | **Done, same day.** `POST /api/v1/documents` now enqueues a real arq job (`ingest_document_job`) instead of only ever running in-process — see the "Document ingestion migrated onto the real queue" row above for the full account. Falls back to the original in-process path only when Redis is unreachable at startup. |
 | OCR | Still doesn't exist — deliberately deferred, since it needs its own dependency decision (local `pytesseract`+`tesseract` binary vs. a cloud OCR API) that's separate from the worker/queue build-out. |
 
-### Production hardening (Phase 13)
-| Item | Status |
-|---|---|
-| Rate limiting | See IAM section — `middleware/rate_limit.py` stub |
-| Retry policies | `tenacity` is a declared dependency; `infrastructure/http/retry.py` is a **1-line stub** with an unimplemented `@retry` TODO |
+### Production hardening (Phase 13) — **100% complete, see the milestone entry at the top of this file**
+All 5 items are now Done: Rate limiting (`packages/api/middleware/rate_limit.py`, real per-tenant/IP sliding-window `429`s), Metrics middleware (`packages/api/middleware/metrics.py` + `GET /api/v1/metrics`), and Retry policies (`packages/infrastructure/http/retry.py`'s `tenacity`-based `RetryTransport`) all closed in the same pass, joining the 2 items that were already Done before it.
 
 ### APIs (Phase 14) — 100%, up from 42.9% — Feedback API closed the phase, see the milestone section above for that entry
 **7 of 9 planned routers are now real and registered.** Confirmed by reading `packages/api/routers/__init__.py` directly:
 
-```python
-from packages.api.routers.auth import router as auth_router
-from packages.api.routers.chat import router as chat_router
-from packages.api.routers.conversations import router as conversation_router
-from packages.api.routers.documents import router as document_router
-from packages.api.routers.health import router as health_router
-from packages.api.routers.knowledge_bases import router as knowledge_base_router
-from packages.api.routers.search import router as search_router
-# from .feedback import router as feedback_router
-# from .models import router as model_router
-# from .prompts import router as prompt_router
-# from .tools import router as tool_router
-...
-api_router.include_router(health_router)
-api_router.include_router(auth_router)
-api_router.include_router(chat_router)
-api_router.include_router(conversation_router)
-api_router.include_router(document_router)
-api_router.include_router(knowledge_base_router)
-api_router.include_router(search_router)
-# ... and 3 more, all commented out
-```
+**Stale as of this pass's review, corrected — all 9+ routers are real and registered, nothing commented out.** Confirmed by reading `packages/api/routers/__init__.py` directly: `health`, `auth`, `chat`, `conversations`, `documents`, `knowledge_bases`, `search`, `agents`, `models`, `prompts`, `tools`, `feedback`, `upload_jobs`, and (this pass) `metrics` are all imported and `include_router()`-ed uncommented. The 4 admin-CRUD routers (`agents`, `models`, `prompts`, `tools`) aren't roadmap items — see the "Admin CRUD" entry above — but they, Feedback, and Upload Jobs are all real, not stubs, contrary to what an earlier version of this doc said.
 
 **Chat router — Done for its one route, still just one route.** `POST /api/v1/chat` now genuinely works end to end — real conversation, real LLM response, real persistence (see the Done section's milestone above). `conversation_id` is now optional (auto-provisions a default conversation when omitted, or creates a new one under an explicit unknown ID rather than `404`ing — see Session Management above), and `X-Tenant-ID`/`X-User-ID` fall back to fixed default UUIDs when omitted. Message history has its own route under `/conversations/{id}/messages`, not `/chat/{id}` — still no chat-scoped delete route.
 
@@ -503,10 +485,7 @@ api_router.include_router(search_router)
 
 ~~**Feedback API — deliberately not started this pass.**~~ **Done, later pass** — a real `Feedback` domain model, repository, schemas, and `POST`/`GET /api/v1/feedback` router now exist, confirmed with the user first since it needed a new table. See the milestone section at the top of this file for the full account.
 
-The 4 admin-CRUD router files referenced below (`agents.py`, `models.py`, `prompts.py`, `tools.py`) are **also no longer stubs** — see the "Admin CRUD for agents, model profiles, prompts, and tool definitions" entry above; none of those four are roadmap items, unlike Feedback.
-| `packages/api/routers/models.py` | `# Router models` |
-| `packages/api/routers/prompts.py` | `# Router prompts` |
-| `packages/api/routers/tools.py` | `# Router tools` |
+**Metrics router — new this pass.** `GET /api/v1/metrics` (`packages/api/routers/metrics.py`), reading `MetricsMiddleware`'s in-memory counters — see Production hardening (Phase 13) above.
 
 **Practical impact:** a conversation can now genuinely be created over HTTP and chatted with end-to-end — verified live with real Gemini responses, real persistence, real tool-calling, real cross-conversation memory recall, real SSE streaming, real document upload that a chat request can then retrieve and cite by exact figures, real document list/fetch/delete, knowledge base create/list/fetch, direct search with the same retrieval quality chat gets, and (as of a later pass) real feedback submission/review. What's still missing on the routing surface: chat-scoped delete, conversation list-all/delete.
 
@@ -539,11 +518,11 @@ New this pass: [`docs/DEPLOYMENT.md`](./DEPLOYMENT.md) documents all of the abov
 
 These don't map to a `docs/mvpRAG.md` checklist item, but they're real gaps that would surface in any production readiness review. Found by reading the actual code, not by checking off roadmap boxes.
 
-### 1. Resource lifecycle — leaked HTTP client
-`packages/tools/builtin/weather.py:23` creates `client = httpx.AsyncClient(timeout=10)` at **module level**, used in `get_weather()` (line 61), and it is **never closed anywhere** — not in `packages/api/lifespan.py`'s shutdown block (lines 54-62), which only does `await engine.dispose()` on the DB engine. `news.py` and `search.py` avoid this by instantiating their client fresh per call instead (wasteful but not leaky). Net effect: an unclosed connector/socket on every process shutdown.
+### 1. Resource lifecycle — leaked HTTP client — **Fixed this pass**
+`packages/tools/builtin/weather.py`'s module-level `client = httpx.AsyncClient(timeout=10)` was never closed anywhere. Fixed: new `close_weather_client()`, called from `packages/api/lifespan.py`'s shutdown block alongside the existing checkpointer/queue-pool cleanup. `news.py`/`search.py` were never affected (they instantiate fresh per call).
 
-### 2. No CORS middleware, no security headers, docs exposed unconditionally
-`packages/api/middleware/__init__.py`'s `register_middlewares()` (lines 11-39) registers only `TenantMiddleware`, `LoggingMiddleware`, `RequestIdMiddleware` — there is **no `CORSMiddleware`** anywhere in the codebase (repo-wide grep for CORS/CSP/X-Frame-Options returns nothing). Separately, `packages/api/app.py:21-23` hardcodes `docs_url="/docs"`, `redoc_url="/redoc"`, `openapi_url="/openapi.json"` unconditionally — `packages/config/app.py:18`'s `debug` flag and `packages/config/api.py:16-17`'s `docs_url`/`redoc_url` settings fields exist but are **never actually read by `app.py`**, so Swagger/ReDoc are live in every environment regardless of `DEBUG`.
+### 2. No CORS middleware, no security headers, docs exposed unconditionally — **CORS half fixed (predates this pass, doc was stale); docs-exposure half still open**
+`CORSMiddleware` **is** genuinely registered now (`packages/api/middleware/__init__.py`) with explicit `X-Tenant-ID`/`X-User-ID`/`Authorization` header allowances — this doc's earlier claim that no CORS middleware existed was stale, corrected without a code change. Still genuinely open: `packages/api/app.py` hardcodes `docs_url="/docs"`, `redoc_url="/redoc"`, `openapi_url="/openapi.json"` unconditionally — `packages/config/app.py`'s `debug` flag and `packages/config/api.py`'s `docs_url`/`redoc_url` settings fields exist but are never read by `app.py`, so Swagger/ReDoc are live in every environment regardless of `DEBUG`. No CSP/X-Frame-Options or other security headers exist either.
 
 ### 3. Secrets — real keys in local `.env`, correctly gitignored, but worth rotating
 Local `.env` holds live-looking keys (OpenAI, Google, Groq, Serper, Tavily, OpenWeather, NewsAPI, a Postgres password, and a placeholder-looking `JWT_SECRET=dev-secret-key-...`). Confirmed via `git log --all -- .env` and `git ls-files` that `.env` has **never been committed** — only the blank `.env.example` is tracked, and `.gitignore` correctly excludes `.env`/`.env.local`. Not a repo leak, but worth rotating any key that's been shared in plaintext during a review like this one, and worth double-checking `JWT_SECRET` gets replaced with a real secret before JWT validation is ever wired up (see Phase 2 gap).
@@ -623,5 +602,8 @@ Chat works end to end now — the priorities below are genuinely the *next* laye
 15. ~~Complete Session Management (Persistent Sessions, Conversation History)~~ — **Done.** Phase 6 is now fully complete (4/4, 100%) — see the Session Management section above. Real Postgres-backed checkpointing (`langgraph-checkpoint-postgres`) plus `GET /conversations/{id}`/`GET /conversations/{id}/messages`. A real `uvicorn`-on-native-Windows incompatibility (hardcoded `ProactorEventLoop`, unrelated to Postgres reachability) was found and **fixed for real**, not just documented around — `ThreadedPostgresSaver` wraps LangGraph's official sync `PostgresSaver` via `asyncio.to_thread()`, sidestepping the async-driver restriction entirely. Confirmed live under real `uvicorn` on native Windows: `Persistent (Postgres-backed) checkpointer ready.`, no fallback.
 16. ~~Build the Feedback API (needs a new domain model + migration first)~~ — **Done.** A real `Feedback` model/repository/router now exist — `POST`/`GET /api/v1/feedback`, verified live against real Postgres including the upsert-on-resubmit behavior and tenant isolation. Closes both Phase 14 (APIs, now 100%) and Phase 3's own separate "Feedback" database checklist item (Database now 75.0%). See the milestone section above.
 17. **Write an actual pytest suite** — the highest-leverage remaining gap. Nearly every real bug this session found (the checkpointer msgpack no-op, the `LoadMemoryNode` full-state-return bug, the three `enabled`→`is_active` repository bugs, the `model_profiles.vector` dimension drift) was only caught by manual live testing; a real suite covering conversation-create → chat → recall, tool-calling, and retrieval would catch this class of regression automatically instead of one bug at a time.
+18. ~~Build Rate limiting and Metrics middleware, and a real Retry policy~~ — **Done.** Production hardening (Phase 13) is now fully complete (5/5, 100%) — see the milestone section at the top of this file. A previously-undocumented leaked HTTP client in the weather tool was fixed alongside.
+19. **Automate starting the dedicated Chroma server** — the client-server migration (see the "real root cause of every intermittent RAG failure" CHANGELOG entry) fixed the concurrency bug for good, but introduced a third long-lived process (`chroma run --path ./storage/chroma --port 8010`) that nothing currently starts automatically. It has already caused one full outage after a multi-day gap between sessions purely because it wasn't restarted. Candidates: a `docker-compose.yml` service, a Windows service/scheduled task, or a wrapper script that starts all three (Chroma, API, worker) together.
+20. **Verify the Docker/Compose path against a real daemon** — Docker Desktop wasn't running in this environment for most of this project's history (the reason Deployment/Phase 16 has stayed "code-level bugs fixed, still unproven" for so long); it was confirmed reachable during this pass. Worth an actual `docker compose up`/`docker build` pass to move Phase 16 off 0%, now that the blocker is gone.
 
 **Fixed this session:** the DB session `Resource`→`Factory` bug and the connection-leak/multi-session risks it could have introduced; the `model_profiles.vector` schema drift; the repository-writes-never-commit bug; the conversations router (stub → real, working, idempotent `POST /conversations`); replacing `ConversationManager`'s flow with `packages/application/services/chat_service.py`'s `ChatService`, 9 further real bugs across that stack — resulting in the first fully working `POST /api/v1/chat` round trip this project has ever had; real tool-calling (`LLMNode` was never binding tools to the model at all); real long-term memory — a genuine `memories` table, real pgvector search, and a significant `Singleton`-caching-a-pre-request-session bug fixed along the way; real `ChatPromptTemplate`/LCEL/`BaseOutputParser` usage across `PromptBuilder` and the memory extraction/summarization chains, surfacing one more real bug (`LLMManager` isn't a `Runnable`, fixed via `.model`); a checkpointer silently rebuilt empty every request plus an earlier msgpack-allowlist fix that had never actually worked; real custom reducers and real end-to-end SSE streaming; making `packages/knowledge/` — a ~70-file implementation that had never successfully run — into the canonical, live-wired document-processing/RAG stack; real IAM via `packages/sdk/iam/` (also never-run before this session) wired into a genuine `AuthenticationMiddleware` with working RBAC; and, most recently, completing Document Processing end to end — real metadata extraction, markdown/semantic chunking, and genuinely async/incremental/batched indexing through a brand-new `POST /api/v1/documents` route and document persistence layer, closing Phase 8 to 100%. See the milestone section at the top of this document for the full account of each. **Fixed in earlier passes, holding steady:** `SafeCalculator`'s `ast.Num` and `dataclass(slots=True)`/`__dict__` crashes.

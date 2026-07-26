@@ -8,6 +8,8 @@ from packages.config.loader import settings
 
 from .authentication import AuthenticationMiddleware
 from .logging import LoggingMiddleware
+from .metrics import MetricsMiddleware
+from .rate_limit import RateLimitMiddleware
 from .request_id import RequestIdMiddleware
 from .tenant import TenantMiddleware
 
@@ -49,6 +51,28 @@ def register_middlewares(app: FastAPI) -> None:
     #
     app.add_middleware(
         RequestIdMiddleware,
+    )
+
+    #
+    # Rate limiting (Production hardening's own pending gap — see
+    # packages/api/middleware/rate_limit.py). Registered here, just
+    # inside Metrics/CORS, so abusive traffic is rejected before it
+    # costs a request-id, a log line, tenant resolution, or an IAM
+    # round-trip.
+    #
+    app.add_middleware(
+        RateLimitMiddleware,
+    )
+
+    #
+    # Metrics (Production hardening's own other pending gap — see
+    # packages/api/middleware/metrics.py). Registered just inside CORS
+    # so it still times/counts requests RateLimitMiddleware rejects
+    # (a 429 is a real, countable response), not just ones that reach
+    # the route.
+    #
+    app.add_middleware(
+        MetricsMiddleware,
     )
 
     #
