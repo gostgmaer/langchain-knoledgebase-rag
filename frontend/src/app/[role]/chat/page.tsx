@@ -26,6 +26,7 @@ export default function ChatPage() {
   const { entries, touch, remove } = useConversationHistory();
   const [conversationId, setConversationId] = useState<string>(() => newId());
   const [draft, setDraft] = useState("");
+  const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -35,7 +36,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, pendingAssistant]);
+  }, [messages, pendingUser, pendingAssistant]);
 
   async function handleSend() {
     const text = draft.trim();
@@ -43,6 +44,12 @@ export default function ChatPage() {
 
     setDraft("");
     setSending(true);
+    // Rendered immediately below, before the request even starts — the
+    // real message only exists in `messages` once the server-fetched
+    // history refetches in the `finally` block below, which previously
+    // meant the user's own message stayed invisible for the entire
+    // duration of the assistant's reply.
+    setPendingUser(text);
     setPendingAssistant("");
     touch(conversationId, text);
 
@@ -77,17 +84,20 @@ export default function ChatPage() {
           // Best-effort refresh — the next natural fetch will catch up.
         }
       }
+      setPendingUser(null);
       setPendingAssistant(null);
     }
   }
 
   function handleSelectConversation(id: string) {
     setConversationId(id);
+    setPendingUser(null);
     setPendingAssistant(null);
   }
 
   function handleNewChat() {
     setConversationId(newId());
+    setPendingUser(null);
     setPendingAssistant(null);
   }
 
@@ -108,12 +118,23 @@ export default function ChatPage() {
         </div>
 
         <div className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-lg border border-neutral-200 bg-neutral-50/50 p-4 dark:border-neutral-800 dark:bg-neutral-900/30">
-          {messages.length === 0 && pendingAssistant === null && (
+          {messages.length === 0 && pendingUser === null && pendingAssistant === null && (
             <p className="m-auto text-sm text-neutral-400">Say something to get started.</p>
           )}
           {messages.map((message) => (
             <MessageBubble key={message.id} message={message} />
           ))}
+          {pendingUser !== null && (
+            <MessageBubble
+              message={{
+                id: "pending-user",
+                conversation_id: conversationId,
+                role: "USER",
+                content: pendingUser,
+                created_at: new Date().toISOString(),
+              }}
+            />
+          )}
           {pendingAssistant !== null && (
             <MessageBubble
               message={{

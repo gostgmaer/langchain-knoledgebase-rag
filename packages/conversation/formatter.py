@@ -34,8 +34,18 @@ class MessageFormatter:
                 HumanMessage,
             )
 
+            # id must be stable across reloads and match the DB row —
+            # LangGraph's checkpointer merges GraphState.messages via
+            # add_messages, which matches by .id to decide "update
+            # existing" vs "append new". Without this, every reload
+            # produces fresh random ids (BaseMessage's default), so the
+            # checkpointer never recognizes these as the same messages
+            # it already has for this thread and appends them as
+            # duplicates on every single turn — the conversation history
+            # sent to the LLM silently doubles (then triples, ...) turn
+            # over turn.
             result.append(
-                cls(content=message.content)
+                cls(content=message.content, id=str(message.id))
             )
 
         return result
