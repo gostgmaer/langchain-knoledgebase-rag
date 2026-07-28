@@ -13,7 +13,12 @@ class EmbeddingSettings(BaseSettings):
     )
     model: str = Field(default="gemini-pro", alias="LLM_MODEL")
 
-    dimensions: int | None = Field(default=3072, alias="EMBEDDING_DIMENSIONS")
+    # 1536 — one of gemini-embedding-001's own documented Matryoshka
+    # truncation breakpoints (768/1536/3072), and comfortably under
+    # pgvector's hard 2000-dimension HNSW/IVFFlat index ceiling (unlike
+    # the native 3072, which forced dropping the index on the
+    # `embeddings` bookkeeping table entirely — see its own model file).
+    dimensions: int | None = Field(default=1536, alias="EMBEDDING_DIMENSIONS")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")

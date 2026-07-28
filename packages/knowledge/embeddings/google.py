@@ -23,9 +23,17 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
 
     def __init__(self) -> None:
 
+        # output_dimensionality truncates gemini-embedding-001's native
+        # 3072-dim output via Matryoshka Representation Learning — without
+        # this, settings.embedding.dimensions was purely a DB/vector-store
+        # schema number with no effect on what the API actually returns,
+        # so a config change alone (without this parameter) would have
+        # produced a hard dimension-mismatch on the very first real
+        # embed call.
         raw_client = GoogleGenerativeAIEmbeddings(
             model=settings.rag.embedding_model,
             google_api_key=settings.ai.google_api_key,
+            output_dimensionality=settings.embedding.dimensions,
         )
 
         # Gemini's own free-tier quota (100 requests/min) is what a
