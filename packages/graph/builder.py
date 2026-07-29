@@ -8,54 +8,54 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from packages.graph.middleware import (
+    LoggingMiddleware,
+    MetricsMiddleware,
+    MiddlewarePipeline,
+)
 from packages.graph.nodes import GraphNodes
 from packages.graph.router import GraphRouter
 from packages.graph.state import GraphState
-from packages.shared.logging import get_logger
-
-logger = get_logger(__name__)
 
 NodeFn = Callable[[GraphState], Awaitable[dict[str, Any] | GraphState]]
 
+# One pipeline shared by every node in every graph build — LoggingMiddleware
+# and MetricsMiddleware are both stateless per call (MetricsMiddleware
+# writes into the module-level graph_metrics_store, not instance state),
+# so a single pipeline instance is safe to reuse across requests despite
+# GraphBuilder itself being Factory-scoped (a fresh instance per request,
+# per the DI-session-capture lesson learned earlier building memory).
+_DEFAULT_PIPELINE = MiddlewarePipeline(LoggingMiddleware(), MetricsMiddleware())
 
-def _instrumented(name: str, node: NodeFn) -> NodeFn:
+
+def _instrumented(name: str, node: NodeFn, pipeline: MiddlewarePipeline = _DEFAULT_PIPELINE) -> NodeFn:
     """
-    Wraps a graph node with structured entered/exited/error events —
-    LangGraph (Phase 5)'s own "Runtime Events" gap. Wrapping at the
-    `add_node` call site (rather than inside each node class) keeps
-    this a single, generic instrumentation point instead of touching
-    every node's own implementation.
+    Wraps a graph node with the middleware pipeline's before/after/
+    on_error hooks — LangGraph (Phase 5)'s "Runtime Events" item, now
+    genuinely running through packages/graph/middleware.py instead of
+    duplicating logging logic here. Wrapping at the `add_node` call
+    site (rather than inside each node class) keeps this a single,
+    generic instrumentation point instead of touching every node.
     """
 
     async def wrapper(state: GraphState) -> dict[str, Any] | GraphState:
-        conversation_id = state.get("conversation_id")
-        logger.info("Graph node entered", node=name, conversation_id=str(conversation_id))
+        await pipeline.before(state, name)
         start = time.monotonic()
 
         try:
             result = await node(state)
         except GraphBubbleUp:
             # LangGraph's own control-flow signal for interrupt()/Command —
-            # not a real error, just an early exit. Let it propagate
-            # silently; logging it as "raised" would be misleading noise
+            # not a real error, just an early exit. Skip on_error/after
+            # entirely; logging it as "raised" would be misleading noise
             # on every single tool-approval pause.
             raise
         except Exception as exc:
-            logger.error(
-                "Graph node raised",
-                node=name,
-                conversation_id=str(conversation_id),
-                error=str(exc),
-                error_type=type(exc).__name__,
-            )
+            await pipeline.on_error(state, name, exc)
             raise
 
-        logger.info(
-            "Graph node exited",
-            node=name,
-            conversation_id=str(conversation_id),
-            duration_ms=round((time.monotonic() - start) * 1000, 2),
-        )
+        duration_ms = (time.monotonic() - start) * 1000
+        await pipeline.after(state, name, duration_ms)
         return result
 
     return wrapper
