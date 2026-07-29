@@ -6,6 +6,25 @@ Application service container.
 
 from __future__ import annotations
 
+from dependency_injector import containers, providers
+
+from packages.config.loader import settings as _settings
+from packages.shared.logging import configure_logger, get_logger
+
+configure_logger(_settings.logging.level)
+
+
+class RootContainer(containers.DeclarativeContainer):
+    """
+    Minimal root container for standalone scripts (e.g. main.py).
+    """
+
+    settings = providers.Object(_settings)
+    logger = providers.Singleton(get_logger, __name__)
+
+
+container = RootContainer()
+
 
 class Container:
     """
