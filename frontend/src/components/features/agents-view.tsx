@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -97,7 +96,6 @@ export function AgentsView() {
                 <TableCell className="text-neutral-500">{agent.temperature}</TableCell>
                 <TableCell>
                   <StatusBadge status={agent.status} />
-                  {agent.is_active && <Badge variant="success" className="ml-1">active</Badge>}
                 </TableCell>
               </TableRow>
             ))}

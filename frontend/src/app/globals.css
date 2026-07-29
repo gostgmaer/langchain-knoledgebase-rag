@@ -3,11 +3,52 @@
 :root {
   --background: #fafafa;
   --foreground: #171717;
+
+  /* Brand — a single accent color used sparingly (primary actions,
+     active nav state, focus rings, links) rather than everywhere, so
+     it stays meaningful instead of decorative. Indigo reads as
+     "product," not "default browser blue." */
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-foreground: #ffffff;
+  --primary-soft: #eef2ff;
+
+  --surface: #ffffff;
+  --border: #e5e7eb;
+  --muted: #f4f5f7;
+  --muted-foreground: #6b7280;
+  --ring: #4f46e5;
+
+  --success: #059669;
+  --success-soft: #ecfdf5;
+  --warning: #b45309;
+  --warning-soft: #fffbeb;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-ring: var(--ring);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
 }
@@ -16,6 +57,24 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --primary: #818cf8;
+    --primary-hover: #a5b4fc;
+    --primary-foreground: #0a0a0a;
+    --primary-soft: #1e1b4b;
+
+    --surface: #111113;
+    --border: #27272a;
+    --muted: #18181b;
+    --muted-foreground: #a1a1aa;
+    --ring: #818cf8;
+
+    --success: #34d399;
+    --success-soft: #052e21;
+    --warning: #fbbf24;
+    --warning-soft: #451a03;
+    --danger: #f87171;
+    --danger-soft: #450a0a;
   }
 }
 

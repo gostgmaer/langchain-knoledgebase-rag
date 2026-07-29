@@ -50,7 +50,7 @@ export function Topbar() {
       <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5 text-xs text-neutral-500">
           <span
-            className={`h-1.5 w-1.5 rounded-full ${healthy ? "bg-emerald-500" : "bg-neutral-300 dark:bg-neutral-700"}`}
+            className={`h-1.5 w-1.5 rounded-full ${healthy ? "bg-success" : "bg-neutral-300 dark:bg-neutral-700"}`}
           />
           {health ? (healthy ? "Backend healthy" : "Backend unreachable") : "Checking backend…"}
         </span>
