@@ -17,6 +17,7 @@ from .security import SecuritySettings
 from .storage import StorageSettings
 from .upload_service import UploadServiceSettings
 from .iam import IAMSettings
+from .observability import ObservabilitySettings
 from .rag import RAGSettings
 
 
@@ -36,3 +37,4 @@ class Settings(BaseSettings):
     rag: RAGSettings = Field(default_factory=RAGSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     tools: ToolsSettings = Field(default_factory=ToolsSettings)
+    observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)

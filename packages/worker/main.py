@@ -21,6 +21,7 @@ async def _on_startup(ctx: dict[str, Any]) -> None:
     # per-call session-scoping every background task in this app uses.
     ctx["container"] = ApplicationContainer()
     logger.info("Worker started", queue_prefix=settings.queue.prefix)
+    logger.info("LangSmith tracing", enabled=settings.observability.active)
 
 
 async def _on_shutdown(ctx: dict[str, Any]) -> None:

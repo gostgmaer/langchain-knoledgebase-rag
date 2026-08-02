@@ -37,6 +37,14 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting EasyDev AI Platform")
 
+    if settings.observability.active:
+        logger.info(
+            "LangSmith tracing enabled",
+            project=settings.observability.project,
+        )
+    else:
+        logger.info("LangSmith tracing disabled (no LANGCHAIN_API_KEY or LANGCHAIN_TRACING_V2=false)")
+
     logger.info("Initializing database schema...")
     try:
         engine = container.database.engine()
