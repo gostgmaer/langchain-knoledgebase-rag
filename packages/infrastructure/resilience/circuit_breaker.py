@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from enum import Enum
+from enum import StrEnum
 from typing import TypeVar
 
 from packages.shared.logging import get_logger
@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 T = TypeVar("T")
 
 
-class CircuitState(str, Enum):
+class CircuitState(StrEnum):
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"

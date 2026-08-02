@@ -1,8 +1,7 @@
 # Container Upload Service setup
 from __future__ import annotations
 
-from dependency_injector import containers
-from dependency_injector import providers
+from dependency_injector import containers, providers
 
 from packages.config.loader import settings as app_settings
 from packages.infrastructure.http.client import create_http_client

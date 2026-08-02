@@ -9,11 +9,11 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    JSON,
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from packages.domain.models.base import BaseModel
@@ -96,11 +96,11 @@ class DocumentChunk(BaseModel):
         nullable=False,
     )
 
-    document: Mapped["Document"] = relationship(
+    document: Mapped[Document] = relationship(
         back_populates="chunks",
     )
     source: Mapped[str | None]
-    embeddings: Mapped[list["Embedding"]] = relationship(
+    embeddings: Mapped[list[Embedding]] = relationship(
         back_populates="chunk",
         cascade="all, delete-orphan",
         lazy="selectin",

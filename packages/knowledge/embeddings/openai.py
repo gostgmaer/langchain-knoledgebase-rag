@@ -8,9 +8,8 @@ from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
 
 from packages.config.loader import settings
-from packages.shared.logging import get_logger
-
 from packages.knowledge.schema.chunk import KnowledgeChunk
+from packages.shared.logging import get_logger
 
 from .base import EmbeddingProvider
 

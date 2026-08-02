@@ -4,8 +4,7 @@ Base document splitter.
 
 from __future__ import annotations
 
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 from langchain_core.documents import Document
 

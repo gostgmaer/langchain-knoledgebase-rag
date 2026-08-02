@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 def build_rag_section(documents: list[str]) -> str:
     """
     Formats retrieved semantic documents for inclusion in the prompt.

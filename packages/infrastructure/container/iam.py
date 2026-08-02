@@ -1,8 +1,7 @@
 # Container IAM setup
 from __future__ import annotations
 
-from dependency_injector import containers
-from dependency_injector import providers
+from dependency_injector import containers, providers
 
 from packages.auth.service import AuthService
 from packages.config.loader import settings as app_settings

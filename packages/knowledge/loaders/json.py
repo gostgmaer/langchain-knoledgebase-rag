@@ -10,6 +10,7 @@ from pathlib import Path
 from langchain_core.documents import Document
 
 from packages.knowledge.exceptions import DocumentReadError
+
 from .base import BaseDocumentLoader
 
 

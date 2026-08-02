@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from packages.graph.state import GraphState
-
 from .models import (
     Capability,
     ExecutionPlan,

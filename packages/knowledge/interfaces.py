@@ -4,10 +4,10 @@ Knowledge module interfaces.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from pathlib import Path
-
 from typing import Protocol
+
 from langchain_core.documents import Document
 
 

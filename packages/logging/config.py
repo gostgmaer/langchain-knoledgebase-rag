@@ -1,5 +1,6 @@
 # Logging configuration
 import logging
+
 import structlog
 
 

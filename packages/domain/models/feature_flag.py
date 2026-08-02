@@ -1,12 +1,13 @@
 # Feature flag model
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy import Boolean, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from packages.domain.models.base import BaseModel
-from uuid import UUID
 
 
 class FeatureFlag(BaseModel):

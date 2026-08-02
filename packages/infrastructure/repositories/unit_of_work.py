@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.infrastructure.repositories.agent import AgentRepository
 from packages.infrastructure.repositories.ai_response import AIResponseRepository
 from packages.infrastructure.repositories.conversation import ConversationRepository
-from packages.infrastructure.repositories.document_chunk import DocumentChunkRepository
 from packages.infrastructure.repositories.document import DocumentRepository
+from packages.infrastructure.repositories.document_chunk import DocumentChunkRepository
 from packages.infrastructure.repositories.document_version import DocumentVersionRepository
 from packages.infrastructure.repositories.embedding import EmbeddingRepository
 from packages.infrastructure.repositories.knowledge_base import KnowledgeBaseRepository
@@ -34,7 +34,7 @@ class UnitOfWork:
     # Context Manager
     # ---------------------------------------------------------
 
-    async def __aenter__(self) -> "UnitOfWork":
+    async def __aenter__(self) -> UnitOfWork:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:

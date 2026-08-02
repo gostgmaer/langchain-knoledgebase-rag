@@ -18,8 +18,7 @@ The implementation may use an LLM, rules, or a hybrid approach.
 
 from __future__ import annotations
 
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from uuid import UUID
 
 from langchain_core.messages import BaseMessage

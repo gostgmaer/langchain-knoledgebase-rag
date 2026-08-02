@@ -41,37 +41,12 @@ class EmbeddingRepository(BaseRepository[Embedding]):
         stmt = (
             select(func.count())
             .select_from(Embedding)
-            .where(Embedding.chunk_id == chunk_id)
+            .where(
+                Embedding.chunk_id == chunk_id,
+            )
         )
 
         return int(await self.session.scalar(stmt) or 0)
-
-    async def delete_by_chunk(
-        self,
-        chunk_id: UUID,
-    ) -> int:
-        embeddings = await self.list_by_chunk(chunk_id)
-
-        for embedding in embeddings:
-            await self.session.delete(embedding)
-
-        return len(embeddings)
-
-    async def get_by_chunk(
-        self,
-        chunk_id: UUID,
-    ) -> Embedding | None:
-        stmt = select(Embedding).where(Embedding.chunk_id == chunk_id).limit(1)
-
-        return await self.scalar(stmt)
-
-    async def list_by_chunk(
-        self,
-        chunk_id: UUID,
-    ) -> list[Embedding]:
-        stmt = select(Embedding).where(Embedding.chunk_id == chunk_id)
-
-        return await self.scalars(stmt)
 
     async def list_by_model(
         self,
@@ -82,20 +57,6 @@ class EmbeddingRepository(BaseRepository[Embedding]):
         )
 
         return await self.scalars(stmt)
-
-    async def count_by_chunk(
-        self,
-        chunk_id: UUID,
-    ) -> int:
-        stmt = (
-            select(func.count())
-            .select_from(Embedding)
-            .where(
-                Embedding.chunk_id == chunk_id,
-            )
-        )
-
-        return int(await self.session.scalar(stmt) or 0)
 
     async def count_by_tenant(
         self,

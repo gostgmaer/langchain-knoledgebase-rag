@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-
 from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from packages.domain.models.agent import Agent
 from packages.domain.models.base import BaseModel
+
 if TYPE_CHECKING:
     from packages.domain.models.knowledge_base import KnowledgeBase
 
@@ -38,10 +38,10 @@ class AgentKnowledgeBase(BaseModel):
         ForeignKey("knowledge_bases.id", ondelete="CASCADE"),
         nullable=False,
     )
-    agent: Mapped["Agent"] = relationship(
+    agent: Mapped[Agent] = relationship(
         back_populates="knowledge_bases",
     )
 
-    knowledge_base: Mapped["KnowledgeBase"] = relationship(
+    knowledge_base: Mapped[KnowledgeBase] = relationship(
         back_populates="agent_links",
     )

@@ -30,7 +30,7 @@ class GraphPlanner:
 
     def __init__(
         self,
-        query_analyzer: "QueryAnalyzer | None" = None,
+        query_analyzer: QueryAnalyzer | None = None,
     ) -> None:
         self._analyzer = query_analyzer
 

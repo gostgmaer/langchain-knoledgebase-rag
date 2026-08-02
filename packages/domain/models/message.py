@@ -193,20 +193,20 @@ class Message(BaseModel):
     # Relationships
     #
 
-    conversation: Mapped["Conversation"] = relationship(
+    conversation: Mapped[Conversation] = relationship(
         back_populates="messages",
     )
 
-    parent: Mapped["Message | None"] = relationship(
+    parent: Mapped[Message | None] = relationship(
         remote_side="Message.id",
         back_populates="children",
     )
 
-    children: Mapped[list["Message"]] = relationship(
+    children: Mapped[list[Message]] = relationship(
         back_populates="parent",
     )
 
-    citations: Mapped[list["MessageCitation"]] = relationship(
+    citations: Mapped[list[MessageCitation]] = relationship(
         back_populates="message",
         cascade="all, delete-orphan",
     )

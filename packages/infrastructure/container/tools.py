@@ -1,26 +1,25 @@
 # Container tools setup
 from __future__ import annotations
 
-from dependency_injector import containers
-from dependency_injector import providers
+from dependency_injector import containers, providers
 
+from packages.knowledge.manager import KnowledgeManager
+from packages.sdk.iam.client import IAMClient
 from packages.tools.builtin.calculator import calculator
-from packages.tools.executor import ToolExecutor
-from packages.tools.manager import ToolManager
-from packages.tools.registry import ToolRegistry
-from packages.tools.builtin.weather import get_weather
-from packages.tools.builtin.news import get_news
-from packages.tools.builtin.search import get_google_search
-from packages.tools.builtin.knowledge_base import (
-    make_document_search_tool,
-    make_knowledge_base_search_tool,
-)
 from packages.tools.builtin.iam import (
     make_iam_tenant_lookup_tool,
     make_iam_user_lookup_tool,
 )
-from packages.knowledge.manager import KnowledgeManager
-from packages.sdk.iam.client import IAMClient
+from packages.tools.builtin.knowledge_base import (
+    make_document_search_tool,
+    make_knowledge_base_search_tool,
+)
+from packages.tools.builtin.news import get_news
+from packages.tools.builtin.search import get_google_search
+from packages.tools.builtin.weather import get_weather
+from packages.tools.executor import ToolExecutor
+from packages.tools.manager import ToolManager
+from packages.tools.registry import ToolRegistry
 
 
 def init_tool_manager(

@@ -45,7 +45,11 @@ async def _to_response(container: ApplicationContainer, kb: KnowledgeBase) -> Kn
     status_code=status.HTTP_201_CREATED,
     response_model=ApiResponse[KnowledgeBaseResponseSchema],
     summary="Create a knowledge base",
-    description="Creates a new knowledge base for the calling tenant. Embedding/chunking settings are seeded from this app's own RAG config, matching the auto-provisioned default knowledge base.",
+    description=(
+        "Creates a new knowledge base for the calling tenant. Embedding/chunking "
+        "settings are seeded from this app's own RAG config, matching the "
+        "auto-provisioned default knowledge base."
+    ),
 )
 async def create_knowledge_base(
     payload: CreateKnowledgeBaseRequestSchema,

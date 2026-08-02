@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+
 class SendEmailHeaders(BaseModel):
     tenant_id: str
 

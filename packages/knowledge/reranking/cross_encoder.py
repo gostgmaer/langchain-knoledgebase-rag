@@ -65,7 +65,7 @@ class CrossEncoderReranker:
         scores = model.predict(pairs)
 
         ranked = sorted(
-            zip(scores, results),
+            zip(scores, results, strict=True),
             key=lambda pair: pair[0],
             reverse=True,
         )

@@ -5,8 +5,8 @@ from langgraph.prebuilt import ToolNode
 
 from packages.graph.nodes.llm import LLMNode
 from packages.graph.nodes.load_memory import LoadMemoryNode
-from packages.planner.planner import GraphPlanner
 from packages.graph.nodes.retrieve import RetrieveNode
+from packages.planner.planner import GraphPlanner
 
 # extract_memory (packages/graph/nodes/extract_memory.py) is no longer
 # a graph node — packages/graph/builder.py's docstring and

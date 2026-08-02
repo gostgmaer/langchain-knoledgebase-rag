@@ -5,20 +5,21 @@ from pydantic_settings import BaseSettings
 
 from packages.config.embedding import EmbeddingSettings
 from packages.config.tools import ToolsSettings
+
 from .ai import AISettings
 from .api import APISettings
 from .app import AppSettings
 from .database import DatabaseSettings
 from .features import FeatureSettings
+from .iam import IAMSettings
 from .logging import LoggingSettings
+from .observability import ObservabilitySettings
 from .queue import QueueSettings
+from .rag import RAGSettings
 from .redis import RedisSettings
 from .security import SecuritySettings
 from .storage import StorageSettings
 from .upload_service import UploadServiceSettings
-from .iam import IAMSettings
-from .observability import ObservabilitySettings
-from .rag import RAGSettings
 
 
 class Settings(BaseSettings):

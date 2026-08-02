@@ -64,4 +64,4 @@ class Feedback(BaseModel):
 
     comment: Mapped[str | None] = mapped_column(Text)
 
-    message: Mapped["Message"] = relationship()
+    message: Mapped[Message] = relationship()

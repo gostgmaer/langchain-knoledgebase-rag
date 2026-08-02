@@ -100,11 +100,11 @@ class AgentTool(BaseModel):
         nullable=False,
     )
 
-    agent: Mapped["Agent"] = relationship(
+    agent: Mapped[Agent] = relationship(
         back_populates="tools",
     )
 
-    tool: Mapped["Tool"] = relationship(
+    tool: Mapped[Tool] = relationship(
         back_populates="agent_tools",
         lazy="joined",
     )

@@ -3,9 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-
 from sqlalchemy import (
-    UUID,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -81,10 +79,10 @@ class MessageCitation(BaseModel):
         nullable=False,
     )
 
-    message: Mapped["Message"] = relationship(
+    message: Mapped[Message] = relationship(
         back_populates="citations",
     )
 
-    document: Mapped["Document"] = relationship()
+    document: Mapped[Document] = relationship()
 
-    chunk: Mapped["DocumentChunk"] = relationship()
+    chunk: Mapped[DocumentChunk] = relationship()

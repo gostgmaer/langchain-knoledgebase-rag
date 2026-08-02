@@ -7,9 +7,8 @@ from __future__ import annotations
 
 from langchain_core.documents import Document
 
-from packages.shared.logging import get_logger
-
 from packages.knowledge.processors.base import DocumentProcessor
+from packages.shared.logging import get_logger
 
 logger = get_logger(__name__)
 

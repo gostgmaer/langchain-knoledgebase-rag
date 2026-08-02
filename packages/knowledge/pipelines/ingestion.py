@@ -14,7 +14,6 @@ from packages.domain.models.document import Document
 from packages.domain.models.document_chunk import DocumentChunk
 from packages.domain.models.document_version import DocumentVersion
 from packages.domain.models.embedding import Embedding
-
 from packages.infrastructure.repositories.document import DocumentRepository
 from packages.infrastructure.repositories.document_version import DocumentVersionRepository
 from packages.infrastructure.repositories.model_profile import ModelProfileRepository

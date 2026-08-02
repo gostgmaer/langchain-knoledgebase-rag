@@ -271,7 +271,12 @@ async def _sse_events(
 
     async for event in chat_service.stream(chat_request):
         if event["type"] == "interrupt":
-            yield f"data: {json.dumps({'type': 'interrupt', 'conversation_id': str(conversation_id), 'tool_calls': event['tool_calls']})}\n\n"
+            payload = {
+                "type": "interrupt",
+                "conversation_id": str(conversation_id),
+                "tool_calls": event["tool_calls"],
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
             return
         yield f"data: {json.dumps({'type': 'token', 'content': event['content']})}\n\n"
 

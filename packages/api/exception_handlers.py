@@ -1,15 +1,15 @@
 # API exception handlers
 from __future__ import annotations
 
-from docx import settings
-from fastapi import FastAPI, Request, logger
+import traceback
+
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-import traceback
 from starlette.exceptions import HTTPException
 
-from packages.config.loader import settings
 from packages.api.responses import ErrorResponse
+from packages.config.loader import settings
 from packages.logging.logger import get_logger
 
 logger = get_logger(__name__)

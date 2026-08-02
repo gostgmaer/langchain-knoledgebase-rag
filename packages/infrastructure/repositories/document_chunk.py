@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete
-from sqlalchemy import exists
-from sqlalchemy import func
-from sqlalchemy import select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.domain.models.document_chunk import DocumentChunk

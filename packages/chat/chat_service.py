@@ -1,9 +1,13 @@
 # Chat service
 from __future__ import annotations
+
 from collections.abc import AsyncIterator, Iterator
+
 from langchain_core.messages import AIMessage
+
 from packages.infrastructure.ai import LLMManager
 from packages.infrastructure.resilience.circuit_breaker import CircuitBreaker
+
 from .request import ChatRequest
 from .response import ChatResponse
 

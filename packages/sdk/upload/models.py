@@ -5,7 +5,6 @@ from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, HttpUrl
 
-
 # ============================================================
 # Base Models
 # ============================================================

@@ -107,11 +107,11 @@ class AgentPrompt(BaseModel):
     # Relationships
     #
 
-    agent: Mapped["Agent"] = relationship(
+    agent: Mapped[Agent] = relationship(
         back_populates="prompts",
     )
 
-    prompt_version: Mapped["PromptVersion"] = relationship(
+    prompt_version: Mapped[PromptVersion] = relationship(
         lazy="joined",
     )
 

@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import chromadb
-from dependency_injector import containers
-from dependency_injector import providers
+from dependency_injector import containers, providers
 
 from packages.config.loader import settings as app_settings
 from packages.knowledge.embeddings.manager import EmbeddingManager

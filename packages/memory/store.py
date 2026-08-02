@@ -18,8 +18,7 @@ The manager depends only on this interface.
 
 from __future__ import annotations
 
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from uuid import UUID
 
 from packages.memory.schemas import (

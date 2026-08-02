@@ -7,11 +7,11 @@ from uuid import UUID
 from sqlalchemy import (
     JSON,
     Enum,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
-    Index,
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -23,12 +23,11 @@ from packages.domain.enums.search_type import SearchType
 from packages.domain.enums.similarity_metric import (
     SimilarityMetric,
 )
-
 from packages.domain.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from packages.domain.models.document import Document
     from packages.domain.models.agent_knowledge_base import AgentKnowledgeBase
+    from packages.domain.models.document import Document
 
 
 class KnowledgeBase(BaseModel):
@@ -122,11 +121,11 @@ class KnowledgeBase(BaseModel):
         default=False,
         nullable=False,
     )
-    documents: Mapped[list["Document"]] = relationship(
+    documents: Mapped[list[Document]] = relationship(
         back_populates="knowledge_base",
         cascade="all, delete-orphan",
     )
-    agent_links: Mapped[list["AgentKnowledgeBase"]] = relationship(
+    agent_links: Mapped[list[AgentKnowledgeBase]] = relationship(
         back_populates="knowledge_base",
         cascade="all, delete-orphan",
     )

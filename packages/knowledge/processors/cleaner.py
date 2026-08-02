@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import re
 
-
 from langchain_core.documents import Document
+
 from .base import DocumentProcessor
 
 

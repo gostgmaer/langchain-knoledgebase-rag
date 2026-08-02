@@ -19,10 +19,9 @@ from packages.application.services.conversation_service import (
 from packages.application.services.message_service import (
     MessageService,
 )
-
+from packages.conversation.context import ConversationContextBuilder
 from packages.domain.models.message import Message
 from packages.graph.manager import GraphManager
-from packages.conversation.context import ConversationContextBuilder
 from packages.infrastructure.repositories.unit_of_work import (
     UnitOfWork,
 )

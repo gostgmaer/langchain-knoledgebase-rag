@@ -69,11 +69,11 @@ class Embedding(BaseModel):
         nullable=False,
     )
 
-    chunk: Mapped["DocumentChunk"] = relationship(
+    chunk: Mapped[DocumentChunk] = relationship(
         back_populates="embeddings",
         lazy="selectin",
     )
 
-    model_profile: Mapped["ModelProfile"] = relationship(
+    model_profile: Mapped[ModelProfile] = relationship(
         lazy="selectin",
     )

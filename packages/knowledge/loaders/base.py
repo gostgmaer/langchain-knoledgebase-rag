@@ -9,13 +9,13 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
-from packages.shared.logging import get_logger
 from packages.knowledge.exceptions import (
     DocumentNotFoundError,
     DocumentReadError,
     InvalidDocumentError,
 )
 from packages.knowledge.interfaces import DocumentLoader
+from packages.shared.logging import get_logger
 
 
 class BaseDocumentLoader(DocumentLoader, ABC):

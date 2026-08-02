@@ -6,8 +6,7 @@ import re
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
-from dependency_injector import containers
-from dependency_injector import providers
+from dependency_injector import containers, providers
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
@@ -26,20 +25,18 @@ from packages.config.loader import settings as app_settings
 from packages.graph.builder import GraphBuilder
 from packages.graph.manager import GraphManager
 from packages.graph.nodes import GraphNodes
+from packages.graph.nodes.extract_memory import ExtractMemoryNode
+from packages.graph.nodes.llm import LLMNode
+from packages.graph.nodes.load_memory import LoadMemoryNode
+from packages.graph.nodes.retrieve import RetrieveNode
+from packages.graph.nodes.tool import GraphToolNode
 from packages.graph.router import GraphRouter
 from packages.knowledge.schemas import Citation, SearchResult
 from packages.memory.schemas import MemoryFact, MemoryType
 from packages.planner.models import Capability, ExecutionPlan, ExecutionStep
-from packages.prompts.builder import PromptBuilder
-from packages.prompts.system import get_base_system_prompt
-
 from packages.planner.planner import GraphPlanner
 from packages.planner.query_analyzer import QueryAnalyzer
-from packages.graph.nodes.load_memory import LoadMemoryNode
-from packages.graph.nodes.retrieve import RetrieveNode
-from packages.graph.nodes.tool import GraphToolNode
-from packages.graph.nodes.llm import LLMNode
-from packages.graph.nodes.extract_memory import ExtractMemoryNode
+from packages.prompts.builder import PromptBuilder
 
 # The checkpointer serializes graph state (including every custom type
 # that can appear anywhere in GraphState) with msgpack. Unregistered

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -150,7 +150,7 @@ async def reindex_stale_documents_job(ctx: dict[str, Any]) -> dict[str, int]:
     """
 
     container: ApplicationContainer = ctx["container"]
-    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.rag.reindex_stale_after_days)
+    cutoff = datetime.now(UTC) - timedelta(days=settings.rag.reindex_stale_after_days)
 
     reindexed = 0
     failed = 0
@@ -303,7 +303,7 @@ async def cleanup_stale_upload_jobs_job(ctx: dict[str, Any]) -> dict[str, int]:
     """
 
     container: ApplicationContainer = ctx["container"]
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    cutoff = datetime.now(UTC) - timedelta(hours=1)
 
     failed = 0
 

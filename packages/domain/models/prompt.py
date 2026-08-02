@@ -117,7 +117,7 @@ class Prompt(BaseModel):
     # Relationships
     #
 
-    versions: Mapped[list["PromptVersion"]] = relationship(
+    versions: Mapped[list[PromptVersion]] = relationship(
         back_populates="prompt",
         cascade="all, delete-orphan",
         passive_deletes=True,

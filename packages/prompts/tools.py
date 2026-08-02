@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 def build_tools_section(tools: list[str]) -> str:
     """
     Formats the available tools and their usage instructions for the prompt.

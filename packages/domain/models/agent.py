@@ -5,12 +5,12 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Enum,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     Numeric,
     String,
     Text,
@@ -108,17 +108,17 @@ class Agent(BaseModel):
         nullable=False,
     )
 
-    conversations: Mapped[list["Conversation"]] = relationship(
+    conversations: Mapped[list[Conversation]] = relationship(
         back_populates="agent",
         cascade="all, delete-orphan",
     )
 
-    knowledge_bases: Mapped[list["AgentKnowledgeBase"]] = relationship(
+    knowledge_bases: Mapped[list[AgentKnowledgeBase]] = relationship(
         back_populates="agent",
         cascade="all, delete-orphan",
     )
 
-    tools: Mapped[list["AgentTool"]] = relationship(
+    tools: Mapped[list[AgentTool]] = relationship(
         back_populates="agent",
         cascade="all, delete-orphan",
     )
@@ -130,7 +130,7 @@ class Agent(BaseModel):
         ),
         nullable=False,
     )
-    prompts: Mapped[list["AgentPrompt"]] = relationship(
+    prompts: Mapped[list[AgentPrompt]] = relationship(
         back_populates="agent",
         cascade="all, delete-orphan",
         passive_deletes=True,

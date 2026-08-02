@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 def build_memory_section(memory_data: dict[str, Any]) -> str:
     """
     Formats the memory data into a structured string for the prompt.

@@ -1,7 +1,7 @@
 # Feedback repository
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -77,7 +77,7 @@ class FeedbackRepository(BaseRepository[Feedback]):
     ) -> list[dict]:
         """Daily thumbs-up/down counts for a tenant — Analytics' feedback-trends series."""
 
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
         day = func.date(Feedback.created_at)
 
         stmt = (

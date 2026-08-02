@@ -14,7 +14,8 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from packages.domain.enums.conversation_status import ConversationStatus
@@ -157,12 +158,12 @@ class Conversation(BaseModel):
 
     # Relationships
 
-    agent: Mapped["Agent"] = relationship(
+    agent: Mapped[Agent] = relationship(
         back_populates="conversations",
         lazy="joined",
     )
 
-    messages: Mapped[list["Message"]] = relationship(
+    messages: Mapped[list[Message]] = relationship(
         back_populates="conversation",
         cascade="all, delete-orphan",
         passive_deletes=True,

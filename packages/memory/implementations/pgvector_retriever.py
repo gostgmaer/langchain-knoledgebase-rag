@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from packages.domain.models.memory import Memory as MemoryRow
 from packages.infrastructure.repositories.memory import MemoryRepository
+from packages.knowledge.embeddings.manager import EmbeddingManager
 from packages.memory.retrieval import MemoryRetriever
 from packages.memory.schemas import (
     MemoryFact,
@@ -13,7 +14,6 @@ from packages.memory.schemas import (
     SearchMemoryResponse,
     SearchResult,
 )
-from packages.knowledge.embeddings.manager import EmbeddingManager
 
 
 class PgVectorMemoryRetriever(MemoryRetriever):

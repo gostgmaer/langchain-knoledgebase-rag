@@ -21,8 +21,8 @@ from packages.domain.enums.document_status import DocumentStatus
 from packages.domain.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from packages.domain.models.knowledge_base import KnowledgeBase
     from packages.domain.models.document_chunk import DocumentChunk
+    from packages.domain.models.knowledge_base import KnowledgeBase
 
 
 class Document(BaseModel):
@@ -114,11 +114,11 @@ class Document(BaseModel):
         nullable=False,
     )
 
-    knowledge_base: Mapped["KnowledgeBase"] = relationship(
+    knowledge_base: Mapped[KnowledgeBase] = relationship(
         back_populates="documents",
     )
 
-    chunks: Mapped[list["DocumentChunk"]] = relationship(
+    chunks: Mapped[list[DocumentChunk]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
     )

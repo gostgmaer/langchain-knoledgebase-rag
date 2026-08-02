@@ -9,12 +9,11 @@
 # ============================================================
 
 
-import os
-from dotenv import load_dotenv
-load_dotenv()
-from langchain_core.tools import tool
 from langchain_community.utilities import GoogleSerperAPIWrapper
+from langchain_core.tools import tool
+
 from packages.config.loader import settings
+
 
 @tool(
     "get_google_search",

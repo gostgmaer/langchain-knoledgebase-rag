@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import GraphBubbleUp

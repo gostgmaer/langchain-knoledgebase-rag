@@ -7,13 +7,13 @@ from arq.connections import RedisSettings as ArqRedisSettings
 from arq.connections import create_pool
 from dependency_injector import providers
 from fastapi import FastAPI
+from sqlalchemy import text
 
+import packages.domain.models  # noqa: F401 - Ensure models are loaded for Base.metadata
 from packages.graph.visualizer import GraphVisualizer
 from packages.infrastructure.container import ApplicationContainer
 from packages.infrastructure.container.graph import create_postgres_checkpointer
 from packages.infrastructure.database.base import Base
-from sqlalchemy import text
-import packages.domain.models  # noqa: F401 - Ensure models are loaded for Base.metadata
 from packages.shared.logging import configure_logger, get_logger
 from packages.shared.tracing import configure_opentelemetry
 from packages.tools.builtin.weather import close_weather_client

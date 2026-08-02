@@ -5,8 +5,8 @@ Recursive document splitter.
 
 from __future__ import annotations
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from packages.config.loader import settings
 

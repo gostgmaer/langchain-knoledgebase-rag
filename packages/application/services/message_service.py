@@ -6,7 +6,7 @@ from packages.domain.enums.message_role import MessageRole
 from packages.domain.models.ai_response import AIResponse
 from packages.domain.models.message import Message
 from packages.infrastructure.database.transaction import UnitOfWork
-from packages.application.dto.message import CreateMessageRequest
+
 
 class MessageService:
 

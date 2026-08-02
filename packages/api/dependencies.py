@@ -1,23 +1,22 @@
 # API dependencies
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 from uuid import UUID
 
 from dependency_injector.wiring import Provide, inject
 from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.infrastructure.ai.manager import LLMManager
-from packages.config.loader import settings
 from packages.conversation.manager import ConversationManager
 from packages.graph.manager import GraphManager
+from packages.infrastructure.ai.manager import LLMManager
 from packages.infrastructure.container import ApplicationContainer
 from packages.infrastructure.database.session import current_session
 from packages.memory.manager import MemoryManager
 from packages.sdk.iam.models import CurrentUser
 from packages.tools.manager import ToolManager
-from sqlalchemy.ext.asyncio import AsyncSession
 
 # NOTE: dependency-injector's wiring does not see markers inside
 # Annotated[...] metadata — keep Depends(Provide[...]) as a default value.
@@ -130,11 +129,11 @@ def require_uuid_header(
         )
     try:
         return UUID(raw)
-    except ValueError:
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"{header} must be a valid UUID.",
-        )
+        ) from exc
 
 
 #

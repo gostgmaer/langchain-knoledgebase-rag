@@ -1,8 +1,10 @@
 # google.py
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from .base_provider import BaseProvider
 from packages.config.loader import settings
+
+from .base_provider import BaseProvider
+
 
 class GoogleProvider(BaseProvider):
 

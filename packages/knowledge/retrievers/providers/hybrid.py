@@ -91,7 +91,7 @@ class HybridRetriever(BaseRetriever):
         scores = bm25.get_scores(_tokenize(query))
 
         ranked = sorted(
-            zip(scores, candidates),
+            zip(scores, candidates, strict=True),
             key=lambda pair: pair[0],
             reverse=True,
         )

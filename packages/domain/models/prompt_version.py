@@ -10,7 +10,6 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    String,
     Text,
     UniqueConstraint,
 )
@@ -134,7 +133,7 @@ class PromptVersion(BaseModel):
     # Relationships
     #
 
-    prompt: Mapped["Prompt"] = relationship(
+    prompt: Mapped[Prompt] = relationship(
         back_populates="versions",
         lazy="joined",
     )

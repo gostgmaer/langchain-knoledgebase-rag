@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from sqlalchemy import Select, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,10 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.domain.models.base import BaseModel
 from packages.infrastructure.repositories.pagination import Page, Pagination
 
-ModelType = TypeVar("ModelType", bound=BaseModel)
 
-
-class BaseRepository(Generic[ModelType]):
+class BaseRepository[ModelType: BaseModel]:
     """Generic async repository for SQLAlchemy models."""
 
     model: type[ModelType]

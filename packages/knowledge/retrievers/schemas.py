@@ -6,7 +6,6 @@ from uuid import UUID
 
 from packages.knowledge.vectorstores.schema import SearchFilter, SearchOptions
 
-
 # ============================================================
 # Retrieval
 # ============================================================

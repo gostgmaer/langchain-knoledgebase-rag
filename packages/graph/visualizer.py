@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+
 class GraphVisualizer:
 
     @staticmethod

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from packages.config.loader import settings
-
 from packages.knowledge.retrievers.base import BaseRetriever
 from packages.knowledge.retrievers.providers.hybrid import HybridRetriever
 from packages.knowledge.retrievers.providers.mmr import MMRRetriever

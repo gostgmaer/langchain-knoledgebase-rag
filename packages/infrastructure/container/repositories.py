@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dependency_injector import containers
-from dependency_injector import providers
+from dependency_injector import containers, providers
 
 from packages.infrastructure.repositories.agent import AgentRepository
 from packages.infrastructure.repositories.ai_response import AIResponseRepository

@@ -1,5 +1,4 @@
 # Log processors
-import structlog
 
 from .context import (
     conversation_id,

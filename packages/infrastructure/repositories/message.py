@@ -1,7 +1,7 @@
 # Message repository
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -129,7 +129,7 @@ class MessageRepository(BaseRepository[Message]):
     ) -> list[dict]:
         """Daily token/cost breakdown for a tenant over the last N days."""
 
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
         day = func.date(Message.created_at)
 
         stmt = (
@@ -167,7 +167,7 @@ class MessageRepository(BaseRepository[Message]):
     ) -> list[dict]:
         """Daily message count for a tenant over the last N days (Analytics)."""
 
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
         day = func.date(Message.created_at)
 
         stmt = (

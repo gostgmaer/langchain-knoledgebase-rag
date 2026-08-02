@@ -1,8 +1,7 @@
 # Container services setup
 from __future__ import annotations
 
-from dependency_injector import containers
-from dependency_injector import providers
+from dependency_injector import containers, providers
 
 from packages.chat.chat_service import ChatService
 from packages.config.loader import settings as _settings

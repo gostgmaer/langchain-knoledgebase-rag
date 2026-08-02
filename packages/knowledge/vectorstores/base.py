@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from uuid import UUID
 
 from packages.domain.models.embedding import Embedding
-from packages.knowledge.vectorstores.schema import SearchFilter
-from packages.knowledge.vectorstores.schema import SearchOptions
-from packages.knowledge.vectorstores.schema import SearchResult
+from packages.knowledge.vectorstores.schema import SearchFilter, SearchOptions, SearchResult
 
 
 class BaseVectorStore(ABC):

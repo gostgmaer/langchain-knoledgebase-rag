@@ -114,7 +114,7 @@ class Tool(BaseModel):
         nullable=False,
     )
 
-    agent_tools: Mapped[list["AgentTool"]] = relationship(
+    agent_tools: Mapped[list[AgentTool]] = relationship(
         back_populates="tool",
         cascade="all, delete-orphan",
     )

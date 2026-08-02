@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any
-
+from typing import Annotated, Any
 from uuid import UUID
-from langchain_core.messages import BaseMessage
+
 from langgraph.graph.message import AnyMessage, add_messages
-from typing_extensions import Annotated, TypedDict
-from packages.planner.models import ExecutionPlan
+from typing_extensions import TypedDict
 
 from packages.knowledge.schemas import Citation, SearchResult
 from packages.memory.schemas import MemoryFact
+from packages.planner.models import ExecutionPlan
 
 
 def merge_usage(

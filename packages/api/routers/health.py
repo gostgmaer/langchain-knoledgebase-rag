@@ -1,12 +1,13 @@
 # Router health
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, Depends
-from packages.api.responses import ApiResponse
-from packages.api.dependencies import get_db_session
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+from fastapi import APIRouter, Depends, Request
 from redis.asyncio import Redis
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from packages.api.dependencies import get_db_session
+from packages.api.responses import ApiResponse
 from packages.config.loader import settings
 
 router = APIRouter(

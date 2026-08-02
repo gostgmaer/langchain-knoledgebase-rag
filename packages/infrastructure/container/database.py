@@ -1,4 +1,4 @@
-from dependency_injector import providers,containers
+from dependency_injector import containers, providers
 
 from packages.infrastructure.database.engine import create_database_engine
 from packages.infrastructure.database.session import (

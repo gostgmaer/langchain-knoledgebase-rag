@@ -241,30 +241,30 @@ Examples:
 
 ---
 
-🚀 Version 1.1
+🚀 Version 1.1 — all 12 items now built; see [`docs/BUILD_STATUS.md`](./BUILD_STATUS.md) for live-verification detail and honest caveats (two items — IAM tool lookups and Scheduled Re-indexing — depend on external EasyDev services confirmed unreachable in this dev environment, so their happy path is code-complete but not provably exercised end to end).
 ### Retrieval
-- ⏸ **Retrieval Evaluation** — systematic scoring of retrieval quality (precision/recall against a labeled set) so changes to chunking/ranking can be measured, not just vibes-checked.
+- ✅ **Retrieval Evaluation** — systematic scoring of retrieval quality (precision/recall against a labeled set) so changes to chunking/ranking can be measured, not just vibes-checked.
 
 ### Tools
-- ⏸ **Internal EasyDev API Integration** — tools that call other EasyDev-internal services, once those contracts are stable.
+- ✅ **Internal EasyDev API Integration** — tools that call other EasyDev-internal services, once those contracts are stable. Scoped to IAM user/tenant lookup tools.
 
 ### Background Jobs
-- ⏸ **Scheduled Re-indexing** — periodic refresh of embeddings/index without waiting for a manual re-upload.
-- ⏸ **Cleanup Jobs** — garbage-collecting orphaned chunks, expired sessions, stale upload jobs.
+- ✅ **Scheduled Re-indexing** — periodic refresh of embeddings/index without waiting for a manual re-upload.
+- ✅ **Cleanup Jobs** — garbage-collecting orphaned chunks, expired sessions, stale upload jobs.
 
 ### Observability
-- ⏸ **LangSmith** — trace-level visibility into every LLM/tool call for debugging and prompt iteration.
-- ⏸ **OpenTelemetry** — standard distributed tracing across the whole request path, not just the LLM calls.
-- ⏸ **Token Usage** — per-request/per-tenant token accounting.
-- ⏸ **Cost Tracking** — turning token usage into actual dollar-cost visibility, ideally per tenant/user.
+- ✅ **LangSmith** — trace-level visibility into every LLM/tool call for debugging and prompt iteration.
+- ✅ **OpenTelemetry** — standard distributed tracing across the whole request path, not just the LLM calls.
+- ✅ **Token Usage** — per-request/per-tenant token accounting.
+- ✅ **Cost Tracking** — turning token usage into actual dollar-cost visibility, ideally per tenant/user.
 
 ### Production
-- ⏸ **Circuit Breakers** — automatically failing fast (rather than piling up retries) against a provider that's clearly down.
-- ⏸ **Feature Flags** — toggling in-progress features per environment/tenant without a redeploy.
+- ✅ **Circuit Breakers** — automatically failing fast (rather than piling up retries) against a provider that's clearly down.
+- ✅ **Feature Flags** — toggling in-progress features per environment/tenant without a redeploy.
 
 ### Frontend
-- ⏸ **Admin Dashboard** — an internal UI for managing tenants, knowledge bases, and reviewing feedback/flagged content.
-- ⏸ **Analytics** — usage dashboards (queries per day, top failing queries, feedback trends).
+- ✅ **Admin Dashboard** — an internal UI for managing tenants, knowledge bases, and reviewing feedback/flagged content.
+- ✅ **Analytics** — usage dashboards (queries per day, top failing queries, feedback trends).
 
 🚀 Version 2.0
 ### Advanced Retrieval

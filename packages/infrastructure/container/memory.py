@@ -1,16 +1,15 @@
 # Container memory setup
 from __future__ import annotations
 
-from dependency_injector import containers
-from dependency_injector import providers
+from dependency_injector import containers, providers
 
 from packages.memory.checkpoint import CheckpointFactory
-from packages.memory.manager import MemoryManager
-from packages.memory.strategy import MemoryStrategy
-from packages.memory.implementations.postgres_store import PostgresMemoryStore
 from packages.memory.implementations.llm_extractor import LLMMemoryExtractor
 from packages.memory.implementations.llm_summarizer import LLMMemorySummarizer
 from packages.memory.implementations.pgvector_retriever import PgVectorMemoryRetriever
+from packages.memory.implementations.postgres_store import PostgresMemoryStore
+from packages.memory.manager import MemoryManager
+from packages.memory.strategy import MemoryStrategy
 
 
 class MemoryContainer(containers.DeclarativeContainer):

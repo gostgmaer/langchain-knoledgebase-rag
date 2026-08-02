@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from langgraph.graph import END
 
-from packages.planner.models import Capability
 from packages.graph.state import GraphState
+from packages.planner.models import Capability
 
 
 class GraphRouter:

@@ -1,8 +1,7 @@
 # Container conversation setup
 from __future__ import annotations
 
-from dependency_injector import containers
-from dependency_injector import providers
+from dependency_injector import containers, providers
 
 from packages.conversation.context import ConversationContextBuilder
 from packages.conversation.formatter import MessageFormatter

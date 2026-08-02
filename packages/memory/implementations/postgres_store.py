@@ -8,6 +8,7 @@ from uuid import UUID
 
 from packages.domain.models.memory import Memory as MemoryRow
 from packages.infrastructure.repositories.memory import MemoryRepository
+from packages.knowledge.embeddings.manager import EmbeddingManager
 from packages.memory.schemas import (
     CreateMemoryRequest,
     MemoryFact,
@@ -18,7 +19,6 @@ from packages.memory.schemas import (
     UpdateMemoryRequest,
 )
 from packages.memory.store import MemoryStore
-from packages.knowledge.embeddings.manager import EmbeddingManager
 
 
 class PostgresMemoryStore(MemoryStore):

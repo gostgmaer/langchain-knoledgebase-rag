@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from uuid import UUID
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
-from langchain_core.messages import HumanMessage
 
 from packages.conversation.context import (
     ConversationContextBuilder,
@@ -15,11 +14,9 @@ from packages.conversation.models import (
 from packages.conversation.service import (
     ConversationService,
 )
-from packages.domain.models.message import Message
 from packages.domain.enums.message_role import MessageRole
+from packages.domain.models.message import Message
 from packages.graph.state import GraphState
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from packages.graph.manager import GraphManager

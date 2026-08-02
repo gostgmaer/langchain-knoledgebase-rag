@@ -11,13 +11,13 @@ from .api import APISettings
 from .app import AppSettings
 from .database import DatabaseSettings
 from .features import FeatureSettings
+from .iam import IAMSettings
 from .logging import LoggingSettings
 from .queue import QueueSettings
 from .redis import RedisSettings
 from .security import SecuritySettings
 from .settings import Settings
 from .storage import StorageSettings
-from .iam import IAMSettings
 
 
 @lru_cache

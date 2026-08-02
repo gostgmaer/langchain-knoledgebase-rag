@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-from alembic import context
+from sqlalchemy import engine_from_config, pool
 
+from alembic import context
 from packages.config.settings import Settings
-from packages.infrastructure.database.base import Base
-from packages.infrastructure.database.utils import to_sync_database_url
 
 # Import every ORM model
 from packages.domain import models  # noqa: F401
+from packages.infrastructure.database.base import Base
+from packages.infrastructure.database.utils import to_sync_database_url
 
 target_metadata = Base.metadata
 

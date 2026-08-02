@@ -75,7 +75,8 @@ class DocumentVersionResponseSchema(BaseModel):
     version_number: int
     superseded_at: datetime | None
     is_current: bool = False
-    """Set by the router, not read from the DB row directly — True for the one entry whose superseded_at is still null."""
+    """Set by the router, not read from the DB row directly — True for the
+    one entry whose superseded_at is still null."""
 
 
 class DocumentVersionListResponseSchema(BaseModel):

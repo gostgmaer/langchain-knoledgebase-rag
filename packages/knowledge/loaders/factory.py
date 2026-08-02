@@ -8,7 +8,6 @@ from pathlib import Path
 
 from packages.knowledge.exceptions import UnsupportedDocumentError
 from packages.knowledge.interfaces import DocumentLoader
-
 from packages.knowledge.loaders.csv import CSVDocumentLoader
 from packages.knowledge.loaders.docx import DocxDocumentLoader
 from packages.knowledge.loaders.html import HTMLDocumentLoader

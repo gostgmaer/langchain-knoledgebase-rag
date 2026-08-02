@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 import chromadb
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.config.loader import settings
 from packages.knowledge.vectorstores.base import BaseVectorStore
 from packages.knowledge.vectorstores.providers.chroma import ChromaVectorStore
 from packages.knowledge.vectorstores.providers.pgvector import PostgresVectorStore
-
 
 
 class VectorStoreFactory:

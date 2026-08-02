@@ -91,7 +91,8 @@ Example:
 # "the AI" (e.g. "User wants the AI to reply in French") doesn't get
 # misfiled as self-referential just for containing that phrase.
 _SELF_REFERENTIAL_PATTERNS = [
-    r"^\s*(?:the ai|this ai|the assistant|this assistant|the model|the chatbot)\b\s+(?:is|are|was|operates|does not|doesn't|cannot|can't|has|have|lacks)",
+    r"^\s*(?:the ai|this ai|the assistant|this assistant|the model|the chatbot)\b"
+    r"\s+(?:is|are|was|operates|does not|doesn't|cannot|can't|has|have|lacks)",
     r"^\s*i(?:'m| am)\s+(?:an ai|a language model|stateless|session-based)\b",
     r"^\s*as an ai\b",
     r"\bsession-based memory model\b",

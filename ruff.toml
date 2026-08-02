@@ -9,3 +9,20 @@ select = [
     "UP",
     "B",
 ]
+
+[lint.flake8-bugbear]
+# FastAPI's dependency-injection system requires Depends()/Query()/File()/
+# etc. to be called as argument defaults — that's the documented API, not
+# a mutable-default-argument bug. Without this, B008 flags every route
+# handler in packages/api/routers/.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Security",
+]

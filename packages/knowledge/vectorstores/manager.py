@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from packages.domain.models.embedding import Embedding
 from packages.knowledge.vectorstores.base import BaseVectorStore
 from packages.knowledge.vectorstores.schema import (
     SearchFilter,
