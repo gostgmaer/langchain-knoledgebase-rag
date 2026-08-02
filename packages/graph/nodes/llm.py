@@ -102,6 +102,18 @@ class LLMNode:
             }
         )
 
+        # Symmetric to the "metadata" event above and for the same
+        # reason — stream_mode="custom" never surfaces the final graph
+        # state, so token usage has to be pushed through explicitly or
+        # it's unreachable once the stream ends (Token Usage/Cost
+        # Tracking, docs/mvpRAG.md v1.1).
+        writer(
+            {
+                "type": "usage",
+                "usage": getattr(final, "usage_metadata", None) or {},
+            }
+        )
+
         return ChatResponse(
             message=final,
             usage=getattr(final, "usage_metadata", None) or {},

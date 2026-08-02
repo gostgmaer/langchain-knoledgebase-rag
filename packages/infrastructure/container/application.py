@@ -9,6 +9,7 @@ from .ai import AIContainer
 
 # from package.conversation import ConversationContainer
 from packages.infrastructure.container.database import DatabaseContainer
+from packages.infrastructure.container.feature_flags import FeatureFlagsContainer
 from packages.infrastructure.container.graph import GraphContainer
 from packages.infrastructure.container.iam import IAMContainer
 from packages.infrastructure.container.memory import MemoryContainer
@@ -48,6 +49,11 @@ class ApplicationContainer(containers.DeclarativeContainer):
 
     repositories = providers.Container(
         RepositoryContainer,
+        database=database,
+    )
+
+    feature_flags = providers.Container(
+        FeatureFlagsContainer,
         database=database,
     )
 
@@ -101,6 +107,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ai=ai,
         services=services,
         repositories=repositories,
+        upload=upload,
     )
 
     # Declared after `rag` — the knowledge-base/document-search tools need
@@ -109,6 +116,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ToolsContainer,
         settings=settings,
         rag=rag,
+        iam=iam,
     )
 
     memory = providers.Container(

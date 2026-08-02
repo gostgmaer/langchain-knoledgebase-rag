@@ -24,3 +24,6 @@ class AISettings(BaseSettings):
     streaming: bool = Field(default=True, alias="LLM_STREAMING")
     top_p: float = Field(default=0.95, alias="LLM_TOP_P")
     top_k: int = Field(default=5, alias="LLM_TOP_K")
+
+    circuit_breaker_failure_threshold: int = Field(default=5, alias="LLM_CIRCUIT_BREAKER_FAILURE_THRESHOLD")
+    circuit_breaker_reset_seconds: float = Field(default=30.0, alias="LLM_CIRCUIT_BREAKER_RESET_SECONDS")

@@ -1,9 +1,12 @@
 "use client";
 
 import {
+  BarChart3,
   Bot,
   Cpu,
   FileText,
+  Flag,
+  Gauge,
   LayoutDashboard,
   Library,
   MessageSquare,
@@ -42,6 +45,8 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/tenant-admin/model-profiles", label: "Model Profiles", icon: Cpu },
     { href: "/tenant-admin/feedback", label: "Feedback", icon: MessagesSquare },
     { href: "/tenant-admin/upload-jobs", label: "Upload Jobs", icon: UploadCloud },
+    { href: "/tenant-admin/analytics", label: "Analytics", icon: BarChart3 },
+    { href: "/tenant-admin/usage", label: "Usage", icon: Gauge },
   ],
   admin: [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -56,6 +61,9 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/admin/tools", label: "Tools", icon: Wrench },
     { href: "/admin/feedback", label: "Feedback", icon: MessagesSquare },
     { href: "/admin/upload-jobs", label: "Upload Jobs", icon: UploadCloud },
+    { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
+    { href: "/admin/usage", label: "Usage", icon: Gauge },
+    { href: "/admin/feature-flags", label: "Feature Flags", icon: Flag },
   ],
 };
 

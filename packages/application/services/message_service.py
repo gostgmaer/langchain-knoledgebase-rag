@@ -1,6 +1,7 @@
 from typing import Any
 from uuid import UUID
 
+from packages.config.pricing import compute_cost
 from packages.domain.enums.message_role import MessageRole
 from packages.domain.models.ai_response import AIResponse
 from packages.domain.models.message import Message
@@ -51,13 +52,44 @@ class MessageService:
         provider: str | None = None,
         model: str | None = None,
         raw_response: dict[str, Any] | None = None,
+        usage: dict[str, Any] | None = None,
+        latency_ms: int | None = None,
     ) -> Message:
 
-        message = await self._create(
+        message = Message(
             conversation_id=conversation_id,
             role=MessageRole.ASSISTANT,
             content=content,
         )
+
+        # LangChain's UsageMetadata shape: input_tokens/output_tokens/
+        # total_tokens (+ non-numeric *_token_details sub-fields, not
+        # used here). `usage` is the graph-accumulated total across
+        # however many LLM calls this turn made — see
+        # ChatService._finalize_or_pause's own docstring-equivalent
+        # comment for why that's not the same as a single call's raw
+        # usage_metadata.
+        if usage:
+            message.prompt_tokens = int(usage.get("input_tokens") or 0)
+            message.completion_tokens = int(usage.get("output_tokens") or 0)
+            message.total_tokens = int(usage.get("total_tokens") or 0)
+            message.usage_metadata = usage
+
+        if latency_ms is not None:
+            message.latency_ms = latency_ms
+
+        if model:
+            message.model_name = model
+
+        if usage and (provider or model):
+            message.cost = compute_cost(
+                provider=provider,
+                model=model,
+                prompt_tokens=message.prompt_tokens,
+                completion_tokens=message.completion_tokens,
+            )
+
+        message = await self._uow.messages.create(message)
 
         # Raw provider snapshot, separate from the display-facing
         # Message row above — see packages/domain/models/ai_response.py.

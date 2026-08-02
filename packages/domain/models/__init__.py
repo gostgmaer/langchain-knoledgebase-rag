@@ -9,6 +9,7 @@ from .document import Document
 from .document_chunk import DocumentChunk
 from .document_version import DocumentVersion
 from .embedding import Embedding
+from .feature_flag import FeatureFlag
 from .feedback import Feedback
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -32,6 +33,7 @@ __all__ = [
     "DocumentChunk",
     "DocumentVersion",
     "Embedding",
+    "FeatureFlag",
     "Feedback",
     "KnowledgeBase",
     "Memory",

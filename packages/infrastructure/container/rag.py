@@ -58,6 +58,8 @@ class RAGContainer(
 
     repositories = providers.DependenciesContainer()
 
+    upload = providers.DependenciesContainer()
+
     embeddings = providers.Singleton(
         EmbeddingManager,
     )
@@ -124,6 +126,8 @@ class RAGContainer(
         vector_store=vectorstore,
         document_repository=repositories.document,
         document_version_repository=repositories.document_version,
+        model_profile_repository=repositories.model_profile,
+        upload_client=upload.client,
     )
 
     # Lazy, not eager — constructed on first real use so that the

@@ -155,6 +155,24 @@ async def get_current_user(
     return getattr(request.state, "current_user", None)
 
 
+async def _rbac_enabled(request: Request) -> bool:
+    """
+    Reads the dynamic `enable_rbac` feature flag (Feature Flags,
+    docs/mvpRAG.md v1.1) instead of the static
+    `settings.features.enable_rbac` directly — this is what gives the
+    new Feature Flags system one real, observable live effect: toggle
+    it via `PATCH /feature-flags/{id}/toggle` and RBAC enforcement
+    turns on/off within the cache's 30s TTL, no redeploy. Falls back
+    to the static settings value as the seed default when no DB row
+    exists yet (FeatureFlagService.get_effective's own fallback).
+    """
+
+    container: ApplicationContainer = request.app.state.container
+    tenant_id = getattr(request.state, "tenant_id", None)
+    service = container.feature_flags.service()
+    return await service.get_effective("enable_rbac", tenant_id)
+
+
 def require_permission(code: str):
     """
     FastAPI dependency factory: raises 401 if no verified user is
@@ -163,20 +181,21 @@ def require_permission(code: str):
     `"user:read"`), matching the real IAM service's JWT claim shape
     (`packages/sdk/iam/models.py`), not `{id, name, code}` objects.
 
-    Gated behind `settings.features.enable_rbac` — a master kill-switch
-    (`ENABLE_RBAC` in `.env`, default off). While off, this no-ops
-    entirely regardless of whether a route uses it, so attaching
-    `Depends(require_permission(...))` to a route today is inert until
-    the flag flips on — deliberately, since the real IAM integration
-    (`packages/sdk/iam/`) was only just corrected against the live
-    service and hasn't been verified end-to-end with real credentials
-    yet (see `docs/CHANGELOG.md`).
+    Gated behind the dynamic `enable_rbac` feature flag (see
+    `_rbac_enabled` above) — a master kill-switch, default off. While
+    off, this no-ops entirely regardless of whether a route uses it,
+    so attaching `Depends(require_permission(...))` to a route today
+    is inert until the flag flips on — deliberately, since the real
+    IAM integration (`packages/sdk/iam/`) was only just corrected
+    against the live service and hasn't been verified end-to-end with
+    real credentials yet (see `docs/CHANGELOG.md`).
     """
 
     async def _check(
+        request: Request,
         current_user: CurrentUser | None = Depends(get_current_user),
     ) -> None:
-        if not settings.features.enable_rbac:
+        if not await _rbac_enabled(request):
             return
 
         if current_user is None:
@@ -198,9 +217,10 @@ def require_role(code: str):
     """Same as require_permission, checked against roles instead."""
 
     async def _check(
+        request: Request,
         current_user: CurrentUser | None = Depends(get_current_user),
     ) -> None:
-        if not settings.features.enable_rbac:
+        if not await _rbac_enabled(request):
             return
 
         if current_user is None:

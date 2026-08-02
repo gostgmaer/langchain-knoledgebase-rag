@@ -77,3 +77,24 @@ class UploadJobRepository(BaseRepository[UploadJob]):
         job.finished_at = datetime.now(UTC)
 
         return await self.update(job)
+
+    async def list_stale(
+        self,
+        older_than: datetime,
+        *,
+        limit: int = 100,
+    ) -> list[UploadJob]:
+        """
+        Jobs stuck in QUEUED/RUNNING with no update since `older_than` —
+        Cleanup Jobs' stale-upload-job sweep (docs/mvpRAG.md v1.1).
+        """
+        stmt = (
+            select(UploadJob)
+            .where(
+                UploadJob.status.in_((UploadJobStatus.QUEUED, UploadJobStatus.RUNNING)),
+                UploadJob.updated_at < older_than,
+            )
+            .limit(limit)
+        )
+
+        return await self.scalars(stmt)

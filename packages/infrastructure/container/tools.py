@@ -15,13 +15,19 @@ from packages.tools.builtin.knowledge_base import (
     make_document_search_tool,
     make_knowledge_base_search_tool,
 )
+from packages.tools.builtin.iam import (
+    make_iam_tenant_lookup_tool,
+    make_iam_user_lookup_tool,
+)
 from packages.knowledge.manager import KnowledgeManager
+from packages.sdk.iam.client import IAMClient
 
 
 def init_tool_manager(
     registry: ToolRegistry,
     executor: ToolExecutor,
     knowledge_manager: KnowledgeManager,
+    iam_client: IAMClient,
 ) -> ToolManager:
     manager = ToolManager(registry=registry, executor=executor)
     manager.register(get_weather)
@@ -30,6 +36,8 @@ def init_tool_manager(
     manager.register(calculator)
     manager.register(make_knowledge_base_search_tool(knowledge_manager))
     manager.register(make_document_search_tool(knowledge_manager))
+    manager.register(make_iam_user_lookup_tool(iam_client))
+    manager.register(make_iam_tenant_lookup_tool(iam_client))
     return manager
 
 
@@ -40,6 +48,10 @@ class ToolsContainer(containers.DeclarativeContainer):
     # rag.knowledge_manager is itself providers.Factory (it depends on
     # repositories bound to a per-request database session)
     rag = providers.DependenciesContainer()
+
+    # IAMClient is providers.Singleton (stateless) — see
+    # packages/infrastructure/container/iam.py.
+    iam = providers.DependenciesContainer()
 
 
     registry = providers.Factory(
@@ -56,4 +68,5 @@ class ToolsContainer(containers.DeclarativeContainer):
         registry=registry,
         executor=executor,
         knowledge_manager=rag.knowledge_manager,
+        iam_client=iam.client,
     )

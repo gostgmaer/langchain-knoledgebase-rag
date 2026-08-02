@@ -14,6 +14,7 @@ from packages.graph.middleware import (
     MiddlewarePipeline,
 )
 from packages.graph.nodes import GraphNodes
+from packages.graph.otel_middleware import OtelGraphMiddleware
 from packages.graph.router import GraphRouter
 from packages.graph.state import GraphState
 
@@ -25,7 +26,10 @@ NodeFn = Callable[[GraphState], Awaitable[dict[str, Any] | GraphState]]
 # so a single pipeline instance is safe to reuse across requests despite
 # GraphBuilder itself being Factory-scoped (a fresh instance per request,
 # per the DI-session-capture lesson learned earlier building memory).
-_DEFAULT_PIPELINE = MiddlewarePipeline(LoggingMiddleware(), MetricsMiddleware())
+# OtelGraphMiddleware is a no-op whenever OpenTelemetry isn't
+# installed/configured (see its own docstring) — safe to always
+# include rather than conditionally building the pipeline.
+_DEFAULT_PIPELINE = MiddlewarePipeline(LoggingMiddleware(), MetricsMiddleware(), OtelGraphMiddleware())
 
 
 def _instrumented(name: str, node: NodeFn, pipeline: MiddlewarePipeline = _DEFAULT_PIPELINE) -> NodeFn:

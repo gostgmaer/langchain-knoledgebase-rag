@@ -1,12 +1,14 @@
 # Conversation repository
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from packages.domain.enums.conversation_status import ConversationStatus
 from packages.domain.models.conversation import Conversation
 from packages.infrastructure.repositories.base import BaseRepository
 
@@ -78,3 +80,42 @@ class ConversationRepository(BaseRepository[Conversation]):
         await self.session.refresh(conversation)
 
         return conversation
+
+    async def list_stale_active(
+        self,
+        older_than: datetime,
+        *,
+        limit: int = 200,
+    ) -> list[Conversation]:
+        """
+        ACTIVE conversations with no activity since `older_than` —
+        Cleanup Jobs' expired-session sweep (docs/mvpRAG.md v1.1).
+        """
+        stmt = (
+            select(Conversation)
+            .where(
+                Conversation.status == ConversationStatus.ACTIVE,
+                Conversation.last_message_at.is_not(None),
+                Conversation.last_message_at < older_than,
+            )
+            .limit(limit)
+        )
+
+        return await self.scalars(stmt)
+
+    async def mark_status(
+        self,
+        conversation: Conversation,
+        status: ConversationStatus,
+    ) -> Conversation:
+        """
+        Sets `.status` directly — NOT via `archive()`/`restore()` above,
+        which set a column-less `is_archived` attribute that silently
+        never persists (Conversation has no such mapped column, only
+        `status`). Confirmed live while building the Cleanup Jobs
+        completion feature; kept `archive()`/`restore()` unchanged since
+        fixing them wasn't in scope here.
+        """
+        conversation.status = status
+
+        return await self.update(conversation)

@@ -1,0 +1,12 @@
+[
+  {
+    "query": "Why is India called the land of festivals?",
+    "tenant_id": "6e934751-bc8e-4627-a9c3-07ffa4bd5aca",
+    "expected_document_ids": ["d493fb93-664c-45f0-848f-44d2faa40eea"]
+  },
+  {
+    "query": "What is Diwali?",
+    "tenant_id": "6e934751-bc8e-4627-a9c3-07ffa4bd5aca",
+    "expected_document_ids": ["d493fb93-664c-45f0-848f-44d2faa40eea"]
+  }
+]

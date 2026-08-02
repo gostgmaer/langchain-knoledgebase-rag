@@ -61,3 +61,8 @@ class RAGSettings(BaseSettings):
     embedding_rate_limit_tokens_per_minute: int = Field(
         default=30_000, alias="EMBEDDING_RATE_LIMIT_TOKENS_PER_MINUTE"
     )
+
+    # Scheduled Re-indexing (docs/mvpRAG.md v1.1) — a current document
+    # not re-embedded in this many days becomes a candidate for the
+    # weekly reindex_stale_documents_job.
+    reindex_stale_after_days: int = Field(default=90, alias="REINDEX_STALE_AFTER_DAYS")

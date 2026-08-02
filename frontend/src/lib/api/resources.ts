@@ -2,10 +2,12 @@ import { apiFetch, type Identity } from "./client";
 import type {
   Agent,
   AgentListResponse,
+  AnalyticsSummary,
   ChatResponseData,
   ChunkingStrategy,
   Conversation,
   CreateAgentRequest,
+  CreateFeatureFlagRequest,
   CreateKnowledgeBaseRequest,
   CreateModelProfileRequest,
   CreatePromptRequest,
@@ -17,6 +19,8 @@ import type {
   Feedback,
   FeedbackListResponse,
   FeedbackRating,
+  FeatureFlag,
+  FeatureFlagListResponse,
   HealthResponse,
   KnowledgeBase,
   KnowledgeBaseListResponse,
@@ -31,6 +35,7 @@ import type {
   ToolDefinition,
   ToolListResponse,
   UploadJob,
+  UsageResponse,
 } from "./types";
 
 const PAGE = { limit: 100, offset: 0 };
@@ -183,4 +188,39 @@ export const feedback = {
 
 export const uploadJobs = {
   get: (identity: Identity, id: string) => apiFetch<UploadJob>(`/upload-jobs/${id}`, identity),
+};
+
+// ---------------------------------------------------------------
+// Usage (Token Usage + Cost Tracking, docs/mvpRAG.md v1.1)
+// ---------------------------------------------------------------
+
+export const usage = {
+  get: (identity: Identity, days = 30) =>
+    apiFetch<UsageResponse>("/usage", identity, { query: { days } }),
+};
+
+// ---------------------------------------------------------------
+// Analytics (docs/mvpRAG.md v1.1)
+// ---------------------------------------------------------------
+
+export const analytics = {
+  summary: (identity: Identity, days = 30) =>
+    apiFetch<AnalyticsSummary>("/analytics/summary", identity, { query: { days } }),
+};
+
+// ---------------------------------------------------------------
+// Feature Flags (docs/mvpRAG.md v1.1) — admin-only (require_role
+// "admin", gated behind the dynamic enable_rbac flag itself)
+// ---------------------------------------------------------------
+
+export const featureFlags = {
+  list: (identity: Identity) =>
+    apiFetch<FeatureFlagListResponse>("/feature-flags", identity, { query: PAGE }),
+  create: (identity: Identity, body: CreateFeatureFlagRequest) =>
+    apiFetch<FeatureFlag>("/feature-flags", identity, { method: "POST", body }),
+  toggle: (identity: Identity, id: string, enabled: boolean) =>
+    apiFetch<FeatureFlag>(`/feature-flags/${id}/toggle`, identity, {
+      method: "PATCH",
+      body: { enabled },
+    }),
 };

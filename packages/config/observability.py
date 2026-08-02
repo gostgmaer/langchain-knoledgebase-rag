@@ -19,6 +19,16 @@ class ObservabilitySettings(BaseSettings):
     api_key: str | None = Field(default=None, alias="LANGCHAIN_API_KEY")
     project: str = Field(default="default", alias="LANGCHAIN_PROJECT")
 
+    # OpenTelemetry (docs/mvpRAG.md v1.1) — a distinct tracing path
+    # from LangSmith above: OTel is standard distributed tracing across
+    # the whole request (HTTP -> graph nodes -> outbound calls), not
+    # just LLM/chain calls. Off by default — needs a real OTLP
+    # collector (e.g. Jaeger, see docker-compose.yml's `jaeger`
+    # service) to actually be useful.
+    otel_enabled: bool = Field(default=False, alias="OTEL_ENABLED")
+    otel_endpoint: str = Field(default="localhost:4317", alias="OTEL_ENDPOINT")
+    otel_service_name: str = Field(default="easydev-ai-platform", alias="OTEL_SERVICE_NAME")
+
     @property
     def active(self) -> bool:
         """Whether tracing should actually be turned on.

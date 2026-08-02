@@ -88,6 +88,25 @@ services:
     networks:
       - ai-platform
 
+  # OpenTelemetry (docs/mvpRAG.md v1.1) — a local OTLP collector +
+  # trace UI so OTEL_ENABLED=true has somewhere real to send spans to.
+  # No env_file/healthcheck needed (nothing else depends on it being
+  # healthy to start) and no volume — traces are ephemeral, all-in-one
+  # is dev/local-only, not meant for production trace retention.
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver — matches OTEL_ENDPOINT's default
+      - "16686:16686" # Jaeger UI
+
+    profiles: [full]
+
+    restart: unless-stopped
+
+    networks:
+      - ai-platform
+
   pgadmin:
     image: dpage/pgadmin4
 

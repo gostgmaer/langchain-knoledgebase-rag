@@ -10,6 +10,7 @@ from packages.infrastructure.repositories.document import DocumentRepository
 from packages.infrastructure.repositories.document_chunk import DocumentChunkRepository
 from packages.infrastructure.repositories.document_version import DocumentVersionRepository
 from packages.infrastructure.repositories.embedding import EmbeddingRepository
+from packages.infrastructure.repositories.feature_flag import FeatureFlagRepository
 from packages.infrastructure.repositories.feedback import FeedbackRepository
 from packages.infrastructure.repositories.knowledge_base import KnowledgeBaseRepository
 from packages.infrastructure.repositories.memory import MemoryRepository
@@ -100,5 +101,10 @@ class RepositoryContainer(
 
     ai_response = providers.Factory(
         AIResponseRepository,
+        session=session,
+    )
+
+    feature_flag = providers.Factory(
+        FeatureFlagRepository,
         session=session,
     )

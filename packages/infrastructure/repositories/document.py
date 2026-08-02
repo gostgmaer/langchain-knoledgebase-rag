@@ -2,6 +2,7 @@
 # Document chunk repository
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import desc, func, select
@@ -168,3 +169,42 @@ class DocumentRepository(BaseRepository[Document]):
         await self.session.refresh(document)
 
         return document
+
+    async def exists_batch(
+        self,
+        document_ids: list[UUID],
+    ) -> set[UUID]:
+        """Which of the given ids have a real row — used to diff Chroma's
+        chunk metadata against real Postgres documents (orphan detection)."""
+        if not document_ids:
+            return set()
+
+        stmt = select(Document.id).where(Document.id.in_(document_ids))
+
+        result = await self.session.execute(stmt)
+
+        return {row[0] for row in result.all()}
+
+    async def list_stale(
+        self,
+        older_than: datetime,
+        *,
+        limit: int = 100,
+    ) -> list[Document]:
+        """
+        Current documents not touched since `older_than` — Scheduled
+        Re-indexing's candidate pool (docs/mvpRAG.md v1.1). Only
+        `is_current` documents: a superseded version doesn't need
+        re-embedding, its successor already was.
+        """
+        stmt = (
+            select(Document)
+            .where(
+                Document.updated_at < older_than,
+                Document.is_current.is_(True),
+            )
+            .order_by(Document.updated_at.asc())
+            .limit(limit)
+        )
+
+        return await self.scalars(stmt)

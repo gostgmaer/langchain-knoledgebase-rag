@@ -17,3 +17,7 @@ class QueueSettings(BaseSettings):
     max_retries: int = 3
 
     retry_delay: int = 5
+
+    circuit_breaker_failure_threshold: int = 5
+
+    circuit_breaker_reset_seconds: float = 30.0

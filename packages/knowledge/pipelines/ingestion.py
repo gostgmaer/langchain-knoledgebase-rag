@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import tiktoken
 from langchain_core.documents import Document as LangChainDocument
 
+from packages.config.loader import settings
 from packages.domain.enums.document_status import DocumentStatus
 from packages.domain.models.document import Document
 from packages.domain.models.document_chunk import DocumentChunk
@@ -16,12 +17,14 @@ from packages.domain.models.embedding import Embedding
 
 from packages.infrastructure.repositories.document import DocumentRepository
 from packages.infrastructure.repositories.document_version import DocumentVersionRepository
+from packages.infrastructure.repositories.model_profile import ModelProfileRepository
 from packages.knowledge.embeddings.manager import EmbeddingManager
 from packages.knowledge.loaders.manager import DocumentLoaderManager
 from packages.knowledge.processors.base import DocumentProcessor
 from packages.knowledge.schemas import IngestionRequest, IngestionResponse
 from packages.knowledge.splitters.factory import SplitterFactory
 from packages.knowledge.vectorstores.manager import VectorStoreManager
+from packages.sdk.upload.client import UploadClient
 
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
 
@@ -48,6 +51,8 @@ class IngestionPipeline:
         vector_store: VectorStoreManager,
         document_repository: DocumentRepository,
         document_version_repository: DocumentVersionRepository,
+        model_profile_repository: ModelProfileRepository,
+        upload_client: UploadClient,
     ) -> None:
         self.loader = loader
         self.transformer = transformer
@@ -56,6 +61,8 @@ class IngestionPipeline:
         self.vector_store = vector_store
         self.document_repository = document_repository
         self.document_version_repository = document_version_repository
+        self.model_profile_repository = model_profile_repository
+        self.upload_client = upload_client
 
     # ============================================================
     # Public
@@ -144,9 +151,86 @@ class IngestionPipeline:
     async def reindex_document(
         self,
         document_id: UUID,
-    ):
-        raise NotImplementedError(
-            "Reindex implementation will be added later."
+    ) -> IngestionResponse:
+        """
+        Re-embeds an already-ingested document in place: re-downloads
+        the original bytes from the Upload Service (the durable copy
+        — the local scratch file from the original upload is long
+        gone by the time this runs, deleted right after ingestion
+        finished, see packages/api/routers/documents.py), deletes its
+        old chunks, and re-runs load->clean->split->embed->store
+        reusing the SAME document_id. Deliberately does NOT reuse
+        ingest()'s checksum-dedup/version-tracking logic — that's for
+        detecting a *new* upload of *changed* content; re-indexing an
+        existing document with (deliberately) the same content isn't
+        either of those.
+
+        Re-embeds under the *current* default ModelProfile, not
+        whatever profile the document originally used — Document
+        itself doesn't store which profile embedded it (only
+        Embedding rows do, keyed by chunk), and re-picking up the
+        current default is the actual point of scheduled re-indexing:
+        catching up documents after an embedding model change.
+        """
+
+        document = await self.document_repository.get(document_id)
+        if document is None:
+            raise ValueError(f"Cannot reindex: no document with id {document_id}")
+
+        profile = await self.model_profile_repository.get_default()
+        if profile is None:
+            raise ValueError("Cannot reindex: no default model profile configured")
+
+        settings.storage.temp_directory.mkdir(parents=True, exist_ok=True)
+        scratch_path = (
+            settings.storage.temp_directory
+            / f"reindex_{document.id}{document.extension}"
+        )
+
+        try:
+            content = await self.upload_client.files.download(
+                document.file_id,
+                tenant_id=str(document.tenant_id),
+            )
+            scratch_path.write_bytes(content)
+
+            request = IngestionRequest(
+                tenant_id=document.tenant_id,
+                model_profile_id=profile.id,
+                knowledge_base_id=document.knowledge_base_id,
+                file=scratch_path,
+                file_id=document.file_id,
+                document_name=document.file_name,
+            )
+
+            await self.vector_store.store.delete_document(
+                tenant_id=document.tenant_id,
+                document_id=document.id,
+            )
+
+            loaded_documents = await self._load(request)
+            cleaned_documents = await self._clean(loaded_documents)
+            chunked_documents = await self._split(cleaned_documents, request)
+            embeddings = await self._embed(chunked_documents, request, document.id)
+
+            await self.vector_store.store.add_many(embeddings)
+
+            document.checksum = self._checksum(scratch_path)
+            document.status = DocumentStatus.READY
+            await self.document_repository.session.flush()
+
+        except Exception:
+            document.status = DocumentStatus.FAILED
+            await self.document_repository.session.flush()
+            raise
+
+        finally:
+            scratch_path.unlink(missing_ok=True)
+
+        return IngestionResponse(
+            document_id=document.id,
+            chunk_count=len(chunked_documents),
+            embedding_count=len(embeddings),
         )
 
     async def exists(

@@ -4,9 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   agents,
+  analytics,
   chat,
   conversations,
   documents,
+  featureFlags,
   feedback,
   health,
   knowledgeBases,
@@ -15,10 +17,12 @@ import {
   search,
   tools,
   uploadJobs,
+  usage,
 } from "@/lib/api/resources";
 import type {
   ChunkingStrategy,
   CreateAgentRequest,
+  CreateFeatureFlagRequest,
   CreateKnowledgeBaseRequest,
   CreateModelProfileRequest,
   CreatePromptRequest,
@@ -313,5 +317,63 @@ export function useSubmitFeedback() {
   return useMutation({
     mutationFn: (body: SubmitFeedbackRequest) => feedback.submit(identity!, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["feedback", identity?.tenantId] }),
+  });
+}
+
+// ---------------------------------------------------------------
+// Usage (Token Usage + Cost Tracking, docs/mvpRAG.md v1.1)
+// ---------------------------------------------------------------
+
+export function useUsage(days = 30) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["usage", identity?.tenantId, days],
+    queryFn: () => usage.get(identity!, days),
+    enabled: !!identity,
+  });
+}
+
+// ---------------------------------------------------------------
+// Analytics (docs/mvpRAG.md v1.1)
+// ---------------------------------------------------------------
+
+export function useAnalyticsSummary(days = 30) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["analytics-summary", identity?.tenantId, days],
+    queryFn: () => analytics.summary(identity!, days),
+    enabled: !!identity,
+  });
+}
+
+// ---------------------------------------------------------------
+// Feature Flags (docs/mvpRAG.md v1.1)
+// ---------------------------------------------------------------
+
+export function useFeatureFlags() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["feature-flags", identity?.tenantId],
+    queryFn: () => featureFlags.list(identity!),
+    enabled: !!identity,
+  });
+}
+
+export function useCreateFeatureFlag() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateFeatureFlagRequest) => featureFlags.create(identity!, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["feature-flags", identity?.tenantId] }),
+  });
+}
+
+export function useToggleFeatureFlag() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      featureFlags.toggle(identity!, id, enabled),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["feature-flags", identity?.tenantId] }),
   });
 }

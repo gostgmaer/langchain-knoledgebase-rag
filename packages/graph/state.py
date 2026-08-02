@@ -24,12 +24,29 @@ def merge_usage(
     first. Nodes should return only their own call's usage delta, not
     a pre-merged total — this function does the accumulation.
 
+    `update=None` (as opposed to `update={}`) is a deliberate, explicit
+    RESET signal — packages/application/services/chat_service.py's
+    `_build_state()` passes it at the start of every new turn. This
+    distinction matters because LangGraph's checkpointer persists
+    `usage` across *every* invoke()/resume() call against the same
+    thread_id, not just within one turn's own node executions —
+    passing `{}` would merge as a pure no-op against whatever's
+    already checkpointed from prior turns (every key still comes from
+    `current` since `update` contributes nothing), so `usage` would
+    silently accumulate for the conversation's entire lifetime instead
+    of resetting per turn. Confirmed live: a long-lived test
+    conversation (~100+ turns, reused throughout one session) grew
+    input_tokens past Postgres INTEGER's 2^31 ceiling, crashing every
+    subsequent message with a real DBAPIError on insert.
+
     LangChain's UsageMetadata has non-numeric sub-fields too (e.g.
     `input_token_details`), so only int/float values are summed —
     anything else falls back to the most recent value.
     """
+    if update is None:
+        return {}
+
     current = current or {}
-    update = update or {}
     merged: dict[str, Any] = {}
     for key in set(current) | set(update):
         c, u = current.get(key), update.get(key)

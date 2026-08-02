@@ -385,6 +385,74 @@ export interface UploadJob {
 }
 
 // ---------------------------------------------------------------
+// Usage (Token Usage + Cost Tracking, docs/mvpRAG.md v1.1)
+// ---------------------------------------------------------------
+
+export interface DailyUsage {
+  date: string;
+  total_tokens: number;
+  cost: string;
+}
+
+export interface UsageResponse {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost: string;
+  daily: DailyUsage[];
+}
+
+// ---------------------------------------------------------------
+// Analytics (docs/mvpRAG.md v1.1)
+// ---------------------------------------------------------------
+
+export interface QueriesPerDay {
+  date: string;
+  count: number;
+}
+
+export interface FeedbackTrend {
+  date: string;
+  rating: FeedbackRating;
+  count: number;
+}
+
+export interface TopFailingQuery {
+  message_id: string;
+  content: string;
+  negative_count: number;
+}
+
+export interface AnalyticsSummary {
+  queries_per_day: QueriesPerDay[];
+  feedback_trends: FeedbackTrend[];
+  top_failing_queries: TopFailingQuery[];
+}
+
+// ---------------------------------------------------------------
+// Feature Flags (docs/mvpRAG.md v1.1)
+// ---------------------------------------------------------------
+
+export interface FeatureFlag {
+  id: string;
+  key: string;
+  tenant_id: string | null;
+  enabled: boolean;
+  description: string | null;
+}
+
+export interface FeatureFlagListResponse extends Page<FeatureFlag> {
+  feature_flags: FeatureFlag[];
+}
+
+export interface CreateFeatureFlagRequest {
+  key: string;
+  tenant_id?: string | null;
+  enabled?: boolean;
+  description?: string | null;
+}
+
+// ---------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------
 

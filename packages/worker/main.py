@@ -8,7 +8,14 @@ from arq.connections import RedisSettings as ArqRedisSettings
 from packages.config.loader import settings
 from packages.infrastructure.container import ApplicationContainer
 from packages.shared.logging import configure_logger, get_logger
-from packages.worker.jobs import cleanup_orphaned_scratch_files, ingest_document_job
+from packages.worker.jobs import (
+    cleanup_orphaned_chunks_job,
+    cleanup_orphaned_scratch_files,
+    cleanup_stale_upload_jobs_job,
+    expire_stale_conversations_job,
+    ingest_document_job,
+    reindex_stale_documents_job,
+)
 
 logger = get_logger(__name__)
 
@@ -55,13 +62,28 @@ class WorkerSettings:
     same thing through `run_worker()` below.
     """
 
-    functions = [cleanup_orphaned_scratch_files, ingest_document_job]
+    functions = [
+        cleanup_orphaned_scratch_files,
+        ingest_document_job,
+        cleanup_orphaned_chunks_job,
+        expire_stale_conversations_job,
+        cleanup_stale_upload_jobs_job,
+        reindex_stale_documents_job,
+    ]
 
     cron_jobs = [
         # 4x/day is arbitrary but reasonable for a defense-in-depth
         # sweep — real scratch files should already be gone within
         # seconds of the ingestion that created them finishing.
         cron(cleanup_orphaned_scratch_files, hour={0, 6, 12, 18}, minute=0),
+        # Cleanup Jobs completion (docs/mvpRAG.md v1.1) — staggered
+        # off-peak, away from the scratch-file sweep above.
+        cron(cleanup_orphaned_chunks_job, hour=2, minute=0),
+        cron(expire_stale_conversations_job, hour=3, minute=0),
+        cron(cleanup_stale_upload_jobs_job, hour={1, 7, 13, 19}, minute=30),
+        # Scheduled Re-indexing (docs/mvpRAG.md v1.1) — weekly, Sunday
+        # (weekday=6) at 4am, well clear of the daily sweeps above.
+        cron(reindex_stale_documents_job, weekday=6, hour=4, minute=0),
     ]
 
     redis_settings = ArqRedisSettings.from_dsn(settings.redis.url)

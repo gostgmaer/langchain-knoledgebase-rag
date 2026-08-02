@@ -1,3 +1,4 @@
+import time
 from collections.abc import AsyncIterator
 from uuid import UUID
 
@@ -57,9 +58,12 @@ class ChatService:
             )
 
             state = await self._build_state(conversation, stream=False)
-            result = await self._graph.invoke(state)
 
-            return await self._finalize_or_pause(conversation, user_message, result)
+            started = time.perf_counter()
+            result = await self._graph.invoke(state)
+            latency_ms = int((time.perf_counter() - started) * 1000)
+
+            return await self._finalize_or_pause(conversation, user_message, result, latency_ms)
 
         except Exception:
             await self._uow.rollback()
@@ -83,12 +87,14 @@ class ChatService:
         try:
             conversation = await self._conversation_service.get(conversation_id)
 
+            started = time.perf_counter()
             result = await self._graph.resume(
                 conversation_id,
                 {"approved": approved},
             )
+            latency_ms = int((time.perf_counter() - started) * 1000)
 
-            return await self._finalize_or_pause(conversation, None, result)
+            return await self._finalize_or_pause(conversation, None, result, latency_ms)
 
         except Exception:
             await self._uow.rollback()
@@ -99,6 +105,7 @@ class ChatService:
         conversation: ConversationResponse,
         user_message: Message | None,
         result: dict,
+        latency_ms: int,
     ) -> ChatResponse:
         """
         Shared tail for both chat() and resume(): a graph run either
@@ -140,10 +147,19 @@ class ChatService:
             "usage_metadata": getattr(final_message, "usage_metadata", None) or {},
         }
 
+        # result["usage"] is the graph-level accumulated total across
+        # however many LLM calls this turn made (see merge_usage() in
+        # packages/graph/state.py) — not final_message.usage_metadata,
+        # which only ever reflects the *last* call and would undercount
+        # a tool-calling turn's real token usage.
+        usage = result.get("usage") or {}
+
         assistant_message = await self._save_assistant_message(
             conversation,
             final_message.content,
             raw_response,
+            usage=usage,
+            latency_ms=latency_ms,
         )
 
         await self._update_conversation(conversation)
@@ -186,12 +202,17 @@ class ChatService:
             chunks: list[str] = []
             raw_response: dict = {}
             pending_approval: dict = {}
+            usage: dict = {}
+
+            started = time.perf_counter()
 
             async for token in self._stream_runtime(
-                conversation, user_message, raw_response, pending_approval
+                conversation, user_message, raw_response, pending_approval, usage
             ):
                 chunks.append(token)
                 yield {"type": "token", "content": token}
+
+            latency_ms = int((time.perf_counter() - started) * 1000)
 
             if pending_approval:
                 yield {
@@ -206,6 +227,8 @@ class ChatService:
                 conversation,
                 assistant_response,
                 raw_response,
+                usage=usage,
+                latency_ms=latency_ms,
             )
 
             await self._update_conversation(conversation)
@@ -271,6 +294,12 @@ class ChatService:
             "tool_calls": [],
             "tool_results": [],
             "memories": [],
+            # None (not {}) is a deliberate reset signal merge_usage()
+            # special-cases — see its own docstring in
+            # packages/graph/state.py for why {} would be a no-op
+            # merge against the prior turn's already-checkpointed
+            # value instead of actually resetting it.
+            "usage": None,
         }
 
     async def _stream_runtime(
@@ -279,6 +308,7 @@ class ChatService:
         message: Message,
         raw_response: dict,
         pending_approval: dict,
+        usage: dict,
     ) -> AsyncIterator[str]:
         """
         Runs the real LangGraph pipeline (planner, retrieval, tools,
@@ -292,7 +322,9 @@ class ChatService:
         streaming completes. `pending_approval` is mutated the same
         way if the tool-approval gate (packages/graph/nodes/tool.py)
         paused the graph instead — see GraphManager.stream()'s own
-        "interrupt" event.
+        "interrupt" event. `usage` is mutated the same way from the
+        "usage" event (Token Usage/Cost Tracking) — same reasoning,
+        it's otherwise unreachable once the stream ends.
         """
 
         state = await self._build_state(conversation, stream=True)
@@ -305,6 +337,8 @@ class ChatService:
             elif event.get("type") == "metadata":
                 raw_response["response_metadata"] = event.get("response_metadata", {})
                 raw_response["additional_kwargs"] = event.get("additional_kwargs", {})
+            elif event.get("type") == "usage":
+                usage.update(event.get("usage") or {})
             elif event.get("type") == "interrupt":
                 pending_approval["tool_calls"] = event.get("value", {}).get(
                     "tool_calls", []
@@ -315,6 +349,8 @@ class ChatService:
         conversation: ConversationResponse,
         response: str,
         raw_response: dict | None = None,
+        usage: dict | None = None,
+        latency_ms: int | None = None,
     ) -> Message:
         agent = await self._uow.agents.get(conversation.agent_id)
 
@@ -324,6 +360,8 @@ class ChatService:
             provider=agent.llm_provider if agent else None,
             model=agent.llm_model if agent else None,
             raw_response=raw_response,
+            usage=usage,
+            latency_ms=latency_ms,
         )
 
     async def _update_conversation(

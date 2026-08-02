@@ -4,10 +4,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, FastAPI
 
 from packages.api.routers.agents import router as agent_router
+from packages.api.routers.analytics import router as analytics_router
 from packages.api.routers.auth import router as auth_router
 from packages.api.routers.chat import router as chat_router
 from packages.api.routers.conversations import router as conversation_router
 from packages.api.routers.documents import router as document_router
+from packages.api.routers.feature_flags import router as feature_flag_router
 from packages.api.routers.feedback import router as feedback_router
 from packages.api.routers.health import router as health_router
 from packages.api.routers.knowledge_bases import router as knowledge_base_router
@@ -17,6 +19,7 @@ from packages.api.routers.prompts import router as prompt_router
 from packages.api.routers.search import router as search_router
 from packages.api.routers.tools import router as tool_router
 from packages.api.routers.upload_jobs import router as upload_job_router
+from packages.api.routers.usage import router as usage_router
 from packages.api.security import get_bearer_token, get_tenant_id
 
 api_router = APIRouter(
@@ -43,6 +46,9 @@ api_router.include_router(tool_router)
 api_router.include_router(feedback_router)
 api_router.include_router(upload_job_router)
 api_router.include_router(metrics_router)
+api_router.include_router(usage_router)
+api_router.include_router(analytics_router)
+api_router.include_router(feature_flag_router)
 
 
 def register_routers(app: FastAPI) -> None:

@@ -15,6 +15,7 @@ from packages.infrastructure.database.base import Base
 from sqlalchemy import text
 import packages.domain.models  # noqa: F401 - Ensure models are loaded for Base.metadata
 from packages.shared.logging import configure_logger, get_logger
+from packages.shared.tracing import configure_opentelemetry
 from packages.tools.builtin.weather import close_weather_client
 
 
@@ -44,6 +45,17 @@ async def lifespan(app: FastAPI):
         )
     else:
         logger.info("LangSmith tracing disabled (no LANGCHAIN_API_KEY or LANGCHAIN_TRACING_V2=false)")
+
+    # Non-fatal, same idiom as the checkpointer/queue-pool setup below —
+    # an unreachable OTLP collector degrades to "no tracing" rather
+    # than blocking startup.
+    if configure_opentelemetry(app, settings.observability):
+        logger.info(
+            "OpenTelemetry tracing enabled",
+            endpoint=settings.observability.otel_endpoint,
+        )
+    else:
+        logger.info("OpenTelemetry tracing disabled (OTEL_ENABLED=false or setup failed)")
 
     logger.info("Initializing database schema...")
     try:

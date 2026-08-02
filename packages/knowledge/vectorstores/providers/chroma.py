@@ -179,6 +179,40 @@ class ChromaVectorStore(BaseVectorStore):
 
         return search_results
 
+    async def list_all_document_refs(
+        self,
+        limit: int = 100_000,
+    ) -> list[tuple[UUID, UUID]]:
+        """
+        Distinct (tenant_id, document_id) pairs across the WHOLE
+        collection, with no tenant/model_profile filter. Chroma-
+        specific — not part of `BaseVectorStore`'s interface, since
+        `PostgresVectorStore`'s orphans are already prevented by
+        `ondelete="CASCADE"` and don't need this.
+
+        Cleanup Jobs' orphan sweep (docs/mvpRAG.md v1.1) needs this
+        rather than deriving candidate tenants from Postgres's own
+        `documents` table: a tenant whose *only* document's Postgres
+        row is itself the orphan wouldn't appear in that table at all
+        — confirmed live, this was the actual bug in an earlier
+        version of the sweep that iterated tenant x model_profile
+        using `DocumentRepository.list_distinct_tenant_ids()`.
+        """
+
+        results = self.collection.get(limit=limit, include=["metadatas"])
+
+        refs: set[tuple[UUID, UUID]] = set()
+
+        for metadata in results.get("metadatas", []) or []:
+            metadata = metadata or {}
+            tenant_id = metadata.get("tenant_id")
+            document_id = metadata.get("document_id")
+
+            if tenant_id and document_id:
+                refs.add((UUID(tenant_id), UUID(document_id)))
+
+        return list(refs)
+
     async def add(
         self,
         embedding: Embedding,

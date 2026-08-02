@@ -9,6 +9,7 @@ from tenacity import (
 )
 
 from packages.config.loader import settings
+from packages.infrastructure.resilience.circuit_breaker import CircuitBreaker
 from packages.shared.logging import get_logger
 
 logger = get_logger(__name__)
@@ -35,44 +36,77 @@ class RetryTransport(httpx.AsyncBaseTransport):
     Applied at the transport layer (via `create_http_client()`) rather
     than call-site-by-call-site so every consumer of the shared client
     factory (currently IAM and Upload SDK clients) gets it for free.
+
+    Also wraps each destination host in its own `CircuitBreaker`: once a
+    host has failed `settings.queue.max_retries`-exhausted requests
+    `circuit_breaker_failure_threshold` times in a row, further requests
+    to that host fail immediately instead of each paying a full
+    retry-then-timeout cycle against something that's clearly down. One
+    breaker failure is recorded per *outer* request (after its own
+    retries are exhausted), not per individual retry attempt.
     """
 
-    def __init__(self, wrapped: httpx.AsyncBaseTransport) -> None:
+    def __init__(
+        self,
+        wrapped: httpx.AsyncBaseTransport,
+        breaker_failure_threshold: int = 5,
+        breaker_reset_timeout_seconds: float = 30.0,
+    ) -> None:
         self._wrapped = wrapped
+        self._breaker_failure_threshold = breaker_failure_threshold
+        self._breaker_reset_timeout_seconds = breaker_reset_timeout_seconds
+        self._breakers: dict[str, CircuitBreaker] = {}
+
+    def _breaker_for(self, host: str | None) -> CircuitBreaker:
+        key = host or "unknown"
+
+        if key not in self._breakers:
+            self._breakers[key] = CircuitBreaker(
+                name=f"http:{key}",
+                failure_threshold=self._breaker_failure_threshold,
+                reset_timeout_seconds=self._breaker_reset_timeout_seconds,
+            )
+
+        return self._breakers[key]
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(settings.queue.max_retries),
-            wait=wait_exponential(
-                multiplier=settings.queue.retry_delay,
-                max=30,
-            ),
-            retry=retry_if_exception(_is_retryable),
-            reraise=True,
-        ):
-            with attempt:
-                response = await self._wrapped.handle_async_request(request)
+        breaker = self._breaker_for(request.url.host)
 
-                if response.status_code >= 500:
-                    await response.aread()
-                    raise httpx.HTTPStatusError(
-                        f"Server error {response.status_code}",
-                        request=request,
-                        response=response,
-                    )
+        async def _do_request() -> httpx.Response:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(settings.queue.max_retries),
+                wait=wait_exponential(
+                    multiplier=settings.queue.retry_delay,
+                    max=30,
+                ),
+                retry=retry_if_exception(_is_retryable),
+                reraise=True,
+            ):
+                with attempt:
+                    response = await self._wrapped.handle_async_request(request)
 
-                if attempt.retry_state.attempt_number > 1:
-                    logger.info(
-                        "HTTP request succeeded after retry",
-                        url=str(request.url),
-                        attempt=attempt.retry_state.attempt_number,
-                    )
+                    if response.status_code >= 500:
+                        await response.aread()
+                        raise httpx.HTTPStatusError(
+                            f"Server error {response.status_code}",
+                            request=request,
+                            response=response,
+                        )
 
-                return response
+                    if attempt.retry_state.attempt_number > 1:
+                        logger.info(
+                            "HTTP request succeeded after retry",
+                            url=str(request.url),
+                            attempt=attempt.retry_state.attempt_number,
+                        )
 
-        # Unreachable: AsyncRetrying either returns from inside `with attempt`
-        # or re-raises (reraise=True) once attempts are exhausted.
-        raise RuntimeError("retry loop exited without a response")
+                    return response
+
+            # Unreachable: AsyncRetrying either returns from inside `with attempt`
+            # or re-raises (reraise=True) once attempts are exhausted.
+            raise RuntimeError("retry loop exited without a response")
+
+        return await breaker.call(_do_request)
 
     async def aclose(self) -> None:
         await self._wrapped.aclose()

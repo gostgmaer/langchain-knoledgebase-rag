@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Iterator
 from langchain_core.messages import AIMessage
 from packages.infrastructure.ai import LLMManager
+from packages.infrastructure.resilience.circuit_breaker import CircuitBreaker
 from .request import ChatRequest
 from .response import ChatResponse
 
@@ -12,8 +13,13 @@ class ChatService:
     Stateless service responsible for communicating with the LLM.
     """
 
-    def __init__(self, llm: LLMManager | None = None):
+    def __init__(self, llm: LLMManager | None = None, breaker: CircuitBreaker | None = None):
         self._llm = llm or LLMManager()
+        # Per-provider circuit breaker (one ChatService instance is a
+        # Singleton bound to one active provider config for the whole
+        # app) — a default is built here so direct instantiation outside
+        # DI (tests, scripts) still works.
+        self._breaker = breaker or CircuitBreaker(name="llm-provider")
 
     def _model(self, request: ChatRequest):
         if request.tools:
@@ -25,9 +31,17 @@ class ChatService:
         Execute a synchronous chat request.
         """
 
-        response: AIMessage = self._model(request).invoke(
-            request.messages
-        )
+        self._breaker.check()
+
+        try:
+            response: AIMessage = self._model(request).invoke(
+                request.messages
+            )
+        except Exception:
+            self._breaker.record_failure()
+            raise
+        else:
+            self._breaker.record_success()
 
         return ChatResponse(
             message=response,
@@ -44,9 +58,17 @@ class ChatService:
         Execute an asynchronous chat request.
         """
 
-        response: AIMessage = await self._model(request).ainvoke(
-            request.messages
-        )
+        self._breaker.check()
+
+        try:
+            response: AIMessage = await self._model(request).ainvoke(
+                request.messages
+            )
+        except Exception:
+            self._breaker.record_failure()
+            raise
+        else:
+            self._breaker.record_success()
 
         return ChatResponse(
             message=response,
@@ -63,9 +85,17 @@ class ChatService:
         Stream model output.
         """
 
-        yield from self._llm.stream(
-            request.messages
-        )
+        self._breaker.check()
+
+        try:
+            yield from self._llm.stream(
+                request.messages
+            )
+        except Exception:
+            self._breaker.record_failure()
+            raise
+        else:
+            self._breaker.record_success()
 
     async def astream(
         self,
@@ -75,10 +105,18 @@ class ChatService:
         Stream model output asynchronously.
         """
 
-        async for chunk in self._model(request).astream(
-            request.messages
-        ):
-            yield chunk
+        self._breaker.check()
+
+        try:
+            async for chunk in self._model(request).astream(
+                request.messages
+            ):
+                yield chunk
+        except Exception:
+            self._breaker.record_failure()
+            raise
+        else:
+            self._breaker.record_success()
 
     def bind_tools(self, tools):
         """
