@@ -14,6 +14,7 @@ from packages.worker.jobs import (
     cleanup_stale_upload_jobs_job,
     expire_stale_conversations_job,
     ingest_document_job,
+    recover_stuck_conversations_job,
     reindex_stale_documents_job,
 )
 
@@ -69,6 +70,7 @@ class WorkerSettings:
         expire_stale_conversations_job,
         cleanup_stale_upload_jobs_job,
         reindex_stale_documents_job,
+        recover_stuck_conversations_job,
     ]
 
     cron_jobs = [
@@ -84,6 +86,15 @@ class WorkerSettings:
         # Scheduled Re-indexing (docs/mvpRAG.md v1.1) — weekly, Sunday
         # (weekday=6) at 4am, well clear of the daily sweeps above.
         cron(reindex_stale_documents_job, weekday=6, hour=4, minute=0),
+        # Durable Execution (docs/mvpRAG.md v2.0) — every 5 minutes,
+        # not daily like the sweeps above: this is about detecting a
+        # crashed turn promptly, not a nightly cleanup. arq's cron has
+        # no interval/stride syntax, so every 5-minute mark is spelled
+        # out explicitly.
+        cron(
+            recover_stuck_conversations_job,
+            minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55},
+        ),
     ]
 
     redis_settings = ArqRedisSettings.from_dsn(settings.redis.url)

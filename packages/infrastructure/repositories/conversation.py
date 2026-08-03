@@ -103,6 +103,32 @@ class ConversationRepository(BaseRepository[Conversation]):
 
         return await self.scalars(stmt)
 
+    async def list_stuck_processing(
+        self,
+        older_than: datetime,
+        *,
+        limit: int = 200,
+    ) -> list[Conversation]:
+        """
+        Conversations left `PROCESSING` since before `older_than` —
+        Durable Execution's crash-detection sweep (docs/mvpRAG.md
+        v2.0, recover_stuck_conversations_job). Mirrors
+        `list_stale_active()`'s shape exactly, just against the
+        `processing_started_at` marker ChatService sets right before
+        invoking/resuming the graph instead of `last_message_at`.
+        """
+        stmt = (
+            select(Conversation)
+            .where(
+                Conversation.status == ConversationStatus.PROCESSING,
+                Conversation.processing_started_at.is_not(None),
+                Conversation.processing_started_at < older_than,
+            )
+            .limit(limit)
+        )
+
+        return await self.scalars(stmt)
+
     async def mark_status(
         self,
         conversation: Conversation,
@@ -117,5 +143,39 @@ class ConversationRepository(BaseRepository[Conversation]):
         fixing them wasn't in scope here.
         """
         conversation.status = status
+
+        return await self.update(conversation)
+
+    async def mark_processing(
+        self,
+        conversation: Conversation,
+    ) -> Conversation:
+        """
+        Durable Execution (docs/mvpRAG.md v2.0) — called right before
+        ChatService invokes/resumes the graph. A dedicated method
+        rather than `mark_status(..., PROCESSING)` because this needs
+        to set `processing_started_at` in the same write, not just
+        `.status`.
+        """
+        conversation.status = ConversationStatus.PROCESSING
+        conversation.processing_started_at = datetime.utcnow()
+
+        return await self.update(conversation)
+
+    async def clear_processing(
+        self,
+        conversation: Conversation,
+    ) -> Conversation:
+        """
+        Called once the graph's invoke()/resume() call has actually
+        returned — whether that's a completed turn or a legitimate
+        tool-approval pause, both mean the call itself didn't crash,
+        so this always resets back to ACTIVE. Only a real process
+        death mid-call skips this entirely, leaving `status` at
+        `PROCESSING` and `processing_started_at` stale — the exact
+        signal `list_stuck_processing()` looks for.
+        """
+        conversation.status = ConversationStatus.ACTIVE
+        conversation.processing_started_at = None
 
         return await self.update(conversation)

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+import uuid
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import tiktoken
 from langchain_core.documents import Document as LangChainDocument
+from langchain_core.messages import HumanMessage
 
 from packages.config.loader import settings
 from packages.domain.enums.document_status import DocumentStatus
@@ -14,6 +16,7 @@ from packages.domain.models.document import Document
 from packages.domain.models.document_chunk import DocumentChunk
 from packages.domain.models.document_version import DocumentVersion
 from packages.domain.models.embedding import Embedding
+from packages.infrastructure.ai.manager import LLMManager
 from packages.infrastructure.repositories.document import DocumentRepository
 from packages.infrastructure.repositories.document_version import DocumentVersionRepository
 from packages.infrastructure.repositories.model_profile import ModelProfileRepository
@@ -24,8 +27,19 @@ from packages.knowledge.schemas import IngestionRequest, IngestionResponse
 from packages.knowledge.splitters.factory import SplitterFactory
 from packages.knowledge.vectorstores.manager import VectorStoreManager
 from packages.sdk.upload.client import UploadClient
+from packages.shared.logging import get_logger
+from packages.shared.messages import normalize_message_content
 
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
+
+logger = get_logger(__name__)
+
+# Bounds the ingestion-time summary prompt to a reasonable excerpt
+# instead of the full document — Multi Vector Retriever's v1 scope
+# (docs/mvpRAG.md v2.0) is one extra representation per *document*,
+# not per chunk, specifically to keep ingestion cost bounded; an
+# unbounded prompt would undercut that.
+_SUMMARY_SOURCE_CHAR_LIMIT = 8000
 
 
 class IngestionPipeline:
@@ -52,6 +66,7 @@ class IngestionPipeline:
         document_version_repository: DocumentVersionRepository,
         model_profile_repository: ModelProfileRepository,
         upload_client: UploadClient,
+        llm: LLMManager,
     ) -> None:
         self.loader = loader
         self.transformer = transformer
@@ -62,6 +77,7 @@ class IngestionPipeline:
         self.document_version_repository = document_version_repository
         self.model_profile_repository = model_profile_repository
         self.upload_client = upload_client
+        self.llm = llm
 
     # ============================================================
     # Public
@@ -121,6 +137,12 @@ class IngestionPipeline:
             )
 
             await self.vector_store.store.add_many(embeddings)
+
+            await self._store_summary_representation(
+                chunked_documents,
+                request,
+                document.id,
+            )
 
             document.status = DocumentStatus.READY
             await self.document_repository.session.flush()
@@ -406,3 +428,107 @@ class IngestionPipeline:
             )
 
         return embeddings
+
+    async def _store_summary_representation(
+        self,
+        chunked_documents: list[LangChainDocument],
+        request: IngestionRequest,
+        document_id: UUID,
+    ) -> None:
+        """
+        Multi Vector Retriever, v1 scope (docs/mvpRAG.md v2.0): one
+        extra representation per *document* (a summary), not per-chunk
+        Q&A pairs — a deliberate scope cut bounding ingestion-time LLM
+        cost to one extra call per document instead of scaling with
+        chunk count.
+
+        Stored as a synthetic Chroma entry (a real `Embedding`/
+        `DocumentChunk` pair, same as any other chunk) tagged
+        `representation_type="summary"` — a query matching the
+        *summary's* phrasing rather than any single chunk's literal
+        wording can still surface this document; the retrieval side
+        (MultiVectorRetriever, packages/knowledge/retrievers/providers/
+        multi_vector.py) resolves a summary hit back to the document's
+        real top-scoring primary chunk(s) before it ever reaches the
+        LLM/citations — the summary text itself is never returned as
+        literal context.
+
+        Deliberately non-fatal: a failed summary call degrades to "no
+        summary representation for this document" rather than failing
+        the whole ingestion, since the primary chunks (the actually
+        load-bearing search path) are already safely stored by the
+        time this runs.
+        """
+
+        if not chunked_documents:
+            return
+
+        try:
+            summary_text = await self._generate_summary(chunked_documents)
+
+            if not summary_text.strip():
+                return
+
+            vector = await self.embedding_manager.client.aembed_query(summary_text)
+
+            summary_chunk = DocumentChunk(
+                id=uuid.uuid5(document_id, "summary"),
+                tenant_id=request.tenant_id,
+                document_id=document_id,
+                chunk_index=-1,
+                content=summary_text,
+                token_count=len(_TOKENIZER.encode(summary_text)),
+                character_count=len(summary_text),
+                metadata_={},
+            )
+
+            await self.vector_store.store.add(
+                Embedding(
+                    tenant_id=request.tenant_id,
+                    chunk_id=summary_chunk.id,
+                    model_profile_id=request.model_profile_id,
+                    vector=vector,
+                    chunk=summary_chunk,
+                ),
+                representation_type="summary",
+            )
+
+        except Exception as exc:
+            logger.warning(
+                "Could not generate/store document summary representation",
+                document_id=str(document_id),
+                error=str(exc),
+            )
+
+    async def _generate_summary(
+        self,
+        chunked_documents: list[LangChainDocument],
+    ) -> str:
+
+        excerpt = ""
+        for chunk in chunked_documents:
+            if len(excerpt) >= _SUMMARY_SOURCE_CHAR_LIMIT:
+                break
+            excerpt += chunk.page_content + "\n\n"
+        excerpt = excerpt[:_SUMMARY_SOURCE_CHAR_LIMIT]
+
+        response = await self.llm.ainvoke(
+            [
+                HumanMessage(
+                    content=(
+                        "Summarize the following document excerpt in 2-4 sentences, "
+                        "capturing its main topic and key points. Return only the "
+                        "summary, no preamble.\n\n"
+                        f"{excerpt}"
+                    )
+                )
+            ]
+        )
+
+        # Gemini (and some other providers) return AIMessage.content as
+        # a list of content blocks, not a plain string — the same
+        # normalization LLMNode already applies to a chat response
+        # (packages/graph/nodes/llm.py), reused here rather than
+        # re-implemented, since a naive str(content) would literally
+        # stringify the raw block list into the summary text.
+        return normalize_message_content(response.content)

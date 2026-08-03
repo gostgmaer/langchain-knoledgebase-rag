@@ -102,6 +102,8 @@ class ChromaVectorStore(BaseVectorStore):
                 tenant_id=UUID(metadata["tenant_id"]),
                 document_id=UUID(metadata.get("document_id", chunk_id)),
                 chunk_index=int(metadata.get("chunk_index", 0)),
+                section=metadata.get("section"),
+                page_number=metadata.get("page_number"),
                 content=content,
                 token_count=int(metadata.get("token_count", 0)),
                 character_count=len(content),
@@ -164,6 +166,8 @@ class ChromaVectorStore(BaseVectorStore):
                 tenant_id=UUID(metadata["tenant_id"]),
                 document_id=UUID(metadata.get("document_id", chunk_id)),
                 chunk_index=int(metadata.get("chunk_index", 0)),
+                section=metadata.get("section"),
+                page_number=metadata.get("page_number"),
                 content=content,
                 token_count=int(metadata.get("token_count", 0)),
                 character_count=len(content),
@@ -216,22 +220,59 @@ class ChromaVectorStore(BaseVectorStore):
     async def add(
         self,
         embedding: Embedding,
+        *,
+        representation_type: str | None = None,
     ) -> None:
 
         chunk = embedding.chunk
+
+        metadata: dict[str, str | int] = {
+            "tenant_id": str(embedding.tenant_id),
+            "model_profile_id": str(embedding.model_profile_id),
+            "document_id": str(chunk.document_id) if chunk else "",
+            "chunk_index": chunk.chunk_index if chunk else 0,
+        }
+
+        # Left unset for ordinary chunks (backward-compatible with
+        # everything already ingested before Multi Vector Retriever
+        # existed, docs/mvpRAG.md v2.0) — only the synthetic
+        # document-summary entry IngestionPipeline._store_summary_
+        # representation() creates ever passes this, and consumers
+        # check for its presence/value rather than assuming every
+        # chunk has one.
+        if representation_type is not None:
+            metadata["representation_type"] = representation_type
+
+        # Already computed at chunk-creation time (IngestionPipeline._embed())
+        # but never propagated into Chroma until now — Self Query and
+        # Parent Document Retriever (docs/mvpRAG.md v2.0) both need real
+        # metadata to filter/group on. Chroma rejects None values in
+        # metadata dicts, so these are only included when actually set,
+        # not written as null.
+        #
+        # `section_lower` is a separate shadow field, not just `section`
+        # normalized in place: Chroma's `where` equality is exact-match,
+        # case-sensitive, and Self Query Retriever's filter values come
+        # from free-form LLM extraction of natural language (a user
+        # asking about the "specifications" section, lowercase, when
+        # the real heading is "Specifications") — confirmed live this
+        # produced zero results before this field existed. Parent
+        # Document Retriever doesn't have this problem (it re-queries
+        # using an already-matched chunk's own exact `section` value,
+        # no LLM involved), so `section` itself stays original-case for
+        # that and for display.
+        if chunk and chunk.section is not None:
+            metadata["section"] = chunk.section
+            metadata["section_lower"] = chunk.section.lower()
+
+        if chunk and chunk.page_number is not None:
+            metadata["page_number"] = chunk.page_number
 
         self.collection.add(
             ids=[str(embedding.chunk_id)],
             embeddings=[embedding.vector],
             documents=[chunk.content if chunk else ""],
-            metadatas=[
-                {
-                    "tenant_id": str(embedding.tenant_id),
-                    "model_profile_id": str(embedding.model_profile_id),
-                    "document_id": str(chunk.document_id) if chunk else "",
-                    "chunk_index": chunk.chunk_index if chunk else 0,
-                }
-            ],
+            metadatas=[metadata],
         )
 
     async def add_many(

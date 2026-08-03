@@ -4,6 +4,8 @@ packages/graph/nodes/retrieve.py
 
 from __future__ import annotations
 
+import asyncio
+
 from packages.config.loader import settings
 from packages.graph.state import GraphState
 from packages.knowledge.manager import KnowledgeManager
@@ -54,15 +56,24 @@ class RetrieveNode:
             model_profile_id=state["model_profile_id"],
         )
 
+        # Independent sub-queries, fetched concurrently rather than
+        # awaited one at a time — none depends on another's result,
+        # only the merge below does (Advanced LangGraph's "Parallel
+        # Execution", docs/mvpRAG.md v2.0).
+        per_query_results = await asyncio.gather(
+            *(
+                self._knowledge.search(
+                    query=query,
+                    filters=filters,
+                    options=SearchOptions(limit=CANDIDATE_LIMIT),
+                )
+                for query in queries
+            )
+        )
+
         merged: dict[object, object] = {}
 
-        for query in queries:
-            results = await self._knowledge.search(
-                query=query,
-                filters=filters,
-                options=SearchOptions(limit=CANDIDATE_LIMIT),
-            )
-
+        for results in per_query_results:
             for result in results:
                 existing = merged.get(result.chunk.id)
                 if existing is None or result.score > existing.score:

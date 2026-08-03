@@ -149,6 +149,18 @@ class Conversation(BaseModel):
 
     ended_at: Mapped[datetime | None]
 
+    # Durable Execution (docs/mvpRAG.md v2.0) — set to a fresh naive-UTC
+    # timestamp (this model's established convention, see last_message_at/
+    # ended_at above and expire_stale_conversations_job's own comment on
+    # it) right before ChatService invokes/resumes the graph, cleared
+    # back to None on successful completion. A real process crash never
+    # reaches Python exception handling, so this staying set — and old
+    # — is the only reliable signal recover_stuck_conversations_job
+    # (packages/worker/jobs.py) has to detect "this turn's process died
+    # mid-flight," since the checkpoint state alone looks identical to
+    # "the user just hasn't replied yet."
+    processing_started_at: Mapped[datetime | None]
+
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSONB,

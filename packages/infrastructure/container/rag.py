@@ -127,6 +127,7 @@ class RAGContainer(
         document_version_repository=repositories.document_version,
         model_profile_repository=repositories.model_profile,
         upload_client=upload.client,
+        llm=ai.manager,
     )
 
     # Lazy, not eager — constructed on first real use so that the
@@ -139,6 +140,7 @@ class RAGContainer(
     retriever = providers.Singleton(
         RetrieverFactory.create,
         vector_store=vectorstore,
+        llm=ai.manager,
     )
 
     retriever_manager = providers.Singleton(

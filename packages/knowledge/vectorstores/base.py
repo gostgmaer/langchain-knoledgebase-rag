@@ -23,9 +23,14 @@ class BaseVectorStore(ABC):
     async def add(
         self,
         embedding: Embedding,
+        *,
+        representation_type: str | None = None,
     ) -> None:
         """
-        Store a single embedding.
+        Store a single embedding. `representation_type` is left unset
+        for ordinary chunks; Multi Vector Retriever (docs/mvpRAG.md
+        v2.0) passes `"summary"` for a document-level synthetic
+        summary embedding.
         """
 
     @abstractmethod

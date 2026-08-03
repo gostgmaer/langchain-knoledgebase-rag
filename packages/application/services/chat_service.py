@@ -106,6 +106,15 @@ class ChatService:
 
             state = await self._build_state(conversation, stream=False)
 
+            # Durable Execution (docs/mvpRAG.md v2.0): committed here,
+            # not just flushed, so it durably survives a real process
+            # crash during the graph.invoke() call below — a flush
+            # alone lives only in this session's uncommitted
+            # transaction, which a crashed connection simply discards,
+            # leaving recover_stuck_conversations_job nothing to find.
+            await self._mark_processing(conversation.id)
+            await self._uow.commit()
+
             started = time.perf_counter()
             result = await self._graph.invoke(state)
             latency_ms = int((time.perf_counter() - started) * 1000)
@@ -134,6 +143,12 @@ class ChatService:
         try:
             conversation = await self._conversation_service.get(conversation_id)
 
+            # Same reasoning as chat()'s own committed mark — durably
+            # persisted before the potentially-crashing call, not just
+            # flushed (docs/mvpRAG.md v2.0).
+            await self._mark_processing(conversation_id)
+            await self._uow.commit()
+
             started = time.perf_counter()
             result = await self._graph.resume(
                 conversation_id,
@@ -146,6 +161,68 @@ class ChatService:
         except Exception:
             await self._uow.rollback()
             raise
+
+    async def recover(
+        self,
+        conversation_id: UUID,
+    ) -> ChatResponse | None:
+        """
+        Continues a conversation whose invoke()/resume()/stream() call
+        never returned — a real process crash, not a legitimate
+        interrupt pause (which always clears PROCESSING via
+        `_finalize_or_pause`'s own normal return; see
+        `mark_processing`/`clear_processing`'s docstrings,
+        packages/infrastructure/repositories/conversation.py, for why
+        a *stuck* PROCESSING conversation can only mean a crash, never
+        a legitimate pending-approval wait). Durable Execution,
+        docs/mvpRAG.md v2.0 — only ever called by
+        `recover_stuck_conversations_job` (packages/worker/jobs.py),
+        never an HTTP route directly.
+
+        Returns `None` if the underlying graph turn out to already be
+        fully complete — confirmed live this happens for a narrow
+        crash-timing edge case (a process dying in the brief window
+        between `graph.invoke()` returning and this conversation's own
+        `clear_processing()` commit landing): without this check,
+        `GraphManager.recover()` doesn't error against an
+        already-completed thread, it just re-returns the same final
+        state, which would otherwise get persisted here as a second,
+        duplicate assistant message.
+        """
+
+        try:
+            conversation = await self._conversation_service.get(conversation_id)
+
+            if not await self._graph.has_pending_work(conversation_id):
+                await self._clear_processing(conversation_id)
+                await self._uow.commit()
+                return None
+
+            started = time.perf_counter()
+            result = await self._graph.recover(conversation_id)
+            latency_ms = int((time.perf_counter() - started) * 1000)
+
+            return await self._finalize_or_pause(conversation, None, result, latency_ms)
+
+        except Exception:
+            await self._uow.rollback()
+            raise
+
+    async def _mark_processing(
+        self,
+        conversation_id: UUID,
+    ) -> None:
+        entity = await self._uow.conversations.get(conversation_id)
+        if entity is not None:
+            await self._uow.conversations.mark_processing(entity)
+
+    async def _clear_processing(
+        self,
+        conversation_id: UUID,
+    ) -> None:
+        entity = await self._uow.conversations.get(conversation_id)
+        if entity is not None:
+            await self._uow.conversations.clear_processing(entity)
 
     async def _finalize_or_pause(
         self,
@@ -161,6 +238,15 @@ class ChatService:
         checkpointer already holds everything, waiting for the next
         resume() call).
         """
+
+        # Reaching this line at all means the invoke()/resume() call
+        # itself returned — whether that's a completed turn or a
+        # legitimate tool-approval pause below, neither is a crash, so
+        # both clear back to ACTIVE uniformly (docs/mvpRAG.md v2.0).
+        # Only a real process death mid-call skips this line entirely,
+        # which is exactly the condition recover_stuck_conversations_job
+        # looks for.
+        await self._clear_processing(conversation.id)
 
         interrupts = result.get("__interrupt__")
 
@@ -259,6 +345,14 @@ class ChatService:
             usage: dict = {}
             citations: list[dict[str, Any]] = []
 
+            # Same reasoning as chat()/resume()'s own committed mark —
+            # durably persisted before the potentially-crashing
+            # streaming call, not just flushed (docs/mvpRAG.md v2.0).
+            # A crash mid-stream leaves exactly the same kind of
+            # recoverable checkpoint state as a crash mid-invoke().
+            await self._mark_processing(conversation.id)
+            await self._uow.commit()
+
             started = time.perf_counter()
 
             async for token in self._stream_runtime(
@@ -268,6 +362,11 @@ class ChatService:
                 yield {"type": "token", "content": token}
 
             latency_ms = int((time.perf_counter() - started) * 1000)
+
+            # Reaching this line means the stream itself finished
+            # without the process crashing — same "clear on any normal
+            # return, not just success" reasoning as _finalize_or_pause.
+            await self._clear_processing(conversation.id)
 
             if pending_approval:
                 yield {

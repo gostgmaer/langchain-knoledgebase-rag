@@ -2,9 +2,19 @@
 from __future__ import annotations
 
 from packages.config.loader import settings
+from packages.infrastructure.ai.manager import LLMManager
 from packages.knowledge.retrievers.base import BaseRetriever
 from packages.knowledge.retrievers.providers.hybrid import HybridRetriever
 from packages.knowledge.retrievers.providers.mmr import MMRRetriever
+from packages.knowledge.retrievers.providers.multi_vector import (
+    MultiVectorRetriever,
+)
+from packages.knowledge.retrievers.providers.parent_document import (
+    ParentDocumentRetriever,
+)
+from packages.knowledge.retrievers.providers.self_query import (
+    SelfQueryRetriever,
+)
 from packages.knowledge.retrievers.providers.similarity import (
     SimilarityRetriever,
 )
@@ -16,6 +26,7 @@ class RetrieverFactory:
     @staticmethod
     def create(
         vector_store: VectorStoreManager,
+        llm: LLMManager,
     ) -> BaseRetriever:
 
         strategy = settings.rag.retrieval_strategy.lower()
@@ -28,6 +39,28 @@ class RetrieverFactory:
 
         if strategy == "hybrid":
             return HybridRetriever(vector_store)
+
+        if strategy == "self_query":
+            # Composition, not a replacement search algorithm — wraps
+            # this app's own default general-purpose strategy (hybrid)
+            # with an LLM step that extracts real metadata filters
+            # before delegating (Advanced Retrieval's Self Query
+            # Retriever, docs/mvpRAG.md v2.0).
+            return SelfQueryRetriever(HybridRetriever(vector_store), llm)
+
+        if strategy == "parent_document":
+            # Same composition pattern — small chunks for match
+            # precision via hybrid, expanded to their full parent
+            # section for answer context (docs/mvpRAG.md v2.0).
+            return ParentDocumentRetriever(HybridRetriever(vector_store), vector_store)
+
+        if strategy == "multi_vector":
+            # Same composition pattern — hybrid search over both real
+            # chunks and document-level summary representations,
+            # resolving any summary hit back to real primary chunk
+            # content before it reaches the LLM/citations
+            # (docs/mvpRAG.md v2.0).
+            return MultiVectorRetriever(HybridRetriever(vector_store), vector_store)
 
         raise ValueError(
             f"Unknown retrieval strategy: {strategy}"

@@ -59,6 +59,51 @@ class GraphManager:
             config=config,
         )
 
+    async def has_pending_work(
+        self,
+        thread_id: UUID,
+    ) -> bool:
+        """
+        True if this thread's checkpoint still has unexecuted nodes
+        (`snapshot.next`) — False means the graph already reached END,
+        so there's genuinely nothing to recover. Confirmed live this
+        distinction matters: calling `recover()` unconditionally
+        against an *already-completed* thread (the narrow crash-
+        timing edge case documented on `recover()` below) doesn't
+        error, it just re-runs the graph from its final checkpoint and
+        returns that same final state again — which `ChatService.
+        recover()` would otherwise persist as a second, duplicate
+        assistant message.
+        """
+
+        config = {"configurable": {"thread_id": str(thread_id)}}
+        snapshot = await self.graph.aget_state(config)
+
+        return bool(snapshot.next)
+
+    async def recover(
+        self,
+        thread_id: UUID,
+    ) -> GraphState:
+        """
+        Continues a graph run left mid-flight by a crashed process
+        (Durable Execution, docs/mvpRAG.md v2.0) — no fresh input and
+        no `Command(resume=...)` payload, unlike `resume()` above:
+        just letting LangGraph pick back up from wherever the last
+        completed node's checkpoint under this thread_id left off.
+        Called by ChatService.recover(), itself only ever called from
+        `recover_stuck_conversations_job` (packages/worker/jobs.py),
+        never an HTTP route directly. Callers should check
+        `has_pending_work()` first — see its own docstring.
+        """
+
+        config = {"configurable": {"thread_id": str(thread_id)}}
+
+        return await self.graph.ainvoke(
+            None,
+            config=config,
+        )
+
     async def stream(
         self,
         state: GraphState,
