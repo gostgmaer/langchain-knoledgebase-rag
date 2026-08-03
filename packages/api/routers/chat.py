@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.exc import IntegrityError
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
@@ -82,17 +83,34 @@ async def chat(
             # request, so a client-generated ID can be used as a
             # conversation handle from its very first message, without
             # a separate POST /conversations round-trip first.
-            conversation = await conversations.create(
-                Conversation(
-                    id=payload.conversation_id,
-                    tenant_id=tenant_id,
-                    agent_id=agent.id,
-                    user_id=user_id,
-                    session_id=f"client-{payload.conversation_id}",
-                    title="New conversation",
-                    status=ConversationStatus.ACTIVE,
+            try:
+                conversation = await conversations.create(
+                    Conversation(
+                        id=payload.conversation_id,
+                        tenant_id=tenant_id,
+                        agent_id=agent.id,
+                        user_id=user_id,
+                        session_id=f"client-{payload.conversation_id}",
+                        title="New conversation",
+                        status=ConversationStatus.ACTIVE,
+                    )
                 )
-            )
+            except IntegrityError:
+                # A real race, confirmed live: two genuinely simultaneous
+                # first-messages to the same not-yet-existing
+                # conversation_id both reach this branch, and only one
+                # INSERT wins — the other hits a real UniqueViolationError
+                # on conversations' primary key rather than a 404-worthy
+                # "doesn't exist." A failed flush leaves the session
+                # unusable until rolled back; the row the losing request
+                # just conflicted with is, by definition, already
+                # committed (Postgres only raises the duplicate-key error
+                # once the winner's transaction commits), so re-fetching
+                # here is safe rather than racy again.
+                await container.database.session().rollback()
+                conversation = await conversations.get(payload.conversation_id)
+                if conversation is None:
+                    raise
         else:
             conversation = await ensure_default_conversation(
                 tenant_id,
@@ -257,14 +275,16 @@ async def _sse_events(
 ):
     """
     Formats each event from ChatService.stream() as a Server-Sent
-    Event: "token" per chunk, then either a terminal "done" once the
-    full response has been generated and persisted, or — if the
-    tool-approval gate paused the graph mid-stream (see
-    GraphManager.stream()'s own "interrupt" event) — a terminal
-    "interrupt" event instead, with memory extraction skipped, the
-    same way the non-streaming path skips it for a pending approval.
-    Resuming a stream-paused conversation still goes through the
-    non-streaming POST /chat/{conversation_id}/resume endpoint —
+    Event: "token" per chunk, "citations" once the full response has
+    been assembled (docs/mvpRAG.md v1.2 — previously a documented gap,
+    streaming never surfaced retrieval citations at all), then either
+    a terminal "done" once the full response has been generated and
+    persisted, or — if the tool-approval gate paused the graph
+    mid-stream (see GraphManager.stream()'s own "interrupt" event) — a
+    terminal "interrupt" event instead, with memory extraction skipped,
+    the same way the non-streaming path skips it for a pending
+    approval. Resuming a stream-paused conversation still goes through
+    the non-streaming POST /chat/{conversation_id}/resume endpoint —
     resuming *as* a stream isn't supported, a deliberate, documented
     scope boundary, not a silent gap.
     """
@@ -278,6 +298,9 @@ async def _sse_events(
             }
             yield f"data: {json.dumps(payload)}\n\n"
             return
+        if event["type"] == "citations":
+            yield f"data: {json.dumps({'type': 'citations', 'citations': event['citations']})}\n\n"
+            continue
         yield f"data: {json.dumps({'type': 'token', 'content': event['content']})}\n\n"
 
     background_tasks.add_task(

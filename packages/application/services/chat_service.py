@@ -1,6 +1,9 @@
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 from uuid import UUID
+
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from packages.application.dto.chat import (
     ChatRequest,
@@ -25,6 +28,51 @@ from packages.graph.manager import GraphManager
 from packages.infrastructure.repositories.unit_of_work import (
     UnitOfWork,
 )
+
+
+def _extract_turn_tool_activity(
+    messages: list,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """
+    Collects the tool calls/results made during the current turn only,
+    scanning `messages` (the graph's full, checkpoint-accumulated
+    history — same list `_finalize_or_pause` reads `final_message`
+    from) backward from the end until the most recent HumanMessage.
+
+    A HumanMessage is what actually bounds "this turn" for both a
+    fresh chat() call and a resume() call after a tool-approval
+    interrupt — GraphToolNode (packages/graph/nodes/tool.py) always
+    routes any tool call through interrupt() first, so a turn with
+    real tool activity is never fully assembled in one invoke(): the
+    AIMessage-with-tool_calls and its ToolMessage results only land in
+    `messages` together once resume() completes it. Scanning from a
+    HumanMessage boundary works correctly for that split just as well
+    as for a single chat() call, without needing the new user
+    message's own id threaded through separately.
+    """
+    tool_calls: list[dict[str, Any]] = []
+    tool_results: list[dict[str, Any]] = []
+
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            break
+        if isinstance(message, ToolMessage):
+            tool_results.append(
+                {
+                    "tool_call_id": message.tool_call_id,
+                    "content": message.content if isinstance(message.content, str) else str(message.content),
+                    "status": getattr(message, "status", None),
+                }
+            )
+        elif isinstance(message, AIMessage) and message.tool_calls:
+            tool_calls.extend(
+                {"id": call.get("id"), "name": call.get("name"), "args": call.get("args")}
+                for call in message.tool_calls
+            )
+
+    tool_calls.reverse()
+    tool_results.reverse()
+    return tool_calls, tool_results
 
 
 class ChatService:
@@ -153,12 +201,16 @@ class ChatService:
         # a tool-calling turn's real token usage.
         usage = result.get("usage") or {}
 
+        tool_calls, tool_results = _extract_turn_tool_activity(result["messages"])
+
         assistant_message = await self._save_assistant_message(
             conversation,
             final_message.content,
             raw_response,
             usage=usage,
             latency_ms=latency_ms,
+            tool_calls=tool_calls,
+            tool_results=tool_results,
         )
 
         await self._update_conversation(conversation)
@@ -183,9 +235,12 @@ class ChatService:
         full response. The full text is still persisted as one
         assistant message once streaming completes.
 
-        Yields `{"type": "token", "content": str}` for real content, or
-        a single terminal `{"type": "interrupt", "tool_calls": [...]}`
-        if the tool-approval gate paused the graph mid-stream — the
+        Yields `{"type": "token", "content": str}` for real content, a
+        single terminal `{"type": "citations", "citations": [...]}`
+        once the response is fully assembled (docs/mvpRAG.md v1.2 —
+        previously a documented gap), then a single terminal
+        `{"type": "interrupt", "tool_calls": [...]}` if the
+        tool-approval gate paused the graph mid-stream instead — the
         caller (packages/api/routers/chat.py's `_sse_events`) must
         check for that type and skip persistence/the "done" event, the
         same way it already has to for a normal completion.
@@ -202,11 +257,12 @@ class ChatService:
             raw_response: dict = {}
             pending_approval: dict = {}
             usage: dict = {}
+            citations: list[dict[str, Any]] = []
 
             started = time.perf_counter()
 
             async for token in self._stream_runtime(
-                conversation, user_message, raw_response, pending_approval, usage
+                conversation, user_message, raw_response, pending_approval, usage, citations
             ):
                 chunks.append(token)
                 yield {"type": "token", "content": token}
@@ -233,6 +289,8 @@ class ChatService:
             await self._update_conversation(conversation)
 
             await self._uow.commit()
+
+            yield {"type": "citations", "citations": citations}
 
         except Exception:
             await self._uow.rollback()
@@ -308,6 +366,7 @@ class ChatService:
         raw_response: dict,
         pending_approval: dict,
         usage: dict,
+        citations: list[dict[str, Any]],
     ) -> AsyncIterator[str]:
         """
         Runs the real LangGraph pipeline (planner, retrieval, tools,
@@ -323,7 +382,10 @@ class ChatService:
         paused the graph instead — see GraphManager.stream()'s own
         "interrupt" event. `usage` is mutated the same way from the
         "usage" event (Token Usage/Cost Tracking) — same reasoning,
-        it's otherwise unreachable once the stream ends.
+        it's otherwise unreachable once the stream ends. `citations`
+        the same way again, from the "citations" event (docs/mvpRAG.md
+        v1.2 — previously a documented gap: streaming never surfaced
+        retrieval citations at all).
         """
 
         state = await self._build_state(conversation, stream=True)
@@ -338,6 +400,16 @@ class ChatService:
                 raw_response["additional_kwargs"] = event.get("additional_kwargs", {})
             elif event.get("type") == "usage":
                 usage.update(event.get("usage") or {})
+            elif event.get("type") == "citations":
+                citations.extend(
+                    {
+                        "document_id": str(citation.document_id),
+                        "chunk_id": str(citation.chunk_id),
+                        "chunk_index": citation.chunk_index,
+                        "score": citation.score,
+                    }
+                    for citation in event.get("citations") or []
+                )
             elif event.get("type") == "interrupt":
                 pending_approval["tool_calls"] = event.get("value", {}).get(
                     "tool_calls", []
@@ -350,6 +422,8 @@ class ChatService:
         raw_response: dict | None = None,
         usage: dict | None = None,
         latency_ms: int | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+        tool_results: list[dict[str, Any]] | None = None,
     ) -> Message:
         agent = await self._uow.agents.get(conversation.agent_id)
 
@@ -361,6 +435,8 @@ class ChatService:
             raw_response=raw_response,
             usage=usage,
             latency_ms=latency_ms,
+            tool_calls=tool_calls,
+            tool_results=tool_results,
         )
 
     async def _update_conversation(

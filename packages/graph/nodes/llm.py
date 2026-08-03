@@ -58,7 +58,7 @@ class LLMNode:
         )
 
         if state.get("stream"):
-            response = await self._stream(request)
+            response = await self._stream(request, state.get("citations") or [])
         else:
             response = await self._chat.chat(request)
 
@@ -70,7 +70,7 @@ class LLMNode:
 
         return state
 
-    async def _stream(self, request: ChatRequest):
+    async def _stream(self, request: ChatRequest, citations: list):
         """
         Streams the LLM response token-by-token, pushing each chunk to
         the graph's stream writer (surfaced over HTTP via
@@ -111,6 +111,21 @@ class LLMNode:
             {
                 "type": "usage",
                 "usage": getattr(final, "usage_metadata", None) or {},
+            }
+        )
+
+        # Same reasoning again, for citations (docs/mvpRAG.md v1.2 —
+        # previously a documented, deliberate gap: the streaming path
+        # never surfaced retrieval citations at all). `citations` was
+        # already computed by the retrieve node earlier in this same
+        # turn, before the LLM node ever ran — passed straight through
+        # as the raw Citation dataclasses; ChatService (the application
+        # layer, which already owns the Citation -> CitationDTO shaping
+        # for the non-streaming path) does the dict conversion.
+        writer(
+            {
+                "type": "citations",
+                "citations": citations,
             }
         )
 

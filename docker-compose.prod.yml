@@ -1,7 +1,27 @@
+# Production overrides. VERSION has no default on purpose — Compose's
+# `${VAR:?message}` syntax fails the whole `up` loudly if it's unset,
+# rather than silently falling back to a floating `latest` tag (the
+# previous default here), which makes a "which image is actually
+# running" question unanswerable after any redeploy and defeats
+# rollback. Deploy with `VERSION=1.4.2 docker compose -f
+# docker-compose.prod.yml up -d`.
+#
+# `deploy.resources` is honored by a plain `docker compose up` too,
+# not just Swarm mode — these are starting points based on what each
+# service actually does (api/worker both run LangGraph + LLM client
+# calls, not CPU-bound work; postgres/redis are the state layer), not
+# load-tested figures — tune against real traffic.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
 
   api:
-    image: easydev/ai-platform:${VERSION:-latest}
+    image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
 
     restart: always
 
@@ -18,11 +38,22 @@ services:
       redis:
         condition: service_healthy
 
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+
+    logging: *default-logging
+
     networks:
       - backend
 
   worker:
-    image: easydev/ai-platform:${VERSION:-latest}
+    image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
 
     command: python -m packages.worker.main
 
@@ -37,6 +68,17 @@ services:
 
       redis:
         condition: service_healthy
+
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+
+    logging: *default-logging
 
     networks:
       - backend
@@ -55,6 +97,17 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
 
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4g
+        reservations:
+          cpus: "0.5"
+          memory: 1g
+
+    logging: *default-logging
+
     networks:
       - backend
 
@@ -70,6 +123,17 @@ services:
 
     volumes:
       - redis-data:/data
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+        reservations:
+          cpus: "0.25"
+          memory: 256m
+
+    logging: *default-logging
 
     networks:
       - backend

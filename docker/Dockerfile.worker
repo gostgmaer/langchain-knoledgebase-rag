@@ -15,7 +15,13 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Installed from PyPI, not `COPY --from=ghcr.io/astral-sh/uv:latest` —
+# this environment's network reliably reaches Docker Hub and PyPI but
+# not ghcr.io (confirmed live: a plain `docker pull ghcr.io/...` fails
+# identically with `tls: bad record MAC`, while docker.io/pypi.org
+# pulls succeed), so routing uv's own install through ghcr.io was the
+# actual build blocker, not anything about this image.
+RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml uv.lock ./
 

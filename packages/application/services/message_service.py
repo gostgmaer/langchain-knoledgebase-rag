@@ -54,6 +54,8 @@ class MessageService:
         raw_response: dict[str, Any] | None = None,
         usage: dict[str, Any] | None = None,
         latency_ms: int | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+        tool_results: list[dict[str, Any]] | None = None,
     ) -> Message:
 
         message = Message(
@@ -61,6 +63,12 @@ class MessageService:
             role=MessageRole.ASSISTANT,
             content=content,
         )
+
+        if tool_calls:
+            message.tool_calls = {"calls": tool_calls}
+
+        if tool_results:
+            message.tool_results = {"results": tool_results}
 
         # LangChain's UsageMetadata shape: input_tokens/output_tokens/
         # total_tokens (+ non-numeric *_token_details sub-fields, not

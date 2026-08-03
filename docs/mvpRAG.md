@@ -266,6 +266,27 @@ Examples:
 - ✅ **Admin Dashboard** — an internal UI for managing tenants, knowledge bases, and reviewing feedback/flagged content.
 - ✅ **Analytics** — usage dashboards (queries per day, top failing queries, feedback trends).
 
+---
+
+🚀 Version 1.2 — "finish the foundation": not new product surface, but closing the two v1.0 phases that never actually reached done (Testing, Deployment) plus four real, already-diagnosed bugs sitting open in [`docs/BUILD_STATUS.md`](./BUILD_STATUS.md). Deliberately excludes new retrieval architecture (Self Query Retriever / Parent Document Retriever stay in Version 2.0, where they're already the cheapest opening items).
+
+### Testing
+- ✅ **Unit Tests** — real pytest coverage for pure logic with no external dependencies: the `merge_usage` LangGraph reducer (including its reset-on-`None` semantics — the exact bug class that caused today's token-overflow regression), the pricing calculator, chunkers/splitters, the circuit breaker's state machine, feature-flag cache invalidation.
+- ✅ **Integration Tests** — real DB/Redis interactions against the existing dev Postgres/Redis containers, each test wrapped in a transaction rolled back afterward (no new infra, no mocking the database).
+- ✅ **LangGraph Workflow Tests** — asserting real routing decisions (retrieve vs. tool vs. llm) and state transitions for representative inputs, not just "doesn't crash."
+- ✅ **API Tests** — FastAPI `TestClient` hitting real routes, asserting status codes and response shapes, replacing today's ad hoc `curl` verification with a repeatable suite.
+
+### Bug fixes
+- ✅ **Empty citations on a correct answer** — a plain RAG question sometimes returns `citations: []` even with a correct grounded response; reproduced once, never root-caused.
+- ✅ **Concurrent-request session error** — three genuinely simultaneous requests to the same conversation throw `sqlalchemy.exc.InvalidRequestError: Session is already flushing`, a real concurrency gap in the per-request session pattern.
+- ✅ **Message metadata never populated on a normal turn** — `Message.tool_calls`/other rich columns stay empty outside the separate `AIResponse` table, which captures the raw provider payload but isn't what the rest of the app reads.
+- ✅ **Citations don't flow through SSE streaming** — a deliberate deferral when citations first shipped; revisited now that they're load-bearing for RAG responses.
+
+### Deployment
+- ✅ **Docker image build** — currently blocked by a `tls: bad record MAC` registry-network fault in this dev environment (not a Dockerfile issue — confirmed identically against both `ghcr.io` and Docker Hub pulls).
+- ✅ **Docker Compose up** — has never been run successfully end to end; blocked on the same image-build issue.
+- ✅ **Production Configuration audit** — `docker-compose.prod.yml`, secrets handling, `.env.example` completeness, and logging verbosity per environment, reviewed without requiring a working build.
+
 🚀 Version 2.0
 ### Advanced Retrieval
 - ❌ **Parent Document Retriever** — retrieve small chunks for precision but return their parent document/section for full context.

@@ -75,3 +75,15 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.15.22",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: pure-logic tests with no external dependencies",
+    "integration: tests against a real Postgres/Redis, transaction-rolled-back",
+    "workflow: LangGraph routing/state-transition tests",
+    "api: FastAPI TestClient tests against real routes",
+    "live: hits a real external provider (LLM/etc) — costs money/quota, not run by default",
+]
+addopts = "-m 'not live'"
