@@ -107,31 +107,9 @@ services:
     networks:
       - ai-platform
 
-  pgadmin:
-    image: dpage/pgadmin4
-
-    env_file:
-      - .env
-
-    ports:
-      - "5050:80"
-    profiles: [full]
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-    volumes:
-      - pgadmin-data:/var/lib/pgadmin
-
-    restart: unless-stopped
-
-    networks:
-      - ai-platform
-
 volumes:
   postgres-data:
   redis-data:
-  pgadmin-data:
 
 networks:
   ai-platform:
