@@ -3,7 +3,6 @@ from __future__ import annotations
 from dependency_injector import containers, providers
 
 from packages.infrastructure.ai.manager import LLMManager
-from packages.infrastructure.ai.registry import LLMRegistry
 
 
 class AIContainer(
@@ -11,10 +10,6 @@ class AIContainer(
 ):
 
     settings = providers.DependenciesContainer()
-
-    registry = providers.Singleton(
-        LLMRegistry,
-    )
 
     manager = providers.Singleton(
         LLMManager,

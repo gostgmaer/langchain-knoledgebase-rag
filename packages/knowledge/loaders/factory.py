@@ -46,3 +46,13 @@ class LoaderFactory:
             raise UnsupportedDocumentError(extension)
 
         return loader()
+
+    @classmethod
+    def supported_extensions(cls) -> frozenset[str]:
+        """
+        The single source of truth for "can this file even be
+        ingested" — used by the upload route to reject an unsupported
+        extension before spending a real Upload Service round trip on
+        a file `create()` would just raise on anyway.
+        """
+        return frozenset(cls._loaders)

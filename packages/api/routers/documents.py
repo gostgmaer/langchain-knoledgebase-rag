@@ -29,6 +29,7 @@ from packages.domain.enums.document_status import DocumentStatus
 from packages.domain.models.upload_job import UploadJob
 from packages.infrastructure.container import ApplicationContainer
 from packages.knowledge.bootstrap import ensure_default_knowledge_base
+from packages.knowledge.loaders.factory import LoaderFactory
 from packages.knowledge.schemas import ChunkingStrategy, IngestionRequest
 from packages.sdk.common.exceptions import SDKException
 from packages.shared.logging import get_logger
@@ -71,7 +72,36 @@ async def upload_document(
     knowledge_base = await ensure_default_knowledge_base(tenant_id, knowledge_bases)
     model_profile = await ensure_default_model_profile(model_profiles)
 
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must have a filename.",
+        )
+
+    extension = Path(file.filename).suffix.lower()
+    if extension not in LoaderFactory.supported_extensions():
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=(
+                f"Unsupported file type '{extension or '(none)'}'. "
+                f"Supported: {', '.join(sorted(LoaderFactory.supported_extensions()))}."
+            ),
+        )
+
     content = await file.read()
+
+    # Checked after reading, not against file.size — Starlette's
+    # UploadFile.size isn't reliably populated for every upload
+    # transport (multipart streaming can leave it None), but the
+    # actual bytes read are always the real, correct length.
+    if len(content) > settings.storage.max_file_size:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"File is {len(content)} bytes, exceeding the "
+                f"{settings.storage.max_file_size}-byte limit."
+            ),
+        )
 
     upload_client = container.upload.client()
     try:
