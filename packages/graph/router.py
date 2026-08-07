@@ -19,11 +19,27 @@ class GraphRouter:
         plan = state["execution_plan"]
 
         if plan.has(Capability.RETRIEVAL):
-            print("[Router] Next node: retrieve")
-            return "retrieve"
+            # Supervisor always runs first whenever retrieval is
+            # needed, deciding whether this turn's question is
+            # genuinely multi-part before either path actually
+            # retrieves anything (Multi-Agent, docs/mvpRAG.md v2.0).
+            print("[Router] Next node: supervisor")
+            return "supervisor"
 
         print("[Router] Next node: llm")
         return "llm"
+
+    def route_after_supervisor(
+        self,
+        state: GraphState,
+    ) -> str:
+
+        if state.get("is_multi_part"):
+            print("[Router] Next node: researcher")
+            return "researcher"
+
+        print("[Router] Next node: retrieve")
+        return "retrieve"
 
     def after_llm(
         self,

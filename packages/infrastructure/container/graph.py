@@ -28,9 +28,18 @@ from packages.graph.nodes import GraphNodes
 from packages.graph.nodes.extract_memory import ExtractMemoryNode
 from packages.graph.nodes.llm import LLMNode
 from packages.graph.nodes.load_memory import LoadMemoryNode
+from packages.graph.nodes.researcher import ResearcherNode
 from packages.graph.nodes.retrieve import RetrieveNode
+from packages.graph.nodes.supervisor import SupervisorNode
 from packages.graph.nodes.tool import GraphToolNode
+from packages.graph.nodes.writer import WriterNode
 from packages.graph.router import GraphRouter
+from packages.graph.schemas import ResearchFinding
+from packages.graph.subgraphs.research import (
+    ResearchRetrieveNode,
+    ResearchSubgraphBuilder,
+    ResearchSynthesizeNode,
+)
 from packages.knowledge.schemas import Citation, SearchResult
 from packages.memory.schemas import MemoryFact, MemoryType
 from packages.planner.models import Capability, ExecutionPlan, ExecutionStep
@@ -66,6 +75,7 @@ _CHECKPOINT_SERDE = JsonPlusSerializer(
         Citation,
         MemoryFact,
         MemoryType,
+        ResearchFinding,
         ("asyncpg.pgproto.pgproto", "UUID"),
     ]
 )
@@ -252,6 +262,44 @@ class GraphContainer(containers.DeclarativeContainer):
         tool_manager=tools.manager,
     )
 
+    # Multi-Agent (docs/mvpRAG.md v2.0) — all Factory, matching this
+    # chain's existing, uniform rule (every node here is Factory,
+    # regardless of whether it individually touches a per-request
+    # session).
+
+    supervisor = providers.Factory(
+        SupervisorNode,
+        llm=ai.manager,
+    )
+
+    research_retrieve = providers.Factory(
+        ResearchRetrieveNode,
+        knowledge_manager=rag.knowledge_manager,
+        reranker=rag.reranker,
+    )
+
+    research_synthesize = providers.Factory(
+        ResearchSynthesizeNode,
+        llm=ai.manager,
+    )
+
+    research_subgraph_builder = providers.Factory(
+        ResearchSubgraphBuilder,
+        retrieve=research_retrieve,
+        synthesize=research_synthesize,
+    )
+
+    researcher = providers.Factory(
+        ResearcherNode,
+        research_subgraph_builder=research_subgraph_builder,
+    )
+
+    writer = providers.Factory(
+        WriterNode,
+        chat_service=services.chat,
+        prompt_builder=prompt_builder,
+    )
+
     # No longer wired into `nodes`/the compiled graph — it's constructed
     # directly by packages/api/routers/chat.py as a background task
     # after the response is sent, inside a fresh request-scoped session
@@ -270,6 +318,9 @@ class GraphContainer(containers.DeclarativeContainer):
         retrieve=retrieve,
         tool=tool,
         llm=llm,
+        supervisor=supervisor,
+        researcher=researcher,
+        writer=writer,
     )
 
     router = providers.Factory(

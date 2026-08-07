@@ -20,10 +20,16 @@ def _plan(*capabilities: Capability) -> ExecutionPlan:
     return ExecutionPlan(steps=[ExecutionStep(capability=c, reason="test") for c in capabilities])
 
 
-def test_route_sends_retrieval_plan_to_retrieve_node():
+def test_route_sends_retrieval_plan_to_supervisor_node():
+    """
+    Supervisor (Multi-Agent, docs/mvpRAG.md v2.0) always runs first
+    whenever the plan needs retrieval, deciding whether this turn's
+    question is genuinely multi-part before either path retrieves
+    anything.
+    """
     state = {"execution_plan": _plan(Capability.RETRIEVAL)}
 
-    assert router.route(state) == "retrieve"
+    assert router.route(state) == "supervisor"
 
 
 def test_route_sends_plain_llm_plan_to_llm_node():
@@ -38,10 +44,31 @@ def test_route_with_no_capabilities_falls_through_to_llm():
     assert router.route(state) == "llm"
 
 
-def test_route_prefers_retrieval_when_plan_has_both():
+def test_route_prefers_supervisor_when_plan_has_both():
     state = {"execution_plan": _plan(Capability.MEMORY, Capability.RETRIEVAL, Capability.LLM)}
 
-    assert router.route(state) == "retrieve"
+    assert router.route(state) == "supervisor"
+
+
+def test_route_after_supervisor_sends_multi_part_to_researcher():
+    state = {"is_multi_part": True}
+
+    assert router.route_after_supervisor(state) == "researcher"
+
+
+def test_route_after_supervisor_sends_non_multi_part_to_retrieve():
+    """
+    The unchanged, existing single-question path — this is where a
+    Supervisor decomposition failure or a genuine "no" decision lands,
+    byte-identical to the graph's behavior before Multi-Agent existed.
+    """
+    state = {"is_multi_part": False}
+
+    assert router.route_after_supervisor(state) == "retrieve"
+
+
+def test_route_after_supervisor_treats_missing_key_as_non_multi_part():
+    assert router.route_after_supervisor({}) == "retrieve"
 
 
 def test_after_llm_routes_to_tool_when_the_last_message_has_tool_calls():

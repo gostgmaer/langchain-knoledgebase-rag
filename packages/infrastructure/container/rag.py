@@ -6,6 +6,7 @@ from dependency_injector import containers, providers
 
 from packages.config.loader import settings as app_settings
 from packages.knowledge.embeddings.manager import EmbeddingManager
+from packages.knowledge.extraction.graph_extractor import GraphExtractor
 from packages.knowledge.loaders.manager import DocumentLoaderManager
 from packages.knowledge.manager import KnowledgeManager
 from packages.knowledge.pipelines.ingestion import IngestionPipeline
@@ -106,6 +107,13 @@ class RAGContainer(
         semantic_splitter=semantic_splitter,
     )
 
+    # Factory, not Singleton — cheap, stateless-per-instance LLM wrapper,
+    # same shape as query_analyzer's own provider entry (graph.py).
+    graph_extractor = providers.Factory(
+        GraphExtractor,
+        llm=ai.manager,
+    )
+
     # NOTE: ingestion_pipeline and knowledge_manager are Factory, not
     # Singleton, on purpose — ingestion_pipeline now depends on
     # repositories.document, which is itself Factory-wired onto a
@@ -114,7 +122,9 @@ class RAGContainer(
     # request_scoped_session). A Singleton here would be constructed
     # once, the first time anything touches it, permanently capturing
     # whatever session existed at that moment — the exact bug fixed
-    # earlier for the memory pipeline (see docs/CHANGELOG.md).
+    # earlier for the memory pipeline (see docs/CHANGELOG.md). The same
+    # rule is why repositories.entity/relationship are threaded in here
+    # too, not resolved once at startup.
 
     ingestion_pipeline = providers.Factory(
         IngestionPipeline,
@@ -128,6 +138,9 @@ class RAGContainer(
         model_profile_repository=repositories.model_profile,
         upload_client=upload.client,
         llm=ai.manager,
+        graph_extractor=graph_extractor,
+        entity_repository=repositories.entity,
+        relationship_repository=repositories.relationship,
     )
 
     # Lazy, not eager — constructed on first real use so that the
@@ -137,13 +150,27 @@ class RAGContainer(
         CrossEncoderReranker,
     )
 
-    retriever = providers.Singleton(
+    # Factory, not Singleton, as of Graph RAG (docs/mvpRAG.md v2.0) —
+    # RetrieverFactory.create() now always takes entity/relationship
+    # repositories (unused by every strategy except "graph_rag", same
+    # as `llm` is already unused by similarity/mmr/hybrid), which are
+    # themselves Factory-wired onto a per-request database session. A
+    # Singleton here would be constructed once, the first time anything
+    # touches it, permanently capturing whatever session existed at
+    # that moment — the exact bug already found and fixed twice in
+    # this codebase (memory pipeline, then ingestion pipeline). This
+    # changes every retrieval strategy to construct fresh per request
+    # instead of once at startup — cheap, stateless object
+    # construction, negligible overhead.
+    retriever = providers.Factory(
         RetrieverFactory.create,
         vector_store=vectorstore,
         llm=ai.manager,
+        entity_repository=repositories.entity,
+        relationship_repository=repositories.relationship,
     )
 
-    retriever_manager = providers.Singleton(
+    retriever_manager = providers.Factory(
         RetrieverManager,
         retriever=retriever,
     )

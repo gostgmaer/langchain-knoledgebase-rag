@@ -19,8 +19,11 @@ from packages.domain.models.embedding import Embedding
 from packages.infrastructure.ai.manager import LLMManager
 from packages.infrastructure.repositories.document import DocumentRepository
 from packages.infrastructure.repositories.document_version import DocumentVersionRepository
+from packages.infrastructure.repositories.entity import EntityRepository
 from packages.infrastructure.repositories.model_profile import ModelProfileRepository
+from packages.infrastructure.repositories.relationship import RelationshipRepository
 from packages.knowledge.embeddings.manager import EmbeddingManager
+from packages.knowledge.extraction.graph_extractor import GraphExtractor
 from packages.knowledge.loaders.manager import DocumentLoaderManager
 from packages.knowledge.processors.base import DocumentProcessor
 from packages.knowledge.schemas import IngestionRequest, IngestionResponse
@@ -67,6 +70,9 @@ class IngestionPipeline:
         model_profile_repository: ModelProfileRepository,
         upload_client: UploadClient,
         llm: LLMManager,
+        graph_extractor: GraphExtractor,
+        entity_repository: EntityRepository,
+        relationship_repository: RelationshipRepository,
     ) -> None:
         self.loader = loader
         self.transformer = transformer
@@ -78,6 +84,9 @@ class IngestionPipeline:
         self.model_profile_repository = model_profile_repository
         self.upload_client = upload_client
         self.llm = llm
+        self.graph_extractor = graph_extractor
+        self.entity_repository = entity_repository
+        self.relationship_repository = relationship_repository
 
     # ============================================================
     # Public
@@ -139,6 +148,12 @@ class IngestionPipeline:
             await self.vector_store.store.add_many(embeddings)
 
             await self._store_summary_representation(
+                chunked_documents,
+                request,
+                document.id,
+            )
+
+            await self._store_graph_representation(
                 chunked_documents,
                 request,
                 document.id,
@@ -532,3 +547,76 @@ class IngestionPipeline:
         # re-implemented, since a naive str(content) would literally
         # stringify the raw block list into the summary text.
         return normalize_message_content(response.content)
+
+    async def _store_graph_representation(
+        self,
+        chunked_documents: list[LangChainDocument],
+        request: IngestionRequest,
+        document_id: UUID,
+    ) -> None:
+        """
+        Knowledge Graph, v1 scope (docs/mvpRAG.md v2.0): one extraction
+        call per *document* (same cost-bounding precedent as
+        `_store_summary_representation`), storing extracted entities/
+        relationships as real Postgres rows (packages/domain/models/
+        entity.py, relationship.py, entity_mention.py) — not another
+        Chroma representation, since GraphRAGRetriever needs real
+        traversal (1-hop neighbor lookups), not similarity search.
+
+        Deliberately non-fatal, same shape as the summary
+        representation above: a failure here degrades to "no graph
+        representation for this document" rather than failing
+        ingestion, since the primary chunks are already stored by the
+        time this runs.
+        """
+
+        if not chunked_documents:
+            return
+
+        try:
+            extraction = await self.graph_extractor.extract(chunked_documents)
+
+            if not extraction.entities:
+                return
+
+            name_to_id: dict[str, UUID] = {}
+
+            for extracted in extraction.entities:
+                entity = await self.entity_repository.get_or_create(
+                    tenant_id=request.tenant_id,
+                    name=extracted.name,
+                    entity_type=extracted.entity_type,
+                    description=extracted.description,
+                )
+                name_to_id[extracted.name.strip().lower()] = entity.id
+                await self.entity_repository.add_mention(
+                    entity.id,
+                    document_id,
+                    request.tenant_id,
+                )
+
+            for rel in extraction.relationships:
+                source_id = name_to_id.get(rel.source.strip().lower())
+                target_id = name_to_id.get(rel.target.strip().lower())
+
+                # The LLM referenced an entity outside its own list, or
+                # produced a self-loop — skip rather than fabricate an
+                # edge to a nonexistent entity.
+                if source_id is None or target_id is None or source_id == target_id:
+                    continue
+
+                await self.relationship_repository.get_or_create(
+                    tenant_id=request.tenant_id,
+                    source_entity_id=source_id,
+                    target_entity_id=target_id,
+                    relationship_type=rel.relationship_type,
+                    description=rel.description,
+                    document_id=document_id,
+                )
+
+        except Exception as exc:
+            logger.warning(
+                "Could not extract/store knowledge graph representation",
+                document_id=str(document_id),
+                error=str(exc),
+            )

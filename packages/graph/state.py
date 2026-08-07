@@ -7,6 +7,7 @@ from uuid import UUID
 from langgraph.graph.message import AnyMessage, add_messages
 from typing_extensions import TypedDict
 
+from packages.graph.schemas import ResearchFinding
 from packages.knowledge.schemas import Citation, SearchResult
 from packages.memory.schemas import MemoryFact
 from packages.planner.models import ExecutionPlan
@@ -91,6 +92,16 @@ class GraphState(TypedDict, total=False):
     citations: list[Citation]
     rewritten_query: str | None
     expanded_queries: list[str]
+
+    #
+    # Multi-Agent (docs/mvpRAG.md v2.0) — SupervisorNode/ResearcherNode/
+    # WriterNode. Plain overwrite, no reducer needed: at most one write
+    # per field per turn.
+    #
+
+    is_multi_part: bool
+    sub_questions: list[str]
+    research_findings: list[ResearchFinding]
 
     #
     # Tools

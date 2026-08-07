@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from packages.config.loader import settings
 from packages.infrastructure.ai.manager import LLMManager
+from packages.infrastructure.repositories.entity import EntityRepository
+from packages.infrastructure.repositories.relationship import RelationshipRepository
 from packages.knowledge.retrievers.base import BaseRetriever
+from packages.knowledge.retrievers.providers.graph_rag import GraphRAGRetriever
 from packages.knowledge.retrievers.providers.hybrid import HybridRetriever
 from packages.knowledge.retrievers.providers.mmr import MMRRetriever
 from packages.knowledge.retrievers.providers.multi_vector import (
@@ -27,6 +30,8 @@ class RetrieverFactory:
     def create(
         vector_store: VectorStoreManager,
         llm: LLMManager,
+        entity_repository: EntityRepository,
+        relationship_repository: RelationshipRepository,
     ) -> BaseRetriever:
 
         strategy = settings.rag.retrieval_strategy.lower()
@@ -61,6 +66,18 @@ class RetrieverFactory:
             # content before it reaches the LLM/citations
             # (docs/mvpRAG.md v2.0).
             return MultiVectorRetriever(HybridRetriever(vector_store), vector_store)
+
+        if strategy == "graph_rag":
+            # Same composition pattern — hybrid search expanded with a
+            # 1-hop knowledge-graph traversal (Advanced Retrieval's
+            # Graph RAG, docs/mvpRAG.md v2.0), resolving neighboring
+            # entities' documents back to real chunk content.
+            return GraphRAGRetriever(
+                HybridRetriever(vector_store),
+                vector_store,
+                entity_repository,
+                relationship_repository,
+            )
 
         raise ValueError(
             f"Unknown retrieval strategy: {strategy}"

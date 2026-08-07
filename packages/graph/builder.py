@@ -96,16 +96,32 @@ class GraphBuilder:
       ┌───────────┐
       │           │
       ▼           ▼
-   retrieve      llm
+   supervisor    llm
       │           │
-      └─────►─────┘
-                │
-          tool calls?
-           │        │
-           ▼        ▼
-         tool       END
-           │
-           └──► llm
+   multi-part?    │
+   │        │     │
+   ▼        ▼     │
+researcher retrieve
+   │        │     │
+   ▼        └──►──┘
+ writer         │
+   │       tool calls?
+   │        │        │
+   │        ▼        ▼
+   │      tool       END
+   │        │
+   │        └──► llm
+   │
+   └──► END
+
+    Supervisor always runs first whenever the plan needs retrieval,
+    deciding whether this turn's question is genuinely multi-part
+    (Multi-Agent, docs/mvpRAG.md v2.0) — a decomposition failure or a
+    "no" decision falls straight through to `retrieve`, the same
+    single-question path that existed before this feature, byte-
+    identical. Only a genuinely multi-part question reaches
+    `researcher`/`writer`, which never touch `tool` — synthesis over
+    already-gathered findings, not a fresh tool-calling turn.
 
     `planner` and `load_memory` used to run sequentially even though
     neither depends on the other's output — `load_memory` only reads
@@ -153,6 +169,9 @@ class GraphBuilder:
         graph.add_node("retrieve", _instrumented("retrieve", self._nodes.retrieve))
         graph.add_node("tool", _instrumented("tool", self._nodes.tool))
         graph.add_node("llm", _instrumented("llm", self._nodes.llm))
+        graph.add_node("supervisor", _instrumented("supervisor", self._nodes.supervisor))
+        graph.add_node("researcher", _instrumented("researcher", self._nodes.researcher))
+        graph.add_node("writer", _instrumented("writer", self._nodes.writer))
 
         #
         # Entry — fan out to planner and load_memory concurrently,
@@ -174,11 +193,30 @@ class GraphBuilder:
             "join",
             self._router.route,
             {
-                "retrieve": "retrieve",
+                "supervisor": "supervisor",
                 "tool": "tool",
                 "llm": "llm",
             },
         )
+
+        #
+        # Multi-Agent — Supervisor decides whether this turn's question
+        # is genuinely multi-part before either path retrieves anything.
+        # A "no"/fail-open decision routes to the exact same `retrieve`
+        # node the single-question path always used.
+        #
+
+        graph.add_conditional_edges(
+            "supervisor",
+            self._router.route_after_supervisor,
+            {
+                "researcher": "researcher",
+                "retrieve": "retrieve",
+            },
+        )
+
+        graph.add_edge("researcher", "writer")
+        graph.add_edge("writer", END)
 
         #
         # Retrieval

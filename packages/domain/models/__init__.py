@@ -9,6 +9,8 @@ from .document import Document
 from .document_chunk import DocumentChunk
 from .document_version import DocumentVersion
 from .embedding import Embedding
+from .entity import Entity
+from .entity_mention import EntityMention
 from .feature_flag import FeatureFlag
 from .feedback import Feedback
 from .knowledge_base import KnowledgeBase
@@ -18,6 +20,7 @@ from .message_citation import MessageCitation
 from .model_profile import ModelProfile
 from .prompt import Prompt
 from .prompt_version import PromptVersion
+from .relationship import Relationship
 from .tool import Tool
 from .upload_job import UploadJob
 
@@ -33,6 +36,8 @@ __all__ = [
     "DocumentChunk",
     "DocumentVersion",
     "Embedding",
+    "Entity",
+    "EntityMention",
     "FeatureFlag",
     "Feedback",
     "KnowledgeBase",
@@ -42,6 +47,7 @@ __all__ = [
     "ModelProfile",
     "Prompt",
     "PromptVersion",
+    "Relationship",
     "Tool",
     "UploadJob",
 ]
