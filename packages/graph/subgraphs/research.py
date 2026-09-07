@@ -31,7 +31,10 @@ from typing_extensions import TypedDict
 from packages.config.loader import settings
 from packages.infrastructure.ai.manager import LLMManager
 from packages.knowledge.manager import KnowledgeManager
-from packages.knowledge.reranking.cross_encoder import CrossEncoderReranker
+from packages.knowledge.reranking.cross_encoder import (
+    CrossEncoderReranker,
+    apply_relevance_floor,
+)
 from packages.knowledge.schemas import Citation
 from packages.knowledge.vectorstores.schema import SearchFilter, SearchOptions
 from packages.shared.messages import normalize_message_content
@@ -81,8 +84,7 @@ class ResearchRetrieveNode:
         top_k = settings.rag.max_results
         reranked = await self._reranker.rerank(query, results, top_k=top_k)
 
-        min_score = settings.rag.min_relevance_score
-        reranked = [result for result in reranked if result.score >= min_score]
+        reranked = apply_relevance_floor(reranked, settings.rag.min_relevance_score)
 
         state["context"] = [result.chunk.content for result in reranked]
         state["citations"] = [

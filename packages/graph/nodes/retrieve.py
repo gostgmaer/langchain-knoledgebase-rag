@@ -9,7 +9,10 @@ import asyncio
 from packages.config.loader import settings
 from packages.graph.state import GraphState
 from packages.knowledge.manager import KnowledgeManager
-from packages.knowledge.reranking.cross_encoder import CrossEncoderReranker
+from packages.knowledge.reranking.cross_encoder import (
+    CrossEncoderReranker,
+    apply_relevance_floor,
+)
 from packages.knowledge.schemas import Citation
 from packages.knowledge.schemas import SearchResult as FlatSearchResult
 from packages.knowledge.vectorstores.schema import SearchFilter, SearchOptions
@@ -89,12 +92,7 @@ class RetrieveNode:
             top_k=top_k,
         )
 
-        # Cross-encoder scores are unbounded, not probabilities — with a
-        # small candidate pool, "best of what's available" can still be a
-        # confidently irrelevant match. Drop anything below the relevance
-        # floor rather than surface it as if it answered the question.
-        min_score = settings.rag.min_relevance_score
-        reranked = [result for result in reranked if result.score >= min_score]
+        reranked = apply_relevance_floor(reranked, settings.rag.min_relevance_score)
 
         state["context"] = [result.chunk.content for result in reranked]
 

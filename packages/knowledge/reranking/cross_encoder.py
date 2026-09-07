@@ -74,3 +74,46 @@ class CrossEncoderReranker:
             SearchResult(chunk=result.chunk, score=float(score))
             for score, result in ranked[:top_k]
         ]
+
+
+def apply_relevance_floor(
+    reranked: list[SearchResult],
+    min_score: float,
+) -> list[SearchResult]:
+    """
+    Drops reranked candidates scoring below `min_score` — except the
+    single best-ranked one, which is always kept when the pool is
+    non-empty.
+
+    Why not filter every candidate uniformly (the original
+    implementation): this cross-encoder's raw logits are unbounded and
+    don't reliably separate "irrelevant" from "relevant but
+    vaguely/pronoun-phrased" — empirically confirmed live, e.g. a real
+    follow-up like "is it safe?" scored -8.25 against its genuinely
+    correct chunk, in the same band as clearly off-topic pairs (-8 to
+    -11). A uniform floor at the default 0.0 can therefore silently
+    empty `citations`/`context` on a turn where retrieval genuinely
+    found the right answer, simply because this specific model scored
+    a vague query harshly — the exact, previously-unreproduced "correct
+    answer, empty citations" bug (docs/BUILD_STATUS.md), now root-
+    caused: it fires whenever query rewriting doesn't produce a
+    specific standalone query (analyzer failure, or an inherently vague
+    follow-up) for a retrieval-routed turn.
+
+    Always keeping the top-1 result trades away one narrower case (a
+    single, confidently *irrelevant* best-of-a-bad-pool match still
+    surfaces as a low-score citation) for a strictly worse one this
+    trade avoids (a real, correct citation vanishing with no trace) —
+    the roadmap's own Phase 9 acceptance bar treats answers that can't
+    be traced back to a source as the harder failure. The floor still
+    prunes weaker stragglers ranked below the top result, which is
+    where it was actually protecting against noise in a larger
+    candidate pool.
+    """
+
+    if not reranked:
+        return []
+
+    return reranked[:1] + [
+        result for result in reranked[1:] if result.score >= min_score
+    ]
