@@ -88,9 +88,20 @@ async def lifespan(app: FastAPI):
         )
 
     try:
-        # Rendering uses the remote mermaid.ink API — never block startup on it.
+        # Rendering uses the remote mermaid.ink API — never block startup
+        # on it. That comment was only half-true before: save_png() is a
+        # synchronous call with no timeout of its own, made directly on
+        # the event loop, so a slow/hanging mermaid.ink response (not
+        # just a fast connection-refused) blocked startup indefinitely —
+        # confirmed live, the health check never went healthy while this
+        # sat waiting. asyncio.to_thread + wait_for gives it a real,
+        # enforced ceiling so the "never block startup" intent is
+        # actually true now, not just documented.
         builder = container.graph.builder()
-        GraphVisualizer.save_png(builder.build())
+        await asyncio.wait_for(
+            asyncio.to_thread(GraphVisualizer.save_png, builder.build()),
+            timeout=10,
+        )
     except Exception as exc:
         logger.warning("Could not render graph.png: %s", exc)
 

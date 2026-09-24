@@ -64,6 +64,12 @@ dependencies = [
     "structlog>=26.1.0",
     "tenacity>=9.1.4",
     "uvicorn[standard]>=0.51.0",
+    # Listed explicitly (not just pulled in transitively by
+    # sentence-transformers) so [tool.uv.sources]'s CPU-only index
+    # below actually takes effect — uv only applies a source override
+    # to packages that appear as a direct dependency somewhere in the
+    # workspace, not to purely transitive ones.
+    "torch>=2.9.0",
 ]
 
 [dependency-groups]
@@ -75,6 +81,21 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.15.22",
 ]
+
+# sentence-transformers (the reranker's cross-encoder, packages/knowledge/
+# reranking/cross_encoder.py) pulls in torch as a transitive dependency
+# with no pin of its own — on Linux, the default PyPI torch wheel is the
+# CUDA build, which drags in ~10 separate nvidia-* runtime packages
+# (several GB combined). This container has no GPU and never will, so
+# force the CPU-only wheel instead: cut a real `docker build` from
+# downloading gigabytes of unused CUDA runtime on every build.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

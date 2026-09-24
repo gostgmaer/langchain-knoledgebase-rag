@@ -156,7 +156,26 @@ class PostgresVectorStore(BaseVectorStore):
     async def add(
         self,
         embedding: Embedding,
+        *,
+        representation_type: str | None = None,
     ) -> None:
+        """
+        `representation_type` mirrors ChromaVectorStore.add()'s own
+        parameter (Multi Vector Retriever, docs/mvpRAG.md v2.0) — but
+        unlike Chroma, which has to duplicate it into a separate flat
+        metadata dict, here it's just written onto the real
+        `DocumentChunk.metadata_` column the chunk is about to be
+        persisted with. MultiVectorRetriever reads it back via
+        `chunk.metadata_.get("representation_type")` either way, so
+        both backends satisfy the same contract from the retriever's
+        point of view.
+        """
+
+        if representation_type is not None and embedding.chunk is not None:
+            embedding.chunk.metadata_ = {
+                **embedding.chunk.metadata_,
+                "representation_type": representation_type,
+            }
 
         self.session.add(embedding)
         await self.session.flush()

@@ -9,7 +9,13 @@ services:
       - .env
     profiles: [full]
     ports:
-      - "8000:8000"
+      # Host-side only — moved off the default 8000 because the
+      # unrelated easydev-infra "ai-platform" stack (a different
+      # project, Backend/multi-tennet-ai-agent) also publishes
+      # 8000:8000 for its own ai-workflow-api locally. The app still
+      # binds 8000 *inside* this container (HOST/PORT in .env), so
+      # nothing internal changes.
+      - "8088:8000"
 
     volumes:
       - .:/app
@@ -57,7 +63,12 @@ services:
       - .env
     profiles: [full, data]
     ports:
-      - "5432:5432"
+      # Host-side only — the api/worker containers reach this over the
+      # ai-platform network by service name (postgres:5432, unaffected
+      # by this remap). Moved off the default 5432 because EasyDev's
+      # own core-postgres (easydev-infra/stacks/core) also publishes
+      # 5432:5432 for local dev; both are meant to run side by side.
+      - "5442:5432"
 
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -77,7 +88,10 @@ services:
     image: redis:7-alpine
 
     ports:
-      - "6379:6379"
+      # Same rationale as postgres above — EasyDev's core-redis also
+      # publishes 6379:6379 locally; the api/worker containers still
+      # reach this one internally as redis:6379.
+      - "6389:6379"
 
     volumes:
       - redis-data:/data

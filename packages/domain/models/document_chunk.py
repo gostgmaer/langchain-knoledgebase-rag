@@ -36,8 +36,19 @@ class DocumentChunk(BaseModel):
             "chunk_index",
             name="uq_document_chunk_index",
         ),
+        # -1 is a real, documented sentinel value, not a data error —
+        # IngestionPipeline._store_summary_representation() (Multi
+        # Vector Retriever, docs/mvpRAG.md v2.0) uses chunk_index=-1 for
+        # a document's synthetic summary chunk, deliberately out of band
+        # from real chunks (0, 1, 2, ...). Confirmed live: this
+        # constraint predates that feature and was never updated for it
+        # — inert under the Chroma backend (which never wrote summary
+        # chunks into this table at all), but a real, immediate
+        # CheckViolationError against a Postgres-backed vector store
+        # (packages/knowledge/vectorstores/providers/pgvector.py),
+        # where the DocumentChunk row genuinely gets persisted here.
         CheckConstraint(
-            "chunk_index >= 0",
+            "chunk_index >= -1",
             name="ck_chunk_index_positive",
         ),
     )

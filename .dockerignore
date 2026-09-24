@@ -64,8 +64,17 @@ tests/
 *.sqlite3
 /data
 
-# Node (if any frontend exists later)
+# Node / frontend — a separate Next.js app (frontend/) the backend
+# Dockerfiles never reference at all; without this, the build context
+# was pulling in frontend/.next (~2.9GB build cache) and
+# frontend/node_modules (~550MB) on every build for zero reason.
 node_modules/
+frontend/
+
+# Local Chroma data and Chroma/graph render artifacts — dev-only,
+# irrelevant to the built image.
+.chroma_data/
+graph.png
 
 # Temporary Files
 tmp/

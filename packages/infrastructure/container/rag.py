@@ -20,6 +20,7 @@ from packages.knowledge.splitters.recursive import RecursiveDocumentSplitter
 from packages.knowledge.splitters.semantic import SemanticDocumentSplitter
 from packages.knowledge.vectorstores.manager import VectorStoreManager
 from packages.knowledge.vectorstores.providers.chroma import ChromaVectorStore
+from packages.knowledge.vectorstores.providers.pgvector import PostgresVectorStore
 
 
 def _build_chroma_client() -> chromadb.ClientAPI:
@@ -64,17 +65,52 @@ class RAGContainer(
         EmbeddingManager,
     )
 
+    # Only actually built when settings.rag.vector_store_backend == "chroma"
+    # — dependency_injector still constructs every branch's dependency
+    # graph eagerly if it's a Singleton touched anywhere, but this one is
+    # lazy (nothing resolves chroma_client at all on the pgvector path,
+    # since vectorstore_backend below never selects it), so no chroma
+    # connection is attempted unless Chroma is the configured backend.
     chroma_client = providers.Singleton(
         _build_chroma_client,
     )
 
-    vectorstore_backend = providers.Singleton(
-        ChromaVectorStore,
-        client=chroma_client,
-        collection_name=app_settings.rag.vector_collection_name,
+    # settings.rag.vector_store_backend picks the real implementation —
+    # previously a dead config field, ChromaVectorStore was hardcoded
+    # regardless of its value. "pgvector" reuses the Postgres this app
+    # already runs (packages/knowledge/vectorstores/providers/pgvector.py,
+    # a genuinely complete BaseVectorStore implementation, not a stub) —
+    # one less moving part than standing up a dedicated Chroma server.
+    # Known trade-off, not hidden: settings.embedding.dimensions (3072)
+    # exceeds pgvector's HNSW/IVFFlat 2000-dimension index ceiling (see
+    # packages/domain/models/embedding.py's own docstring), so similarity
+    # search here is an unindexed, brute-force ORDER BY — fine at small
+    # scale, not for a large corpus without also revisiting the embedding
+    # dimension or pgvector's index options.
+    #
+    # Both branches are Factory, not Singleton, deliberately: pgvector's
+    # PostgresVectorStore needs a fresh per-request session
+    # (repositories.session, itself Factory-wired onto a per-request
+    # connection — see repositories.py) — a Singleton here would capture
+    # the first request's session forever, the exact DI-lifetime bug this
+    # codebase has already hit twice (memory pipeline, ingestion
+    # pipeline). Chroma's client-based backend doesn't need this, but is
+    # kept Factory too so switching backends is just a config change, not
+    # a lifetime rule to remember.
+    vectorstore_backend = providers.Selector(
+        providers.Callable(lambda: app_settings.rag.vector_store_backend),
+        chroma=providers.Factory(
+            ChromaVectorStore,
+            client=chroma_client,
+            collection_name=app_settings.rag.vector_collection_name,
+        ),
+        pgvector=providers.Factory(
+            PostgresVectorStore,
+            session=repositories.session,
+        ),
     )
 
-    vectorstore = providers.Singleton(
+    vectorstore = providers.Factory(
         VectorStoreManager,
         store=vectorstore_backend,
     )
