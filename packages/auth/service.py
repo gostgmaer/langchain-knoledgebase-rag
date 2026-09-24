@@ -31,14 +31,26 @@ class AuthService:
     async def resolve(
         self,
         access_token: str | None,
+        *,
+        fail_open: bool = True,
     ) -> CurrentUser | None:
+        """With fail_open=False an unreachable IAM raises httpx.HTTPError
+        (so the caller can answer 503) instead of being treated as "no user"."""
 
         if not access_token:
             return None
 
         try:
             return await self._client.auth.get_current_user(access_token)
-        except (SDKException, httpx.HTTPError) as exc:
+        except httpx.HTTPError as exc:
+            if not fail_open:
+                raise
+            logger.warning(
+                "IAM auth failed, falling back to default identity",
+                error=str(exc),
+            )
+            return None
+        except SDKException as exc:
             logger.warning(
                 "IAM auth failed, falling back to default identity",
                 error=str(exc),

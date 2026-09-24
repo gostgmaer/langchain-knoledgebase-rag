@@ -9,6 +9,7 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from packages.config.loader import settings
 from packages.conversation.manager import ConversationManager
 from packages.graph.manager import GraphManager
 from packages.infrastructure.ai.manager import LLMManager
@@ -119,6 +120,15 @@ def require_uuid_header(
     header: str,
     default: UUID | None = None,
 ) -> UUID:
+    # A verified IAM identity is authoritative: the client-supplied
+    # tenant/user headers must never be able to override it (spoofing).
+    verified = getattr(request.state, "current_user", None)
+    if verified is not None:
+        if header.lower() == "x-tenant-id":
+            return verified.tenant_id
+        if header.lower() == "x-user-id":
+            return verified.id
+
     raw = request.headers.get(header)
     if not raw:
         if default is not None:
@@ -207,6 +217,35 @@ def require_permission(code: str):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing required permission: {code}",
+            )
+
+    return _check
+
+
+def require_admin():
+    """
+    Admin-only guard for mutating configuration routes. Active whenever
+    AUTH_REQUIRED is on (independent of the enable_rbac flag); a no-op
+    otherwise so the legacy anonymous dev flow keeps working. Any role in
+    ADMIN_ROLES qualifies.
+    """
+
+    async def _check(
+        current_user: CurrentUser | None = Depends(get_current_user),
+    ) -> None:
+        if not settings.api.auth_required:
+            return
+
+        if current_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required.",
+            )
+
+        if not set(current_user.roles) & set(settings.api.admin_roles):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Administrator role required.",
             )
 
     return _check

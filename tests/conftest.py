@@ -1,6 +1,31 @@
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
+from pathlib import Path
+
+# Must run before any packages.* import: pydantic-settings lets real environment
+# variables win over .env.
+#
+# 1. API tests exercise routes anonymously; a developer's .env with
+#    AUTH_REQUIRED=true must not turn them all into 401s.
+os.environ["AUTH_REQUIRED"] = "false"
+
+# 2. .env points at the compose service names (postgres / redis), which only
+#    resolve inside the compose network. When the suite runs on the host,
+#    use the ports docker-compose.yml publishes instead.
+if not Path("/.dockerenv").exists():
+    for _var, _host, _published in (
+        ("DATABASE_URL", "@postgres:5432", "@localhost:5442"),
+        ("REDIS_URL", "//redis:6379", "//localhost:6389"),
+    ):
+        _value = os.environ.get(_var)
+        if _value is None:
+            for _line in Path(".env").read_text().splitlines() if Path(".env").exists() else []:
+                if _line.startswith(f"{_var}="):
+                    _value = _line.split("=", 1)[1].split("#", 1)[0].strip()
+        if _value and _host in _value:
+            os.environ[_var] = _value.replace(_host, _published)
 
 import pytest_asyncio
 from dependency_injector import providers

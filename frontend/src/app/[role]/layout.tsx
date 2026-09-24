@@ -12,6 +12,7 @@ import {
   MessageSquare,
   MessagesSquare,
   ScrollText,
+  Settings,
   Search,
   ShieldCheck,
   UploadCloud,
@@ -33,7 +34,10 @@ import { SLUG_TO_ROLE, type Role } from "@/lib/session";
  * derives basePath from the `role` URL segment it's already given.
  */
 const NAV_BY_ROLE: Record<Role, NavItem[]> = {
-  customer: [{ href: "/customer/chat", label: "Chat", icon: MessageSquare }],
+  customer: [
+    { href: "/customer/chat", label: "Chat", icon: MessageSquare },
+    { href: "/customer/settings", label: "Settings", icon: Settings },
+  ],
   tenant_admin: [
     { href: "/tenant-admin", label: "Dashboard", icon: LayoutDashboard },
     { href: "/tenant-admin/chat", label: "Chat", icon: MessageSquare },
@@ -49,6 +53,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/tenant-admin/upload-jobs", label: "Upload Jobs", icon: UploadCloud },
     { href: "/tenant-admin/analytics", label: "Analytics", icon: BarChart3 },
     { href: "/tenant-admin/usage", label: "Usage", icon: Gauge },
+    { href: "/tenant-admin/settings", label: "Settings", icon: Settings },
   ],
   admin: [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -67,6 +72,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
     { href: "/admin/usage", label: "Usage", icon: Gauge },
     { href: "/admin/feature-flags", label: "Feature Flags", icon: Flag },
+    { href: "/admin/settings", label: "Settings", icon: Settings },
   ],
 };
 

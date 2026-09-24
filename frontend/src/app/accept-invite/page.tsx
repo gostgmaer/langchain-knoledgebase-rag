@@ -61,6 +61,9 @@ function AcceptInvite() {
         } catch {
           // ignore
         }
+        // The session's tenant is baked into the access token, so it can't
+        // see the new membership until a fresh sign-in mints a new one.
+        await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
         setResult({ ok: true });
       })
       .catch((err) => {
@@ -115,11 +118,11 @@ function AcceptInvite() {
             {view === "accepted" && (
               <>
                 <p className="text-green-700 dark:text-green-400">
-                  You&apos;ve joined the workspace. Sign out and back in (or switch workspace) if it
-                  doesn&apos;t appear straight away.
+                  You&apos;ve joined the workspace. For security we&apos;ve signed you out - sign in again
+                  to enter it.
                 </p>
                 <Link href="/" className={cn(buttonVariants({ size: "lg" }))}>
-                  Continue
+                  Sign in
                 </Link>
               </>
             )}

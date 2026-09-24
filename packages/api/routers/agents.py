@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
     get_scoped_container,
+    require_admin,
     require_uuid_header,
 )
 from packages.api.responses import ApiResponse
@@ -36,6 +37,7 @@ def _slugify(name: str) -> str:
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=ApiResponse[AgentResponseSchema],
+    dependencies=[Depends(require_admin())],
     summary="Create an agent",
     description="Creates a new agent for the calling tenant, referencing an existing model profile.",
 )

@@ -36,6 +36,25 @@ class APISettings(BaseSettings):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
+    # Real IAM enforcement. Off (default): the legacy fail-open behaviour -
+    # anonymous callers get the default tenant, a rejected token is ignored.
+    # On: every route except the public ones (health, docs, token refresh)
+    # needs a valid IAM bearer token, a rejected token is a 401, an
+    # unreachable IAM is a 503, and admin-only routes check the caller's roles.
+    auth_required: bool = Field(default=False, alias="AUTH_REQUIRED")
+
+    admin_roles: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["super_admin", "admin", "tenant_admin"],
+        alias="ADMIN_ROLES",
+    )
+
+    @field_validator("admin_roles", mode="before")
+    @classmethod
+    def _split_roles(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [role.strip() for role in value.split(",") if role.strip()]
+        return value
+
     # Production hardening's own "Rate limiting" gap — see
     # packages/api/middleware/rate_limit.py. Per-tenant (or per-IP
     # fallback) sliding window, requests per 60s. Default is generous

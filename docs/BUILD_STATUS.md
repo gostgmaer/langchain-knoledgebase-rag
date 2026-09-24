@@ -2,6 +2,18 @@
 
 Verified against [`docs/mvpRAG.md`](./mvpRAG.md) — that file is the **target roadmap** (what's in scope for v1.0/v1.1/v2.0 and why); this file is the **reality check** (what's actually built, working, broken, or missing right now). Read them as a pair: mvpRAG.md's ✅ marks mean "in v1.0 scope," not "done" — this document is where "done" gets verified.
 
+## IAM enforcement on the RAG API, connected-accounts screen, last-provider unlink guard
+
+- **`AUTH_REQUIRED` (default `false`, `.env.example`; on in the local `.env`)** - when on, every route except `/api/v1/health*`, `/api/v1/auth/refresh`, docs and CORS preflight needs a valid IAM bearer token: no token -> 401, rejected token -> 401, IAM unreachable -> 503 (`packages/api/middleware/authentication.py`). Off keeps the old fail-open/default-tenant behaviour so existing dev flows do not break.
+- **Tenant/user spoofing closed** - `require_uuid_header` (used by every router) now returns the verified IAM identity's tenant/user for `X-Tenant-ID`/`X-User-ID` whenever a token was verified; the headers are only honoured without one. Verified live: a valid token plus a spoofed tenant header stores the row under the token's real tenant.
+- **Admin-only create routes** - `POST /agents`, `/tool-definitions`, `/prompts` use `require_admin()` (roles from `ADMIN_ROLES`, default `super_admin,admin,tenant_admin`); a `member` gets 403. Active only with `AUTH_REQUIRED`.
+- **Frontend** - the browser now calls the RAG API through a same-origin proxy (`frontend/src/app/api/rag/[...path]/route.ts`) that attaches the token from the httpOnly cookie (refreshing it when near expiry) and streams responses through (SSE chat, uploads). Server env `RAG_API_URL` replaces `NEXT_PUBLIC_API_BASE_URL`.
+- **Settings -> Connected accounts** (`/[role]/settings`) - lists Google/Microsoft/Facebook, Connect (IAM link-token flow, works for providers not trusted for auto-link such as multi-tenant Microsoft) and Disconnect. IAM's post-link redirect lands on `/dashboard/settings`, which forwards to the role's settings page.
+- **IAM** - `unlinkSocialAccount` refuses to remove the last sign-in method of a user with no password (tests added; image rebuilt locally).
+- **Invite acceptance** now signs the user out and asks them to sign in again, since the tenant is baked into the access token.
+- **Tests** - `tests/conftest.py` forces `AUTH_REQUIRED=false` and, on the host, maps the compose hostnames in `DATABASE_URL`/`REDIS_URL` to the published ports, so the integration suite runs against the compose Postgres/Redis.
+- **Still unverified** - real Google/Microsoft/Facebook logins (need OAuth credentials).
+
 ## Post-roadmap cleanup pass — the `trace_id` correlation gap fixed for real, the empty-citations bug root-caused for real (not just "not reproduced"), Docker TLS confirmed resolved but a real image build still blocked, now on host memory
 
 Asked to close out the remaining honestly-documented gaps from the v2.0 pass (OCR explicitly out of scope, left untouched). Three items tackled, by request:

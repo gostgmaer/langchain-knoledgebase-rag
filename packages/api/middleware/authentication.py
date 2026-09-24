@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from dependency_injector.wiring import Provide, inject
+import httpx
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from packages.auth.service import AuthService
+from packages.config.loader import settings
 from packages.infrastructure.container import ApplicationContainer
 
 
@@ -28,6 +30,24 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
     AUTH_HEADER = "Authorization"
     AUTH_SCHEME = "Bearer "
 
+    # Reachable without a token even when AUTH_REQUIRED is on.
+    PUBLIC_PREFIXES = ("/api/v1/health", "/api/v1/auth/refresh")
+    PUBLIC_PATHS = ("/docs", "/redoc", "/openapi.json")
+
+    @classmethod
+    def _is_public(cls, request: Request) -> bool:
+        path = request.url.path
+        return (
+            request.method == "OPTIONS"
+            or path in cls.PUBLIC_PATHS
+            or path.startswith(cls.PUBLIC_PREFIXES)
+        )
+
+    @staticmethod
+    def _deny(status_code: int, detail: str) -> Response:
+        headers = {"WWW-Authenticate": "Bearer"} if status_code == 401 else None
+        return JSONResponse({"detail": detail}, status_code=status_code, headers=headers)
+
     @inject
     async def dispatch(
         self,
@@ -44,7 +64,18 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         if header and header.startswith(self.AUTH_SCHEME):
             access_token = header[len(self.AUTH_SCHEME):]
 
-        current_user = await auth_service.resolve(access_token)
+        required = settings.api.auth_required
+
+        if required and not access_token and not self._is_public(request):
+            return self._deny(401, "Authentication required.")
+
+        try:
+            current_user = await auth_service.resolve(access_token, fail_open=not required)
+        except httpx.HTTPError:
+            return self._deny(503, "Could not reach the IAM service.")
+
+        if required and access_token and current_user is None and not self._is_public(request):
+            return self._deny(401, "Invalid or expired access token.")
 
         if current_user is not None:
             request.state.current_user = current_user

@@ -22,6 +22,10 @@ const ROUTES: { method: string; pattern: RegExp }[] = [
   { method: "GET", pattern: new RegExp(`^tenants/${ID}/invitations$`) },
   { method: "DELETE", pattern: new RegExp(`^tenants/${ID}/invitations/${ID}$`) },
   { method: "POST", pattern: /^tenants\/invitations\/accept$/ },
+  // Connected sign-in providers (Settings screen), limited to the three the
+  // login page offers.
+  { method: "GET", pattern: /^auth\/social\/accounts$/ },
+  { method: "DELETE", pattern: /^auth\/social\/unlink\/(google|microsoft|facebook)$/ },
 ];
 
 async function handle(request: Request, { params }: { params: Promise<{ path: string[] }> }) {

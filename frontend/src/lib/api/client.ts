@@ -1,7 +1,9 @@
 import type { ApiErrorResponse, ApiResponse } from "./types";
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1";
+// Same-origin BFF proxy (app/api/rag/[...path]/route.ts): it attaches the IAM
+// access token from the httpOnly cookie and forwards to the RAG API, which
+// derives tenant/user from that token rather than from client headers.
+export const API_BASE_URL = "/api/rag";
 
 export class ApiError extends Error {
   status: number;
@@ -29,7 +31,7 @@ interface RequestOptions {
 }
 
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
-  const url = new URL(`${API_BASE_URL}${path}`);
+  const url = new URL(`${API_BASE_URL}${path}`, typeof window === "undefined" ? "http://localhost" : window.location.origin);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
