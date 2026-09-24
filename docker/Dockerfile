@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # ============================================================
 # Stage 1 - Builder
 # ============================================================
@@ -25,7 +26,17 @@ RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml uv.lock ./
 
-RUN uv sync \
+# Cache mount persists uv's download/wheel cache across separate
+# `docker build` invocations (BuildKit keeps it on the host, outside
+# any image layer) — without it, every single build re-downloaded
+# every package (~200, including a 187MB torch) from scratch, which
+# confirmed live is what turned this environment's ordinary transient
+# network blips into repeated full-build failures. UV_LINK_MODE=copy
+# (above) is required alongside this: uv's default hardlink-from-cache
+# mode would leave dangling links once the ephemeral cache mount is
+# gone, since only COPY/RUN-written files actually land in the image.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync \
     --locked \
     --no-dev
 
@@ -41,13 +52,17 @@ WORKDIR /app
 
 RUN groupadd -r app && useradd -r -g app app
 
-COPY --from=builder /app/.venv /app/.venv
+# --chown at COPY time, not a separate `RUN chown -R` afterwards: a
+# metadata-only chown on files already materialized by an earlier COPY
+# layer forces Docker to re-copy their full content into the new layer
+# (its layer model has no concept of "metadata changed, content
+# didn't") — confirmed live, that one RUN chown -R line was doubling
+# this image's real size (~2.2GB re-copied for nothing).
+COPY --chown=app:app --from=builder /app/.venv /app/.venv
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-COPY . .
-
-RUN chown -R app:app /app
+COPY --chown=app:app . .
 
 USER app
 
