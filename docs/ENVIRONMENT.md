@@ -63,8 +63,8 @@ If one of these is out of sync, the symptom is listed. This is the most common c
 | `IAM_INTROSPECTION_API_KEY` | IAM, RAG (`IAM_INTROSPECTION_API_KEY`) | same string | Only matters for IAM's session-introspection endpoint; normal request auth uses `/auth/me` and does not need it |
 | RAG `IAM_BASE_URL` | RAG | the **gateway** base (`http://host.docker.internal:3301` in Docker) | Every request 401 or 503 with `AUTH_REQUIRED=true` ("Could not reach the IAM service") |
 | `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` | IAM only signs; public key copied to every verifier | the pair | All tokens rejected after a key change |
-| `FILE_UPLOAD_HMAC_SECRET` | IAM, file-upload-service | same string | Signed upload/download URLs rejected |
-| `GATEWAY_INTERNAL_SECRET` | file-upload-service | equal to `FILE_UPLOAD_HMAC_SECRET` (same value, two names) | Upload service rejects signed requests |
+| `FILE_UPLOAD_HMAC_SECRET` | IAM, **RAG**, gateway, file-upload-service (as `GATEWAY_INTERNAL_SECRET` or `FILE_UPLOAD_HMAC_SECRET`) | same string, at least 32 chars | Upload service answers 401 `Missing gateway signature` (RAG document upload fails with HTTP 400) |
+| `GATEWAY_INTERNAL_SECRET` | file-upload-service | Alternative name for `FILE_UPLOAD_HMAC_SECRET`; the service reads `GATEWAY_INTERNAL_SECRET` first, then `FILE_UPLOAD_HMAC_SECRET`, so setting either one is enough | Upload service rejects signed requests |
 | `NOTIFICATION_SERVICE_API_KEY` | IAM, notification-service (`API_KEY`) | same string | Invitation / verification emails never sent (401 from notification service) |
 | `IAM_ADMIN_EMAIL` / `IAM_ADMIN_PASSWORD` | gateway | IAM `BOOTSTRAP_SERVICE_ACCOUNT_*` | Gateway cannot call IAM admin APIs |
 | DB passwords | `.env.shared`/`.env.postgres` vs each service `DATABASE_URL` | each other | Service crash-loops on DB auth |
@@ -176,7 +176,9 @@ Seed values for the live Feature Flags page (changes made there take effect with
 | Variable | Default | Description |
 |---|---|---|
 | `UPLOAD_SERVICE_URL` | none (required) | Base URL of file-upload-service. Local Docker: `http://host.docker.internal:4005`. |
-| `UPLOAD_SERVICE_API_KEY` | unset | Optional service-to-service key sent to the upload service. |
+| **`FILE_UPLOAD_HMAC_SECRET`** | unset | Shared secret used to sign every request to the upload service (`X-Gateway-Hmac` = HMAC-SHA256 of `userId:email:role`). **Required whenever the upload service runs with `GATEWAY_AUTH_REQUIRED=true` (its default)**; without it uploads fail with `Missing gateway signature`. Same value as the upload service's `GATEWAY_INTERNAL_SECRET`. |
+| `UPLOAD_SERVICE_ROLE` | `admin` | Role presented in the signed identity: `user` or `admin`. RAG is a trusted backend acting for its own already-authorised tenants; `admin` lets it replace/delete the files it stored. |
+| `UPLOAD_SERVICE_API_KEY` | unset | Sent as `x-api-key`. The upload service does not check it today; harmless to keep set. |
 | `UPLOAD_SERVICE_TIMEOUT` | `30` | Seconds per call (1-300). |
 | `UPLOAD_SIGNED_URL_EXPIRY` | `3600` | Signed download URL lifetime in seconds (min 60). |
 | `UPLOAD_SERVICE_VERIFY_SSL` | `true` | `false` only for local self-signed certificates. |
@@ -213,6 +215,8 @@ Cookies are `httpOnly`; `secure` is on automatically when `NODE_ENV=production`,
 
 IAM (NestJS + Prisma) owns users, tenants, roles, sessions, invitations and social login. It is the only service that signs tokens.
 
+**IAM refuses to start unless these are set** (Joi validation in `app.module.ts`): `FRONTEND_URL`, `AUTH_PUBLIC_BASE_URL` (must be a URL), `DATABASE_URL`, `COOKIE_SECRET` (16+ chars), `SSO_SECRET` (16+), `JWT_REFRESH_SECRET` (32+), `JWT_MAGIC_LINK_SECRET` (16+), `FILE_UPLOAD_SERVICE_URL` (must be a URL, even if you never upload) and `NOTIFICATION_SERVICE_URL`. Separately, `BACKUP_CODE_ENCRYPTION_KEY` (64 hex) and, in production, `CORS_ORIGINS` are enforced at runtime.
+
 ### 5.1 Core
 
 | Variable | Req | Local / example | Description |
@@ -224,7 +228,7 @@ IAM (NestJS + Prisma) owns users, tenants, roles, sessions, invitations and soci
 | `AUTH_MODE` | opt | `jwt` | `jwt` or `session`. Keep `jwt`. |
 | `FRONTEND_URL` | yes | `http://localhost:3000` | Where IAM redirects the browser after social login and after linking (`/auth/callback`, `/dashboard/settings`). Also trusted as an origin. |
 | `APP_URL` | prod | public IAM URL | IAM's own public URL, used in links inside emails. |
-| `AUTH_PUBLIC_BASE_URL` | prod | public IAM URL | Base for OAuth callback URLs when nothing overrides it. Trusted as an origin. |
+| `AUTH_PUBLIC_BASE_URL` | **yes** | public IAM URL | Base for OAuth callback URLs when nothing overrides it. Must be a valid URL. Trusted as an origin. |
 | **`CORS_ORIGINS`** | prod (boot fails without it) | `http://localhost:3000,http://localhost:3301` | Comma-separated allowed origins. It is **also IAM's trusted-origin list for social callbacks**: it must include the gateway's public origin, otherwise social login fails with "Untrusted base URL override". |
 | `COOKIE_SECRET` | prod | random | Signs IAM cookies (OAuth state, link token). |
 | `SSO_SECRET` | prod | random | Signing secret for single-sign-on handoff. |
@@ -240,7 +244,9 @@ IAM (NestJS + Prisma) owns users, tenants, roles, sessions, invitations and soci
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | compose | Initialise the Postgres container. Change the password for production. |
 | `REDIS_URL` (or `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`) | yes | Redis for tokens, invitation links (`token:tenant_invite:*`), sessions and queues. `rediss://` for TLS providers. |
 | `REDIS_DB` | opt | Redis database index; IAM uses `0`. |
-| `ENABLE_REDIS`, `ENABLE_BULLMQ` | prod | `true` in production (cache and background jobs). |
+| `ENABLE_REDIS` | prod | Default `true`. |
+| `ENABLE_BULLMQ` | prod | Default `false` in code; set `true` in production for background jobs. |
+| `TENANT_SLUG`, `TENANT_ID` | opt | Default tenant selectors for single-tenant setups. |
 
 ### 5.3 Tokens and secrets
 
@@ -250,7 +256,7 @@ IAM (NestJS + Prisma) owns users, tenants, roles, sessions, invitations and soci
 | `JWT_PRIVATE_KEY_PATH`, `JWT_PUBLIC_KEY_PATH` | alt | Paths to PEM files (for example `/run/secrets/jwt_private.pem`) instead of inline keys. |
 | `JWT_PREVIOUS_PUBLIC_KEYS` | opt | Comma-separated older public keys still accepted, for key rotation. |
 | `JWT_ISSUER`, `JWT_AUDIENCE` | prod | Token `iss` / `aud` claims. Use the public auth domain. |
-| `JWT_SECRET` | yes | HMAC secret used by parts of IAM that are not RS256. Random 64 hex. |
+| `JWT_SECRET` | opt | HMAC secret (32+ chars if set) for the non-RS256 parts of IAM. Optional in the validation schema. |
 | `JWT_REFRESH_SECRET` | yes | Secret for refresh tokens. |
 | `JWT_MAGIC_LINK_SECRET` | yes | Secret for magic-link / email-verification tokens. |
 | **`BACKUP_CODE_ENCRYPTION_KEY`** | **yes** | Exactly 64 hex characters (`openssl rand -hex 32`). Encrypts stored social-provider tokens and 2FA secrets. Without it every social sign-in/link and 2FA enrolment fails. Changing it makes already-stored encrypted values unreadable. |
@@ -272,7 +278,8 @@ IAM (NestJS + Prisma) owns users, tenants, roles, sessions, invitations and soci
 |---|---|---|
 | `NOTIFICATION_SERVICE_URL` | **yes (IAM will not boot without it)** | Base URL of notification-service, for example `http://notification-service:4000/v1`. Locally the core compose file injects it. |
 | `NOTIFICATION_SERVICE_API_KEY` | yes for email | Sent as `x-api-key` on every notification request. Must equal notification-service `API_KEY`. |
-| `FILE_UPLOAD_SERVICE_URL`, `FILE_UPLOAD_HMAC_SECRET` | opt | For avatar/file features. The HMAC secret must equal the upload service's. |
+| `FILE_UPLOAD_SERVICE_URL` | **yes** | Base URL of file-upload-service. Required to boot even if unused. |
+| `FILE_UPLOAD_HMAC_SECRET` | opt | Signs calls to the upload service; must equal its secret. |
 | `ENABLE_FILE_UPLOAD`, `ENABLE_EXPORTS` | opt | Feature toggles. |
 | `ENABLE_KAFKA`, `KAFKA_BROKERS`, `KAFKA_CLIENT_ID`, `KAFKA_SSL`, `KAFKA_SASL_USERNAME`, `KAFKA_SASL_PASSWORD`, `KAFKA_SASL_MECHANISM` | opt | Event streaming. Leave `ENABLE_KAFKA=false` unless you run a broker. |
 
@@ -347,7 +354,7 @@ Sends email (and SMS) for IAM: invitations, verification, "account connected". V
 
 | Variable | Req | Local / example | Description |
 |---|---|---|---|
-| `PORT` | yes | `4000` (published 4004) | Listen port inside the container. |
+| `PORT` | yes | `4000` (published 4004) | Listen port inside the container (code default 4000). |
 | `NODE_ENV` | yes | `production` | Runtime mode. |
 | `API_KEY` | yes | equals IAM `NOTIFICATION_SERVICE_API_KEY` | Callers must send this as `x-api-key`. |
 | `DEFAULT_TENANT_ID` | opt | empty | Tenant used when a request does not name one. |
@@ -357,6 +364,9 @@ Sends email (and SMS) for IAM: invitations, verification, "account connected". V
 | `ENABLE_KAFKA`, `ENABLE_CACHE` | opt | `false`, `false` | Event streaming and response cache. |
 | `CORS_ORIGINS` | opt | `http://localhost:3000` | Allowed browser origins. |
 | `THROTTLE_TTL`, `THROTTLE_LIMIT` | opt | `60`, `100` | Requests per window (seconds) per caller. |
+| `BULL_CONCURRENCY_SMS`, `BULL_CONCURRENCY_EMAIL` | opt | `5`, `10` | Parallel queue workers per channel. |
+| `SMS_FALLBACK_PROVIDER`, `SMS_RETRY_ATTEMPTS`, `SMS_RETRY_DELAY_MS` | opt | empty, `3`, `5000` | SMS failover and retry policy. |
+| `KAFKA_BROKERS`, `KAFKA_GROUP_ID`, `KAFKA_CLIENT_ID`, `KAFKA_TOPIC_*` | opt | | Only with `ENABLE_KAFKA=true`. |
 | `SMS_DEFAULT_PROVIDER` | opt | `mock` | `mock` logs the SMS instead of sending. Set a real provider plus its credentials to send. |
 | `EMAIL_SERVICE` | opt | empty | Well-known provider name (for example `gmail`). Empty means use host/port. |
 | `EMAIL_HOST`, `EMAIL_PORT` | yes | **Mailpit:** `mailpit`, `1025`. Gmail: `smtp.gmail.com`, `587` | SMTP server. |
@@ -377,19 +387,30 @@ Locally, mail is caught by Mailpit (SMTP 1025, web UI 8025); nothing leaves your
 
 ## 8. file-upload-service (`stacks/utility/env/.env.file-upload`, host port 4005)
 
-Stores uploaded documents; the RAG worker fetches them through signed URLs.
+Stores uploaded documents; the RAG worker fetches them through signed URLs. Startup validation (`src/config/validateEnv.js`) fails fast: `MONGO_URI` is required; `GATEWAY_INTERNAL_SECRET` (min 32 chars) is required while `GATEWAY_AUTH_REQUIRED` is true (the default); `LOCAL_SIGNED_URL_SECRET` (min 32) is required when `STORAGE_TYPE=local`; and each cloud backend's own variables are required when selected.
+
+With `GATEWAY_AUTH_REQUIRED=true` every request must carry `X-Gateway-Hmac` plus `X-User-Id` and `X-User-Role` (`user` or `admin`). The RAG API sends these automatically when `FILE_UPLOAD_HMAC_SECRET` is set.
 
 | Variable | Req | Local / example | Description |
 |---|---|---|---|
-| `PORT` | yes | `3000` (published 4005) | Listen port inside the container. |
+| `PORT` | yes | `3000` (published 4005) | Listen port inside the container (code default 4001). |
 | `NODE_ENV` | yes | `production` | Runtime mode. |
 | `CORS_ORIGIN` | yes | `http://localhost:3000` | Allowed browser origin. |
 | `MONGO_URI` | yes | shared platform Mongo | File metadata. **Note the name: `MONGO_URI`, not `MONGODB_URI`.** |
-| `GATEWAY_INTERNAL_SECRET` | yes | same value as `FILE_UPLOAD_HMAC_SECRET` | Secret this service's own auth middleware reads to check signed requests. |
-| `FILE_UPLOAD_HMAC_SECRET` | yes | random | The same secret under the name callers (gateway, IAM) use. **Both variables must be set to the same value.** |
+| `GATEWAY_INTERNAL_SECRET` | yes (min 32 chars) | random | The secret used to verify `X-Gateway-Hmac`. |
+| `FILE_UPLOAD_HMAC_SECRET` | alt | same value | Accepted as a fallback name when `GATEWAY_INTERNAL_SECRET` is unset. Callers (RAG, gateway, IAM) know it by this name. Setting both to the same value is what the infra example does. |
 | `GATEWAY_AUTH_REQUIRED` | opt | `true` | Require calls to come through the gateway or carry a valid signature. |
 | `TENANCY_ENABLED` | opt | `true` | Separate files per tenant. |
-| `STORAGE_TYPE` | yes | `local` | `local`, `r2` (Cloudflare), `azure` or `s3`. Production uses R2 or Azure. |
+| `STORAGE_TYPE` | yes | `local` | `local`, `r2` (Cloudflare), `azure`, `s3` or `gcs`. Production uses R2 or Azure. |
+| `LOCAL_UPLOAD_DIR` | opt | `uploads` | Directory for `local` storage (a volume in Docker). |
+| `MAX_FILE_SIZE` | opt | `10485760` (10 MB) | Largest accepted upload in bytes. RAG also enforces its own limit. |
+| `UPLOAD_RATE_LIMIT`, `UPLOAD_RATE_WINDOW` | opt | `10`, `900000` | Uploads per window (ms) per caller. |
+| `GENERAL_RATE_LIMIT`, `GENERAL_RATE_WINDOW` | opt | `300`, `60000` | General request rate limit. |
+| `SIGNED_URL_EXPIRY` | opt | `3600` | Signed download URL lifetime in seconds. |
+| `TENANCY_MODE` | opt | `shared` | `shared` (one database) or `per-db`. |
+| `REDIS_URL` | opt | empty | Optional cache/rate-limit store. |
+| `CLAMAV_HOST`, `CLAMAV_PORT` | opt | empty, `3310` | Enables virus scanning when a ClamAV host is set. |
+| `GCS_BUCKET`, `GCS_PROJECT_ID`, `GCS_KEY_FILE` | if `gcs` | | Google Cloud Storage. |
 | `LOCAL_SIGNED_URL_SECRET` | if `local` | random | Signs download URLs for local storage. |
 | `R2_ENDPOINT`, `R2_ACCESS_KEY`, `R2_SECRET`, `R2_BUCKET`, `R2_PUBLIC_DOMAIN` | if `r2` | | Cloudflare R2 bucket and credentials. |
 | `AZURE_CONNECTION_STRING`, `AZURE_CONTAINER` | if `azure` | | Azure Blob Storage. |
@@ -431,8 +452,20 @@ The RAG API and frontend are not part of this generator yet: they need their own
 2. **IAM** (`.env.auth`): keys, secrets, `BACKUP_CODE_ENCRYPTION_KEY`, `CORS_ORIGINS`, bootstrap admin, notification URL/key. Check: `POST :3301/api/auth/login` with the bootstrap admin returns 200.
 3. **notification-service** (`.env.app`): API key = IAM's, Mailpit or SMTP. Check: invite a user, see the email in Mailpit.
 4. **file-upload-service**: secrets and storage. Check: upload a document from the UI.
-5. **RAG** `.env`: LLM/embedding keys, `IAM_*`, `UPLOAD_*`, `AUTH_REQUIRED`. Check: `GET :8088/api/v1/health` = 200, and `GET /api/v1/knowledge-bases` without a token = 401.
+5. **RAG** `.env`: LLM/embedding keys, `IAM_*`, `UPLOAD_*` **including `FILE_UPLOAD_HMAC_SECRET`**, `AUTH_REQUIRED`. Check: `POST /api/v1/documents` with a token returns 202 and the upload job reaches `SUCCEEDED`; then `GET :8088/api/v1/health` = 200, and `GET /api/v1/knowledge-bases` without a token = 401.
 6. **Frontend** `.env.local`: three URLs. Restart `npm run dev` after any change (env is read at start).
 7. **OAuth providers**: create apps, register the redirect URIs from section 5, set credentials, then enable in IAM settings. Check: the login page shows the buttons; sign in with an email that already has a password account and confirm it links instead of creating a duplicate.
 
 After changing any `.env`, recreate containers (`docker compose up -d`) - a plain restart does not always re-read `env_file`.
+
+---
+
+## 12. Known runtime issues that look like configuration problems
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Document upload returns 400 `Missing gateway signature` | `FILE_UPLOAD_HMAC_SECRET` not set in RAG `.env`, or differs from the upload service's `GATEWAY_INTERNAL_SECRET` | Set the same 32+ char value on both, recreate `api` and `worker` |
+| First chat hangs, then 500 with `Can't load the model for 'cross-encoder/ms-marco-MiniLM-L-6-v2'` | The ~90 MB reranker model is downloaded from HuggingFace on first use and large downloads can fail on flaky TLS | The model cache is a Docker volume (`hf-cache`), so it only has to succeed once: run `snapshot_download("cross-encoder/ms-marco-MiniLM-L6-v2")` inside the `api` container until it completes, or set `ENABLE_RERANKING=false` |
+| Chat returns 500 `An unexpected internal server error` and logs show `503 UNAVAILABLE ... high demand` | The Gemini API is overloaded; the client retries with backoff and then gives up | Retry later, or switch `LLM_PROVIDER` / `LLM_MODEL` |
+| Social login: `Untrusted base URL override` | Gateway origin missing from IAM `CORS_ORIGINS` | Add it (section 5.1) |
+| IAM container exits at start | A variable in the "IAM refuses to start" list is missing or too short | Read `docker logs auth-service` for the Joi message |
