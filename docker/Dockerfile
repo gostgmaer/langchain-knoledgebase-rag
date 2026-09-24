@@ -50,7 +50,15 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-RUN groupadd -r app && useradd -r -g app app
+# -m creates a real, owned /home/app — confirmed live this was missing:
+# a plain `useradd -r` system account gets no home directory on disk,
+# so the cross-encoder reranker's lazy model download (sentence-
+# transformers, first real use only — see packages/knowledge/reranking/
+# cross_encoder.py) crashed with PermissionError trying to create
+# ~/.cache/huggingface the first time an actual RAG query needed
+# reranking, since nothing had ever exercised this path in a fresh
+# container before.
+RUN groupadd -r app && useradd -r -m -g app app
 
 # --chown at COPY time, not a separate `RUN chown -R` afterwards: a
 # metadata-only chown on files already materialized by an earlier COPY

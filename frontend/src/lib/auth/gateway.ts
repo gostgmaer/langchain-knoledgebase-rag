@@ -74,6 +74,68 @@ async function gatewayFetch(path: string, init: RequestInit, origin: string): Pr
   };
 }
 
+// Where the *browser* is sent for OAuth redirects (social login start).
+// Distinct from GATEWAY_URL because that one is server-to-server and may be
+// an internal hostname the browser can't resolve; defaults to it for local dev.
+export const GATEWAY_PUBLIC_URL = process.env.AUTH_GATEWAY_PUBLIC_URL ?? GATEWAY_URL;
+
+function messageFrom(json: unknown, fallback: string): string {
+  const message = (json as { message?: unknown } | null)?.message;
+  // class-validator failures come back as string[] — join rather than
+  // showing "[object Object]" or dropping all but the first problem.
+  if (Array.isArray(message)) return message.join(" ");
+  return typeof message === "string" && message ? message : fallback;
+}
+
+/**
+ * Generic JSON call to the gateway, optionally authenticated with the
+ * caller's own access token (forwarded from our httpOnly cookie — never
+ * from client-supplied headers). Returns IAM's envelope `data` when present.
+ */
+export async function gatewayJson<T = unknown>(
+  path: string,
+  init: { method?: string; body?: unknown; accessToken?: string },
+  origin: string,
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${GATEWAY_URL}${path}`, {
+      method: init.method ?? "GET",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: origin,
+        ...(init.accessToken ? { Authorization: `Bearer ${init.accessToken}` } : {}),
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+  } catch {
+    throw new GatewayError(
+      "Could not reach the auth gateway — check AUTH_GATEWAY_URL is pointed at a running instance.",
+      502,
+    );
+  }
+
+  const json = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new GatewayError(messageFrom(json, "Request failed."), response.status);
+  }
+
+  return ((json as { data?: T } | null)?.data ?? json) as T;
+}
+
+export function tokensFromData(data: unknown): GatewayTokens | null {
+  const d = data as Partial<GatewayTokens> | null;
+  if (!d?.accessToken || !d?.refreshToken) return null;
+  return {
+    accessToken: d.accessToken,
+    refreshToken: d.refreshToken,
+    accessExpiresIn: d.accessExpiresIn,
+    refreshExpiresIn: d.refreshExpiresIn,
+  };
+}
+
 export function gatewayLogin(email: string, password: string, origin: string): Promise<GatewayTokens> {
   return gatewayFetch(
     "/api/auth/login",

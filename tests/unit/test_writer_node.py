@@ -96,3 +96,41 @@ async def test_citations_are_flattened_across_every_finding():
     all_citation_ids = {citation.chunk_id for finding in findings for citation in finding.citations}
     result_citation_ids = {citation.chunk_id for citation in result["citations"]}
     assert result_citation_ids == all_citation_ids
+
+
+@pytest.mark.asyncio
+async def test_the_same_chunk_cited_by_two_sub_questions_is_deduped_keeping_the_higher_score():
+    """
+    The exact bug reproduced live: a two-part question against a
+    single-document knowledge base independently retrieved the same
+    chunk for both sub-questions, with two different rerank scores —
+    it must appear once in the final citations, at its higher score.
+    """
+
+    document_id = uuid4()
+    chunk_id = uuid4()
+
+    findings = [
+        ResearchFinding(
+            sub_question="What is the payload capacity?",
+            finding="73 kilograms.",
+            citations=[Citation(document_id=document_id, chunk_id=chunk_id, chunk_index=0, score=10.9)],
+        ),
+        ResearchFinding(
+            sub_question="What is the flight endurance?",
+            finding="51 minutes.",
+            citations=[Citation(document_id=document_id, chunk_id=chunk_id, chunk_index=0, score=8.8)],
+        ),
+    ]
+
+    response = ChatResponse(message=AIMessage(content="synthesized"))
+    chat_service = _FakeChatService(response)
+    node = WriterNode(chat_service, PromptBuilder())
+
+    state = _state()
+    state["research_findings"] = findings
+
+    result = await node(state)
+
+    assert len(result["citations"]) == 1
+    assert result["citations"][0].score == 10.9

@@ -15,6 +15,7 @@ import {
   Search,
   ShieldCheck,
   UploadCloud,
+  Users,
   Wrench,
 } from "lucide-react";
 import { notFound } from "next/navigation";
@@ -42,6 +43,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/tenant-admin/search", label: "Search", icon: Search },
     { href: "/tenant-admin/prompts", label: "Prompts", icon: ScrollText },
     { href: "/tenant-admin/tools", label: "Tools", icon: Wrench },
+    { href: "/tenant-admin/team", label: "Team", icon: Users },
     { href: "/tenant-admin/model-profiles", label: "Model Profiles", icon: Cpu },
     { href: "/tenant-admin/feedback", label: "Feedback", icon: MessagesSquare },
     { href: "/tenant-admin/upload-jobs", label: "Upload Jobs", icon: UploadCloud },
@@ -51,6 +53,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
   admin: [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
     { href: "/admin/tenants", label: "Tenants", icon: ShieldCheck },
+    { href: "/admin/team", label: "Team", icon: Users },
     { href: "/admin/model-profiles", label: "Model Profiles", icon: Cpu },
     { href: "/admin/chat", label: "Chat", icon: MessageSquare },
     { href: "/admin/agents", label: "Agents", icon: Bot },

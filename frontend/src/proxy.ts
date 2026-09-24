@@ -9,8 +9,12 @@ import { ACCESS_COOKIE } from "@/lib/auth/cookies";
 // or reject it) and in AppShell's client-side role guard; this just stops
 // an unauthenticated request from rendering a protected page's shell at
 // all, rather than flashing it before client JS redirects.
+// Reachable while signed out: the login page, and the pages/handlers an
+// invite email or a social-login redirect lands on before any cookie exists.
+const PUBLIC_PATHS = new Set(["/", "/register", "/accept-invite", "/auth/callback"]);
+
 export function proxy(request: NextRequest) {
-  if (request.nextUrl.pathname === "/") {
+  if (PUBLIC_PATHS.has(request.nextUrl.pathname)) {
     return NextResponse.next();
   }
 

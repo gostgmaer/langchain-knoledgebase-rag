@@ -75,9 +75,27 @@ class WriterNode:
 
         state["messages"].append(response.message)
         state["usage"] = response.usage or {}
-        state["citations"] = [
-            citation for finding in findings for citation in finding.citations
-        ]
+
+        # Deduped by chunk, keeping the higher score — unlike
+        # RetrieveNode's own multi-query fan-out (which merges by
+        # chunk.id before it ever reaches citations), each sub-question
+        # here runs its own independent research subgraph with no
+        # visibility into what the others retrieved, so the same real
+        # chunk commonly gets pulled into more than one sub-question's
+        # findings (confirmed live: a two-part question against a
+        # single-document knowledge base cited the same chunk twice,
+        # once per sub-question, with two different rerank scores).
+        # Same "keep the higher of the two scores" idiom as
+        # MultiVectorRetriever's own dedup.
+        deduped: dict[tuple, object] = {}
+        for finding in findings:
+            for citation in finding.citations:
+                key = (citation.document_id, citation.chunk_id)
+                existing = deduped.get(key)
+                if existing is None or citation.score > existing.score:
+                    deduped[key] = citation
+        state["citations"] = list(deduped.values())
+
         state["context"] = synthesis_context
 
         return state
