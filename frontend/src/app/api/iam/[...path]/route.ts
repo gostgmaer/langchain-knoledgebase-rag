@@ -22,6 +22,8 @@ const ROUTES: { method: string; pattern: RegExp }[] = [
   { method: "GET", pattern: new RegExp(`^tenants/${ID}/invitations$`) },
   { method: "DELETE", pattern: new RegExp(`^tenants/${ID}/invitations/${ID}$`) },
   { method: "POST", pattern: /^tenants\/invitations\/accept$/ },
+  // The caller's own workspaces (workspace switcher).
+  { method: "GET", pattern: /^tenants\/mine$/ },
   // Connected sign-in providers (Settings screen), limited to the three the
   // login page offers.
   { method: "GET", pattern: /^auth\/social\/accounts$/ },

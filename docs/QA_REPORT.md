@@ -11,14 +11,14 @@ Every finding below was reproduced against the running stack unless marked **(co
 | B2 | **High** | **Open self-registration** put anyone in the admin workspace, and IAM's `auth.registration.enabled` setting was **not enforced at all** | **Fixed** in IAM (invite-only enforced for password and social sign-up). Local instance is now **invite-only** |
 | B3 | **Medium** | Members could read admin-only data and open admin pages by URL; could create knowledge bases | **Fixed** - server: every non-chat route is admin-only; UI: per-page role guard |
 | B4 | **Medium** | Super-admin "browse as tenant" broken by my earlier change | **Fixed** - `X-Tenant-ID` honoured for `TENANT_OVERRIDE_ROLES` (default `super_admin`) only |
-| B5 | **Medium** | New social users had no workspace | **Resolved by B2**: unknown emails can no longer create stranded accounts in invite-only mode. Existing stranded accounts still need an invite |
-| B6 | **Medium** | Invite into a second workspace had no effect | **Fixed for sign-up** (an invitee registers into *only* the invited workspace). **Not changed:** an existing user accepting an invite still cannot switch workspace (member lacks the switch permission) |
-| B7 | Low | Provider outage returned HTTP 500 | **Fixed** - mapped to 503 + `Retry-After` with a clear message (unit-tested; not reproduced live) |
+| B5 | **Medium** | New social users had no workspace | **Fixed - root cause found**: social login, magic-link login and the post-verification auto-login created sessions with **no `tenantId`** even though the membership existed. All three now resolve the workspace. (The stranded account was never missing its membership: a fresh sign-in now gets one.) |
+| B6 | **Medium** | Invite into a second workspace had no effect | **Fixed**: sign-up invitee joins only the invited workspace; existing members get `tenant:switch`, `GET /tenants/mine`, a top-bar **workspace switcher**, and accepting an invite switches straight in. Verified live (16 checks) |
+| B7 | Low | Provider outage returned HTTP 500 | **Fixed and tested through a real FastAPI app**: 503 + `Retry-After`; **streaming chat** now ends with an explicit `error` event (retryable flag) instead of a dropped connection; the chat page shows the real reason |
 | B8 | Low | Six views had no error state | **Fixed** - shared `QueryError` component with retry |
 | B9 | Low | No DELETE for knowledge bases / feature flags | **Fixed** - API + UI buttons (KB only when empty) |
 | B10 | Low | Email verification not enforced | **Option added** - `REQUIRE_VERIFIED_EMAIL` (off by default; unit-tested). Turn on with IAM verification for public deployments |
 | B11 | Low | 3 lint errors | **Fixed** - frontend `tsc` and `eslint` now report **0 problems** |
-| B12 | Info | Raw 429 text on rate-limited login | **Fixed** - friendly message (code only; not triggered in a browser) |
+| B12 | Info | Raw 429 text on rate-limited login | **Fixed and verified live**: 5th wrong attempt returns "Too many sign-in attempts. Please wait a minute and try again." |
 | Earlier | - | No-workspace crash (500), Microsoft `AADSTS9002325`, Microsoft tenant setting | Fixed before this round |
 
 ## 2. What was tested
@@ -130,9 +130,15 @@ Every finding below was reproduced against the running stack unless marked **(co
 - Plain members now see **only Chat and Settings**; direct URLs to other pages show "You don't have access to this page" and their APIs return 403.
 - `X-Tenant-ID` is ignored for everyone except `TENANT_OVERRIDE_ROLES`.
 
+**Follow-up round (remaining items)**
+- Members can switch workspaces (`tenant:switch`, `GET /tenants/mine`, switcher UI, switch on invite accept); existing deployments need the one-time permission grant documented in IAM `INTEGRATION.md`.
+- Root cause of the "You are not in a workspace yet" screen fixed in IAM (sessions without `tenantId` on social / magic-link / verification sign-in).
+- Streaming chat errors, provider-outage handling, login rate-limit message: verified.
+- Login helper in the test scripts no longer hammers IAM's 5-per-minute throttle (it extended the lockout).
+- Test data removed from the local instance (24 test users, the second workspace, 10 test documents, test conversations, Mailpit).
+
 **Still open / not verified**
 - Signed-in screens in a browser (the session was signed out; I do not enter passwords): the new role-guard page, `QueryError` states, delete buttons and the 429 message are verified by type-check, lint and API only.
-- Existing users accepting an invite into a second workspace still cannot switch (member lacks the permission) - needs an IAM permission/UX decision.
-- The stranded account `kishor81160@gmail.com` still needs an admin invite.
+- `kishor81160@gmail.com` keeps a session issued before the IAM fix: signing out and in again gives it a workspace (its membership existed all along).
 - Provider-outage 503 was unit-tested but not reproduced against a real Gemini outage.
 - A real Google/Microsoft login end to end, and Facebook.

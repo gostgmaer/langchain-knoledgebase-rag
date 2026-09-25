@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 import { useHealth } from "@/hooks/use-api";
 import { ROLE_LABELS, useSession } from "@/lib/session";
 
@@ -43,7 +44,7 @@ export function Topbar() {
             </Button>
           </form>
         ) : (
-          <span className="font-mono text-xs text-neutral-400">tenant: {session.tenantId}</span>
+          <WorkspaceSwitcher />
         )}
       </div>
 

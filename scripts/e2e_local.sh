@@ -17,7 +17,9 @@ try:
 except Exception:
     print(''); sys.exit()
 $1"; }
-login(){ for _ in $(seq 1 20); do r=$(curl -s -X POST $GW/api/auth/login -H 'Content-Type: application/json' -H "$O" -d "{\"email\":\"$1\",\"password\":\"$2\"}" | J "print(d['data']['accessToken'])"); [ -n "$r" ] && { echo "$r"; return; }; sleep 6; done; }
+# NOTE: IAM throttles sign-ins to 5 per 60 s per IP and extends the block on every extra attempt,
+# so a retry must wait a full window; hammering keeps the lockout alive.
+login(){ for _ in 1 2 3; do r=$(curl -s -X POST $GW/api/auth/login -H 'Content-Type: application/json' -H "$O" -d "{\"email\":\"$1\",\"password\":\"$2\"}" | J "print(d['data']['accessToken'])"); [ -n "$r" ] && { echo "$r"; return; }; sleep 65; done; }
 
 echo "== 1. Email/password login and session"
 ATOK=$(login $ADMIN_EMAIL "$ADMIN_PW"); [ ${#ATOK} -gt 100 ] && ok "admin login returns an access token" || bad "admin login"

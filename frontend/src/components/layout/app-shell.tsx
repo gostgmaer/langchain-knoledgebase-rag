@@ -45,8 +45,9 @@ export function AppShell({
         <div className="max-w-md space-y-4 rounded-lg border p-6 text-center">
           <h1 className="text-lg font-semibold">You are not in a workspace yet</h1>
           <p className="text-sm text-muted-foreground">
-            Your account ({session.displayName}) is not a member of any workspace, so there is nothing to show yet. Ask a
-            workspace admin to invite this email address, open the invitation link, and then sign in again.
+            Your session ({session.displayName}) is not attached to any workspace. If you were just added or invited,
+            sign out and sign in again. Otherwise ask a workspace admin to invite this email address and open the link
+            in the invitation email.
           </p>
           <Button variant="outline" onClick={() => void logout().then(() => router.replace("/"))}>
             Sign out
