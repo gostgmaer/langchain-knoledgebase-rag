@@ -144,21 +144,17 @@ Full variable lists for core/utility services: `ENVIRONMENT.md`. For the service
 
 ---
 
-## 5. Local warning: example URLs point to hosted services
+## 5. Notification and file-upload are local - endpoints to use
 
-Several shipped env examples default to **hosted** services, not the local stack:
+Both services run locally, so every service must point at them, not at the old hosted deployments (a Vercel notification service and a Render upload service). Use:
 
-- `stacks/product/env/.env.shared.example` and `stacks/support-ai/env/.env.app.example` set `NOTIFICATION_SERVICE_URL=https://notification-service-iota.vercel.app/v1` and `FILE_UPLOAD_SERVICE_URL=https://file-upload-service-zjtv.onrender.com`.
-- The gateway also falls back to that Render URL when `FILE_UPLOAD_SERVICE_URL` is unset.
+| Caller runs... | Notification | File upload |
+|---|---|---|
+| **Inside Docker** (infra stacks; templates in `stacks/*/env/*.example`) | `http://notification-service:4000/v1` (health `.../v1/health`) | `http://file-upload-service:3000` (health `.../health`) |
+| **From source on your machine** (each repo's own `.env`) | `http://localhost:4004/v1` | `http://localhost:4005` |
+| **RAG API inside Docker** (reaches the host) | not used | `http://host.docker.internal:4005` |
 
-If you run these locally without changing them, they would talk to **hosted services** (real emails, uploads stored remotely). For a local stack set:
-
-```
-NOTIFICATION_SERVICE_URL=http://notification-service:4000/v1
-FILE_UPLOAD_SERVICE_URL=http://file-upload-service:3000
-```
-
-(the utility stack must be running, and its containers must be reachable on the network these services join **(assumed: attach them to `utility-network` or use `host.docker.internal:4004` / `:4005`)**).
+Keep any path suffix a service already appends (some use `.../v1`, some add it themselves). The shipped examples for the core, product and support-ai stacks and the per-repo `.env` files have been switched to these values. Still hosted by default (production only, left as is): `scripts/secrets.example.env`, `scripts/github-config.env`, `Backend/web-agency-backend-api/deploy/oracle-vm/*`, `UI/easydev/docker-compose.yml`, and the gateway's built-in fallback for `FILE_UPLOAD_SERVICE_URL` (if that variable is unset the gateway silently uses the hosted Render URL, so always set it).
 
 ---
 
