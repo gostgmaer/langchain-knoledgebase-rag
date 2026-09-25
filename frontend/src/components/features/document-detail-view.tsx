@@ -1,5 +1,6 @@
 "use client";
 
+import { QueryError } from "@/components/shared/query-error";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/shared/page-header";
@@ -13,8 +14,12 @@ import { formatBytes, formatDateTime } from "@/lib/utils";
 
 export function DocumentDetailView({ documentId, basePath }: { documentId: string; basePath: string }) {
   const router = useRouter();
-  const { data: doc, isLoading } = useDocument(documentId);
+  const { data: doc, isLoading, isError, error, refetch } = useDocument(documentId);
   const { data: versions } = useDocumentVersions(documentId);
+
+  if (isError) {
+    return <QueryError error={error} onRetry={() => void refetch()} />;
+  }
 
   if (isLoading || !doc) {
     return <Skeleton className="h-64 w-full" />;

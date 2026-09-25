@@ -10,6 +10,7 @@ from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
     get_scoped_container,
     require_uuid_header,
+    require_admin,
 )
 from packages.api.responses import ApiResponse
 from packages.api.schemas.kb import (
@@ -25,6 +26,7 @@ from packages.infrastructure.container import ApplicationContainer
 router = APIRouter(
     prefix="/knowledge-bases",
     tags=["Knowledge Bases"],
+    dependencies=[Depends(require_admin())],
 )
 
 
@@ -147,3 +149,40 @@ async def get_knowledge_base(
         message="Knowledge base retrieved.",
         data=await _to_response(container, knowledge_base),
     )
+
+
+@router.delete(
+    "/{knowledge_base_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[None],
+    summary="Delete a knowledge base",
+    description=(
+        "Deletes an EMPTY knowledge base of the calling tenant. One that still has documents "
+        "is refused (409): delete its documents first, so nothing is orphaned in the vector store."
+    ),
+)
+async def delete_knowledge_base(
+    knowledge_base_id: UUID,
+    request: Request,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    knowledge_bases = container.repositories.knowledge_base()
+    knowledge_base = await knowledge_bases.get(knowledge_base_id)
+
+    if knowledge_base is None or knowledge_base.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Knowledge base not found.",
+        )
+
+    if await knowledge_bases.count_documents(knowledge_base_id) > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This knowledge base still has documents. Delete them first.",
+        )
+
+    await knowledge_bases.delete(knowledge_base)
+
+    return ApiResponse(message="Knowledge base deleted.")

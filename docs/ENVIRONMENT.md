@@ -1,5 +1,9 @@
 # Environment variables - every service in the RAG stack
 
+> What depends on what? See [`SERVICE_DEPENDENCIES.md`](SERVICE_DEPENDENCIES.md).
+
+> Looking for how to start everything? See [`LOCAL_SETUP.md`](LOCAL_SETUP.md) (prerequisites, start order, checks, troubleshooting).
+
 How to configure the RAG platform end to end: which file each service reads, what every
 variable does, which values must match across services, and what to create at the providers
 (Google / Microsoft / Facebook OAuth, SMTP, LLM keys).
@@ -19,7 +23,7 @@ Browser --> Next.js frontend (:3000)
               |-- /api/auth/*  --> API gateway (:3301) --> IAM auth-service (:3304)
               |-- /api/iam/*   --> gateway (invites, connected accounts)
               `-- /api/rag/*   --> RAG API (:8088 local / :8000 in container)
-                                     |-- IAM (JWKS + /auth/me)   [verifies every token]
+                                     |-- IAM via gateway (/auth/me)   [verifies every token]
                                      |-- Postgres+pgvector, Redis
                                      |-- file-upload-service (:4005)
                                      `-- LLM / embedding providers
@@ -60,12 +64,11 @@ If one of these is out of sync, the symptom is listed. This is the most common c
 |---|---|---|---|
 | Gateway public origin (`http://localhost:3301` locally) | IAM `CORS_ORIGINS`, provider OAuth redirect URIs, frontend `AUTH_GATEWAY_PUBLIC_URL` | each other | Social login fails with `Untrusted base URL override` or `redirect_uri_mismatch` |
 | Frontend origin (`http://localhost:3000`) | IAM `FRONTEND_URL` + `CORS_ORIGINS`, gateway `FRONTEND_URL` + `CORS_ORIGINS`, RAG `CORS_ORIGINS` | each other | Blocked by CORS, or the post-login redirect goes to the wrong place |
-| `IAM_INTROSPECTION_API_KEY` | IAM, RAG (`IAM_INTROSPECTION_API_KEY`) | same string | RAG cannot verify tokens: every request 401/503 with `AUTH_REQUIRED=true` |
-| RAG `IAM_BASE_URL` | RAG | the **gateway** base (`http://host.docker.internal:3301` in Docker) | 401s / "Could not reach the IAM service" |
-| RAG `IAM_JWKS_BASE_URL` | RAG | the **auth-service** base (`http://host.docker.internal:3304`) | Token signature cannot be verified |
+| `IAM_INTROSPECTION_API_KEY` | IAM, RAG (`IAM_INTROSPECTION_API_KEY`) | same string | Only matters for IAM's session-introspection endpoint; normal request auth uses `/auth/me` and does not need it |
+| RAG `IAM_BASE_URL` | RAG | the **gateway** base (`http://host.docker.internal:3301` in Docker) | Every request 401 or 503 with `AUTH_REQUIRED=true` ("Could not reach the IAM service") |
 | `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` | IAM only signs; public key copied to every verifier | the pair | All tokens rejected after a key change |
-| `FILE_UPLOAD_HMAC_SECRET` | IAM, file-upload-service | same string | Signed upload/download URLs rejected |
-| `GATEWAY_INTERNAL_SECRET` | gateway, file-upload-service | same string | Upload service refuses gateway calls |
+| `FILE_UPLOAD_HMAC_SECRET` | IAM, **RAG**, gateway, file-upload-service (as `GATEWAY_INTERNAL_SECRET` or `FILE_UPLOAD_HMAC_SECRET`) | same string, at least 32 chars | Upload service answers 401 `Missing gateway signature` (RAG document upload fails with HTTP 400) |
+| `GATEWAY_INTERNAL_SECRET` | file-upload-service | Alternative name for `FILE_UPLOAD_HMAC_SECRET`; the service reads `GATEWAY_INTERNAL_SECRET` first, then `FILE_UPLOAD_HMAC_SECRET`, so setting either one is enough | Upload service rejects signed requests |
 | `NOTIFICATION_SERVICE_API_KEY` | IAM, notification-service (`API_KEY`) | same string | Invitation / verification emails never sent (401 from notification service) |
 | `IAM_ADMIN_EMAIL` / `IAM_ADMIN_PASSWORD` | gateway | IAM `BOOTSTRAP_SERVICE_ACCOUNT_*` | Gateway cannot call IAM admin APIs |
 | DB passwords | `.env.shared`/`.env.postgres` vs each service `DATABASE_URL` | each other | Service crash-loops on DB auth |
@@ -75,84 +78,128 @@ If one of these is out of sync, the symptom is listed. This is the most common c
 
 ## 3. RAG API + worker (`.env`)
 
-Loaded by `docker compose` (`env_file: .env`) and by the local venv. Inside Docker, host names are compose service names (`postgres`, `redis`); the published host ports are Postgres `5442`, Redis `6389`, API `8088`.
+Loaded by `docker compose` (`env_file: .env`) and by the local venv. Inside Docker, host names are compose service names (`postgres`, `redis`); the published host ports are Postgres `5442`, Redis `6389`, API `8088`. Defaults below are the code defaults from `packages/config/`.
 
-### App and API
+**Must be present or the app will not start** (no code default): `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `IAM_BASE_URL`, `IAM_CLIENT_ID`, `IAM_CLIENT_SECRET`, `IAM_INTROSPECTION_API_KEY`, `UPLOAD_SERVICE_URL`, `OPENWEATHER_API_KEY`, `NEWSAPI_API_KEY`. Values you do not use (weather, news, IAM client credentials) can be placeholders, but they must be set.
 
-| Variable | Req | Local / example | Notes |
-|---|---|---|---|
-| `APP_NAME`, `APP_VERSION`, `APP_ENV` | opt | `development` | `APP_ENV=production` for prod |
-| `DEBUG` | opt | `false` | Never `true` in prod |
-| `HOST`, `PORT` | opt | `0.0.0.0`, `8000` | Container port; compose publishes 8088 |
-| `CORS_ORIGINS` | yes | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated. Must include the frontend origin |
-| `RATE_LIMIT_REQUESTS_PER_MINUTE` | opt | `300` | Per tenant/IP, `0` disables |
-| `LOG_LEVEL`, `LOG_JSON` | opt | `INFO`, `true` | JSON logs carry `trace_id` / `request_id` |
+### 3.1 Application and API
 
-### Authentication (IAM integration)
-
-| Variable | Req | Local / example | Notes |
-|---|---|---|---|
-| **`AUTH_REQUIRED`** | prod | `false` in code; **`true` in local `.env`** | `true`: every route except health, docs, `/auth/refresh` needs a valid IAM bearer token (401 no/bad token, 503 IAM down); tenant/user come from the token, never from headers. `false`: legacy anonymous default-tenant behaviour. **Turn on in every real environment.** With it on, only the frontend (via `/api/rag`) sends tokens; curl / CLI / `/docs` "Try it out" get 401 |
-| `ADMIN_ROLES` | opt | `super_admin,admin,tenant_admin` | Roles allowed to create agents, tool definitions, prompts (only enforced when `AUTH_REQUIRED=true`) |
-| `IAM_BASE_URL` | yes | `http://host.docker.internal:3301` | The gateway, not the auth-service |
-| `IAM_JWKS_BASE_URL` | yes | `http://host.docker.internal:3304` | The auth-service (publishes JWKS) |
-| `IAM_INTROSPECTION_API_KEY` | yes | - | Must equal IAM's value |
-| `IAM_CLIENT_ID`, `IAM_CLIENT_SECRET` | opt | empty | Only if the IAM client-credentials flow is used |
-| `IAM_TIMEOUT`, `IAM_MAX_RETRIES`, `IAM_VERIFY_SSL` | opt | `30`, `3`, `true` | `IAM_VERIFY_SSL=false` only for local self-signed |
-| `JWT_SECRET`, `JWT_ALGORITHM` | opt | empty, `HS256` | Legacy local-signing settings; real sessions are IAM RS256 tokens verified via JWKS |
-| `ENABLE_RBAC` | opt | `false` | Static default for the dynamic `enable_rbac` feature flag (permission-code checks on routes that use them) |
-
-### Database, cache, vector store
-
-| Variable | Req | Local / example | Notes |
-|---|---|---|---|
-| `DATABASE_URL` | yes | `postgresql://user:pass@postgres:5432/db` | Needs the `pgvector` extension (the compose image has it) |
-| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | yes (compose) | - | Initialise the Postgres container; keep consistent with `DATABASE_URL` |
-| `REDIS_URL` | yes | `redis://redis:6379/0` | Queue, rate limit, cache |
-| `QUEUE_PREFIX` | opt | - | Namespace so several stacks can share one Redis |
-| `VECTOR_STORE_BACKEND` | yes | `pgvector` | `chroma` still selectable but no longer the default |
-| `VECTOR_COLLECTION_NAME` | opt | - | Collection / namespace name |
-| `CHROMA_DIRECTORY`, `CHROMA_SERVER_HOST`, `CHROMA_SERVER_PORT` | opt | - | Only when `VECTOR_STORE_BACKEND=chroma` |
-| `CHUNK_SIZE`, `CHUNK_OVERLAP` | opt | - | Splitter settings |
-| `RAG_CONTEXT_TOKEN_BUDGET`, `RAG_MAX_RESULTS`, `RAG_MIN_RELEVANCE_SCORE` | opt | - | Retrieval tuning; the score is a raw cross-encoder logit (can be negative) |
-| `RETRIEVAL_STRATEGY`, `REINDEX_STALE_AFTER_DAYS`, `SESSION_EXPIRY_DAYS` | opt | - | See `packages/config/` |
-
-### LLM and embeddings
-
-| Variable | Req | Notes |
+| Variable | Default | Description |
 |---|---|---|
-| `LLM_PROVIDER` | yes | `google` \| `openai` \| `anthropic` \| `groq` |
-| `LLM_MODEL` | yes | Model id for the provider |
-| `GOOGLE_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GROQ_API_KEY` | yes (the one for `LLM_PROVIDER`, and for embeddings if same provider) | Get from each provider console |
-| `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_STREAMING`, `LLM_TOP_K`, `LLM_TOP_P` | opt | Generation defaults |
-| `LLM_CIRCUIT_BREAKER_FAILURE_THRESHOLD`, `LLM_CIRCUIT_BREAKER_RESET_SECONDS` | opt | Provider outage protection |
-| `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` | yes | Dimensions must match the pgvector column; changing them needs a re-embed |
-| `EMBEDDING_RATE_LIMIT_REQUESTS_PER_MINUTE`, `EMBEDDING_RATE_LIMIT_TOKENS_PER_MINUTE` | opt | Client-side throttling |
+| `APP_NAME` | `EasyDev AI Platform` | Name shown in API docs and logs. |
+| `APP_VERSION` | `1.0.0` | Version string reported by the API. |
+| `APP_ENV` | `development` | Environment label. Use `production` in prod. |
+| `DEBUG` | `false` | Verbose error behaviour. Never `true` in production. |
+| `HOST` | `0.0.0.0` | Interface uvicorn binds to inside the container. |
+| `PORT` | `8000` | Container port. Compose publishes it as host port 8088. |
+| `CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated browser origins allowed to call the API. Add every frontend origin. |
+| `RATE_LIMIT_REQUESTS_PER_MINUTE` | `300` | Sliding-window request cap per tenant (per IP if no tenant). `0` disables it. |
+| `SESSION_EXPIRY_DAYS` | `30` | An ACTIVE conversation with no activity for this long is swept as expired by the cleanup job. |
+| `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR`. |
+| `LOG_JSON` | `false` (`true` in `.env.example`) | Emit structured JSON logs. Each line carries `request_id`, and `trace_id` when tracing is on. |
 
-### Feature flags and tools
+### 3.2 Authentication (IAM integration)
 
-`ENABLE_RAG`, `ENABLE_TOOLS`, `ENABLE_MEMORY`, `ENABLE_STREAMING`, `ENABLE_RERANKING`, `ENABLE_QUERY_REWRITE`, `ENABLE_WEB_SEARCH`, `ENABLE_WEATHER`, `ENABLE_NEWS`, `ENABLE_CALCULATOR` - all default `true`; these are seed values, editable live via the Feature Flags page.
+The API verifies each request by sending the caller's bearer token to IAM (`GET {IAM_BASE_URL}/api/auth/me`, through the gateway) and reading tenant, user, roles and permissions from the answer.
 
-| Variable | Req | Notes |
+| Variable | Default | Description |
 |---|---|---|
-| `SERPER_API_KEY` or `TAVILY_API_KEY` | only if `ENABLE_WEB_SEARCH` | Web search tool |
-| `OPENWEATHER_API_KEY`, `OPENWEATHER_BASE_URL` | only if `ENABLE_WEATHER` | Weather tool |
-| `NEWSAPI_API_KEY`, `NEWSAPI_BASE_URL` | only if `ENABLE_NEWS` | News tool |
+| **`AUTH_REQUIRED`** | `false` | `true`: every route except `/api/v1/health*`, `/api/v1/auth/refresh`, docs and CORS preflight needs a valid IAM bearer token. No or bad token = 401, IAM unreachable = 503. Tenant and user come from the token; the `X-Tenant-ID` / `X-User-ID` headers are ignored. `false`: anonymous callers get a default tenant (dev only). **Set `true` in every real environment.** With it on, only the frontend (through `/api/rag`) sends tokens, so curl, the CLI and `/docs` "Try it out" get 401. |
+| `ADMIN_ROLES` | `super_admin,admin,tenant_admin` | IAM role codes counted as administrators. Enforced only when `AUTH_REQUIRED=true`. Everyone else (a plain `member`) can use chat and conversations only; knowledge bases, documents, agents, prompts, tools, model profiles, the feedback list, usage, analytics, upload jobs and feature flags are admin-only. |
+| `TENANT_OVERRIDE_ROLES` | `super_admin` | Roles that may act on behalf of another tenant with `X-Tenant-ID` ("browse as tenant") and manage **global** feature flags. Everyone else is pinned to the tenant in their token. |
+| `REQUIRE_VERIFIED_EMAIL` | `false` | `true`: refuse (403) accounts whose email IAM has not verified. Turn on with IAM email verification for internet-facing deployments. |
+| `IAM_BASE_URL` | none (required) | The **gateway** base URL, not the auth-service. Local Docker: `http://host.docker.internal:3301`. |
+| `IAM_CLIENT_ID`, `IAM_CLIENT_SECRET` | none (required) | Credentials for IAM's `client_credentials` service token. Not used for per-request auth. Placeholders are fine until a feature calls the service token. |
+| `IAM_INTROSPECTION_API_KEY` | none (required) | Sent as `x-api-key` when the API calls IAM's session-introspection endpoint. Set it to IAM's value if you use introspection; otherwise a placeholder. |
+| `IAM_JWKS_BASE_URL` | unset | **Unused today.** Reserved for future local RS256 verification. Leave empty. |
+| `IAM_TIMEOUT` | `30` | Seconds per IAM request. |
+| `IAM_MAX_RETRIES` | `3` | Retries on transient IAM/network failures. |
+| `IAM_VERIFY_SSL` | `true` | Set `false` only against a local self-signed certificate. |
+| `JWT_SECRET` | none (required) | Legacy local-signing secret. Sessions are IAM-issued tokens and are not verified with this, but it must be set. Use a random 32+ character value. |
+| `JWT_ALGORITHM` | `HS256` | Algorithm for the legacy secret above. |
+| `ENABLE_RBAC` | `false` | Seed value of the dynamic `enable_rbac` feature flag: turns on permission-code checks (`require_permission` / `require_role`) on routes that use them. Separate from `AUTH_REQUIRED`. |
 
-### File upload service
+### 3.3 Database, cache and queue
 
-| Variable | Req | Local / example | Notes |
-|---|---|---|---|
-| `UPLOAD_SERVICE_URL` | yes | `http://host.docker.internal:4005` | file-upload-service |
-| `UPLOAD_SERVICE_API_KEY` | yes | - | Key the upload service expects |
-| `UPLOAD_SERVICE_TIMEOUT`, `UPLOAD_SIGNED_URL_EXPIRY`, `UPLOAD_SERVICE_VERIFY_SSL` | opt | `30`, `3600`, `true` | |
-
-### Observability
-
-| Variable | Req | Notes |
+| Variable | Default | Description |
 |---|---|---|
-| `OTEL_ENABLED`, `OTEL_ENDPOINT`, `OTEL_SERVICE_NAME` | opt | `OTEL_ENABLED=true` + a collector (Jaeger at `jaeger:4317` in the `full` profile) |
-| `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_ENDPOINT`, `LANGCHAIN_PROJECT` | opt | LangSmith. **Set `LANGCHAIN_TRACING_V2=false` unless you have a real key** |
+| `DATABASE_URL` | none (required) | Postgres URL on a pgvector-enabled server (the compose image is). Example: `postgresql://user:pass@postgres:5432/db`. |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | none | Used only to initialise the compose Postgres container on first start. Keep consistent with `DATABASE_URL`. Changing them later does not change an existing volume. |
+| `REDIS_URL` | none (required) | Redis for the job queue, rate limiting and caches. Example: `redis://redis:6379/0`. |
+| `QUEUE_PREFIX` | `easydev` | Namespace for queue keys so several stacks can share one Redis. |
+
+### 3.4 Vector store and retrieval
+
+| Variable | Default | Description |
+|---|---|---|
+| `VECTOR_STORE_BACKEND` | `chroma` in code, **`pgvector` in `.env.example` and local** | Where embeddings live. Use `pgvector` (same Postgres, no extra service). `chroma` still works but needs a Chroma directory or server. |
+| `VECTOR_COLLECTION_NAME` | `langchain` | Collection / namespace name. |
+| `CHROMA_DIRECTORY` | `./storage/chroma` | Only for `chroma`: on-disk embedded store path. |
+| `CHROMA_SERVER_HOST`, `CHROMA_SERVER_PORT` | unset | Only for `chroma`: use a real `chroma run` server instead of the embedded client (needed when API and worker both use Chroma). |
+| `CHUNK_SIZE` | `1000` | Characters per chunk when splitting documents. |
+| `CHUNK_OVERLAP` | `200` | Characters shared between adjacent chunks. |
+| `RETRIEVAL_STRATEGY` | `hybrid` | Retrieval mode (vector + keyword). |
+| `RAG_MAX_RESULTS` | `5` | Chunks passed to the answer step after reranking. |
+| `RAG_CONTEXT_TOKEN_BUDGET` | `4000` | Max tokens of retrieved context sent to the LLM. |
+| `RAG_MIN_RELEVANCE_SCORE` | `0.0` | Cutoff on the reranker's raw score (can be negative). The top chunk is always kept so answers are never left without a citation; lower-ranked chunks below the cutoff are dropped. |
+| `REINDEX_STALE_AFTER_DAYS` | `90` | The weekly job re-embeds current documents not indexed in this many days. |
+
+### 3.5 LLM and embeddings
+
+| Variable | Default | Description |
+|---|---|---|
+| `LLM_PROVIDER` | `google` | `google`, `openai`, `anthropic` or `groq`. |
+| `LLM_MODEL` | `gemini-pro` | Model id for that provider. |
+| `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY` | unset | Provider keys. Set the one for `LLM_PROVIDER`, and for embeddings if that provider differs. |
+| `LLM_TEMPERATURE` | `0.2` | Sampling temperature. |
+| `LLM_MAX_TOKENS` | `8192` | Max tokens generated per answer. |
+| `LLM_STREAMING` | `true` | Stream tokens to the client (SSE). |
+| `LLM_TOP_K`, `LLM_TOP_P` | provider default | Optional sampling controls. |
+| `LLM_CIRCUIT_BREAKER_FAILURE_THRESHOLD` | `5` | Consecutive provider failures before the breaker opens and calls fail fast. |
+| `LLM_CIRCUIT_BREAKER_RESET_SECONDS` | `30` | Seconds before the breaker lets a trial call through. |
+| `EMBEDDING_PROVIDER` | `google` | Provider used to create embeddings. |
+| `EMBEDDING_MODEL` | `models/embedding-001` | Embedding model id. |
+| `EMBEDDING_DIMENSIONS` | `1536` | Vector size. Must match the pgvector column; changing it means re-embedding everything. Keep under 2000 (pgvector index limit). |
+| `EMBEDDING_RATE_LIMIT_REQUESTS_PER_MINUTE` | `90` | Self-imposed cap on embedding calls, kept below the provider limit (Gemini free tier: 100/min) so queued ingestion waits instead of hitting 429. |
+| `EMBEDDING_RATE_LIMIT_TOKENS_PER_MINUTE` | `30000` | Same idea, by tokens. |
+
+### 3.6 Feature flags and tools
+
+Seed values for the live Feature Flags page (changes made there take effect within about 30 seconds, no redeploy). All default `true` except `ENABLE_RBAC`.
+
+`ENABLE_RAG` retrieval-augmented answers - `ENABLE_TOOLS` agent tool calling - `ENABLE_MEMORY` conversation memory - `ENABLE_STREAMING` SSE streaming - `ENABLE_RERANKING` cross-encoder reranking - `ENABLE_QUERY_REWRITE` query rewriting - `ENABLE_WEB_SEARCH`, `ENABLE_WEATHER`, `ENABLE_NEWS`, `ENABLE_CALCULATOR` the matching tools.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SERPER_API_KEY`, `TAVILY_API_KEY` | empty | Web-search tool keys. Set one if `ENABLE_WEB_SEARCH=true`. |
+| `OPENWEATHER_API_KEY` | none (**required to boot**) | Weather tool key. Placeholder if you do not use weather. |
+| `OPENWEATHER_BASE_URL` | `https://api.openweathermap.org` | Weather API base. |
+| `NEWSAPI_API_KEY` | none (**required to boot**) | News tool key. Placeholder if you do not use news. |
+| `NEWSAPI_BASE_URL` | `https://newsapi.org` | News API base. |
+
+### 3.7 File upload service
+
+| Variable | Default | Description |
+|---|---|---|
+| `UPLOAD_SERVICE_URL` | none (required) | Base URL of file-upload-service. Local Docker: `http://host.docker.internal:4005`. |
+| **`FILE_UPLOAD_HMAC_SECRET`** | unset | Shared secret used to sign every request to the upload service (`X-Gateway-Hmac` = HMAC-SHA256 of `userId:email:role`). **Required whenever the upload service runs with `GATEWAY_AUTH_REQUIRED=true` (its default)**; without it uploads fail with `Missing gateway signature`. Same value as the upload service's `GATEWAY_INTERNAL_SECRET`. |
+| `UPLOAD_SERVICE_ROLE` | `admin` | Role presented in the signed identity: `user` or `admin`. RAG is a trusted backend acting for its own already-authorised tenants; `admin` lets it replace/delete the files it stored. |
+| `UPLOAD_SERVICE_API_KEY` | unset | Sent as `x-api-key`. The upload service does not check it today; harmless to keep set. |
+| `UPLOAD_SERVICE_TIMEOUT` | `30` | Seconds per call (1-300). |
+| `UPLOAD_SIGNED_URL_EXPIRY` | `3600` | Signed download URL lifetime in seconds (min 60). |
+| `UPLOAD_SERVICE_VERIFY_SSL` | `true` | `false` only for local self-signed certificates. |
+
+### 3.8 Observability
+
+| Variable | Default | Description |
+|---|---|---|
+| `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing (HTTP request, graph nodes, outbound calls). Needs a collector such as the `jaeger` service in the `full` compose profile. |
+| `OTEL_ENDPOINT` | `localhost:4317` | OTLP gRPC collector address. Inside compose use `jaeger:4317`. |
+| `OTEL_SERVICE_NAME` | `easydev-ai-platform` | Service name shown in the trace UI. |
+| `LANGCHAIN_TRACING_V2` | `false` in code (**`true` in `.env.example`**) | Send LLM/chain traces to LangSmith. Set `false` unless `LANGCHAIN_API_KEY` is real. |
+| `LANGCHAIN_API_KEY` | unset | LangSmith key. |
+| `LANGCHAIN_ENDPOINT` | `https://api.smith.langchain.com` | LangSmith endpoint. |
+| `LANGCHAIN_PROJECT` | `default` | LangSmith project name. |
 
 ---
 
@@ -172,31 +219,87 @@ Cookies are `httpOnly`; `secure` is on automatically when `NODE_ENV=production`,
 
 ## 5. IAM auth-service (`stacks/core/env/.env.auth`, host port 3304)
 
-| Variable | Req | Local / example | Notes |
+IAM (NestJS + Prisma) owns users, tenants, roles, sessions, invitations and social login. It is the only service that signs tokens.
+
+**IAM refuses to start unless these are set** (Joi validation in `app.module.ts`): `FRONTEND_URL`, `AUTH_PUBLIC_BASE_URL` (must be a URL), `DATABASE_URL`, `COOKIE_SECRET` (16+ chars), `SSO_SECRET` (16+), `JWT_REFRESH_SECRET` (32+), `JWT_MAGIC_LINK_SECRET` (16+), `FILE_UPLOAD_SERVICE_URL` (must be a URL, even if you never upload), `NOTIFICATION_SERVICE_URL` and `TENANT` (the platform tenant slug, for example `easydev`). Separately, `BACKUP_CODE_ENCRYPTION_KEY` (64 hex) and, in production, `CORS_ORIGINS` are enforced at runtime.
+
+### 5.1 Core
+
+| Variable | Req | Local / example | Description |
 |---|---|---|---|
-| `NODE_ENV` | yes | `development` / `production` | |
-| `PORT`, `API_PREFIX`, `APP_NAME` | opt | `3000` inside the container (published as 3304), `api/v1/iam` | |
-| `FRONTEND_URL` | yes | `http://localhost:3000` | Post-login and post-link redirects go here |
-| `APP_URL`, `AUTH_PUBLIC_BASE_URL` | prod | public IAM URL | Used in OAuth callbacks and emails |
-| **`CORS_ORIGINS`** | prod (boot fails without it) | `http://localhost:3000,http://localhost:3301` | Also IAM's **trusted-origin list for social callbacks** - must contain the gateway's public origin |
-| `DATABASE_URL` | yes | via pgbouncer | Prisma schema `iam` |
-| `REDIS_URL` / `REDIS_HOST`,`REDIS_PORT`,`REDIS_PASSWORD`,`REDIS_DB` | yes | - | Tokens, invites (`token:tenant_invite:*`), sessions |
-| `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` (or `*_PATH`) | yes | RS256 pair | IAM is the only signer. `JWT_PREVIOUS_PUBLIC_KEYS` for rotation |
-| `JWT_REFRESH_SECRET`, `JWT_MAGIC_LINK_SECRET`, `SSO_SECRET`, `COOKIE_SECRET` | yes | random | |
-| `JWT_ISSUER`, `JWT_AUDIENCE` | prod | public auth domain | |
-| **`BACKUP_CODE_ENCRYPTION_KEY`** | **yes** | **64 hex chars** | `openssl rand -hex 32`. Encrypts stored social-provider tokens and 2FA secrets. Production deploy aborts if missing/invalid |
-| `IAM_INTROSPECTION_API_KEY` | yes | - | Shared with RAG |
-| `GATEWAY_IAM_CLIENT_ID`, `GATEWAY_IAM_CLIENT_SECRET` | prod | - | Gateway's machine identity |
-| `BOOTSTRAP_TENANT_NAME`, `BOOTSTRAP_SUPER_ADMIN_EMAIL`, `BOOTSTRAP_SUPER_ADMIN_PASSWORD`, `BOOTSTRAP_SERVICE_ACCOUNT_EMAIL`, `BOOTSTRAP_SERVICE_ACCOUNT_PASSWORD` | yes | - | First-run accounts. **Change the passwords before production** |
-| `NOTIFICATION_SERVICE_URL`, `NOTIFICATION_SERVICE_API_KEY` | URL: **yes (IAM will not boot without it)**; key: yes for email | `http://notification-service:4000/v1` | Locally these two are injected by the core compose file, not `.env.auth`. Invites, verification, "account connected" emails |
-| `FILE_UPLOAD_SERVICE_URL`, `FILE_UPLOAD_HMAC_SECRET` | opt | - | Avatars etc. |
-| `ENABLE_SWAGGER` | prod | `false` in prod | |
-| `ENABLE_DB_QUERY_LOGGING` | prod | `false` | |
-| `ENABLE_RATE_LIMIT`, `RATE_LIMIT_TTL`, `RATE_LIMIT_MAX` | prod | `true` | |
-| `ENABLE_REDIS`, `ENABLE_BULLMQ` | prod | `true` | |
-| `ENABLE_KAFKA`, `KAFKA_*` | opt | off | Only with a broker |
-| `TURNSTILE_SECRET_KEY` | opt | - | CAPTCHA |
-| `EMAIL_NORMALIZATION_ENABLED`, `EMAIL_ALIAS_*`, `DISPOSABLE_EMAIL_*`, `EMAIL_PROVIDER_RULES_ENABLED` | opt | see example | Sign-up email hygiene |
+| `NODE_ENV` | yes | `development` / `production` | `production` turns on stricter startup checks (for example `CORS_ORIGINS` becomes mandatory). |
+| `PORT` | opt | `3000` inside the container (published as 3304) | Listen port. Other services reach IAM at `http://auth-service:3000`. |
+| `API_PREFIX` | opt | `api/v1/iam` | Global URL prefix of the IAM API. |
+| `APP_NAME` | opt | `EasyDev` | Shown in emails and the Swagger title. |
+| `AUTH_MODE` | opt | `jwt` | `jwt` or `session`. Keep `jwt`. |
+| `FRONTEND_URL` | yes | `http://localhost:3000` | Where IAM redirects the browser after social login and after linking (`/auth/callback`, `/dashboard/settings`). Also trusted as an origin. |
+| `APP_URL` | prod | public IAM URL | IAM's own public URL, used in links inside emails. |
+| `AUTH_PUBLIC_BASE_URL` | **yes** | public IAM URL | Base for OAuth callback URLs when nothing overrides it. Must be a valid URL. Trusted as an origin. |
+| **`CORS_ORIGINS`** | prod (boot fails without it) | `http://localhost:3000,http://localhost:3301` | Comma-separated allowed origins. It is **also IAM's trusted-origin list for social callbacks**: it must include the gateway's public origin, otherwise social login fails with "Untrusted base URL override". |
+| `COOKIE_SECRET` | prod | random | Signs IAM cookies (OAuth state, link token). |
+| `SSO_SECRET` | prod | random | Signing secret for single-sign-on handoff. |
+| `ENABLE_SWAGGER` | prod | `false` in prod | Exposes the Swagger UI. Hide it in production. |
+| `ENABLE_LOGGING`, `LOG_LEVEL` | opt | `true`, `info` | `LOG_LEVEL`: `debug`/`info`/`warn`/`error`. |
+| `ENABLE_DB_QUERY_LOGGING` | prod | `false` | Logs every SQL query. Always `false` in production. |
+
+### 5.2 Data stores
+
+| Variable | Req | Description |
+|---|---|---|
+| `DATABASE_URL` | yes | Postgres URL (through pgbouncer in the core stack). Prisma uses schema `iam`; migrations run at start. |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | compose | Initialise the Postgres container. Change the password for production. |
+| `REDIS_URL` (or `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`) | yes | Redis for tokens, invitation links (`token:tenant_invite:*`), sessions and queues. `rediss://` for TLS providers. |
+| `REDIS_DB` | opt | Redis database index; IAM uses `0`. |
+| `ENABLE_REDIS` | prod | Default `true`. |
+| `ENABLE_BULLMQ` | prod | Default `false` in code; set `true` in production for background jobs. |
+| `TENANT_SLUG`, `TENANT_ID` | opt | Default tenant selectors for single-tenant setups. |
+
+### 5.3 Tokens and secrets
+
+| Variable | Req | Description |
+|---|---|---|
+| `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` | yes (or the `_PATH` pair) | RS256 key pair, base64-encoded PEM. IAM signs with the private key; copy the public key to every service that verifies tokens. Never share the private key. |
+| `JWT_PRIVATE_KEY_PATH`, `JWT_PUBLIC_KEY_PATH` | alt | Paths to PEM files (for example `/run/secrets/jwt_private.pem`) instead of inline keys. |
+| `JWT_PREVIOUS_PUBLIC_KEYS` | opt | Comma-separated older public keys still accepted, for key rotation. |
+| `JWT_ISSUER`, `JWT_AUDIENCE` | prod | Token `iss` / `aud` claims. Use the public auth domain. |
+| `JWT_SECRET` | opt | HMAC secret (32+ chars if set) for the non-RS256 parts of IAM. Optional in the validation schema. |
+| `JWT_REFRESH_SECRET` | yes | Secret for refresh tokens. |
+| `JWT_MAGIC_LINK_SECRET` | yes | Secret for magic-link / email-verification tokens. |
+| **`BACKUP_CODE_ENCRYPTION_KEY`** | **yes** | Exactly 64 hex characters (`openssl rand -hex 32`). Encrypts stored social-provider tokens and 2FA secrets. Without it every social sign-in/link and 2FA enrolment fails. Changing it makes already-stored encrypted values unreadable. |
+| `IAM_INTROSPECTION_API_KEY` | yes | Key other services present (`x-api-key`) to call IAM's session-introspection endpoint. |
+| `GATEWAY_IAM_CLIENT_ID`, `GATEWAY_IAM_CLIENT_SECRET` | prod | The gateway's machine identity (client-credentials). Mirror the values in the gateway's env. |
+| `GATEWAY_HMAC_ALGORITHM` | opt | HMAC algorithm for gateway-signed requests. Leave the default. |
+
+### 5.4 First-run accounts
+
+| Variable | Req | Description |
+|---|---|---|
+| `BOOTSTRAP_TENANT_NAME` | yes | Name of the tenant created on first start. |
+| `BOOTSTRAP_SUPER_ADMIN_EMAIL`, `BOOTSTRAP_SUPER_ADMIN_PASSWORD` | yes | The platform super admin created on first start. **Change the password before production.** |
+| `BOOTSTRAP_SERVICE_ACCOUNT_EMAIL`, `BOOTSTRAP_SERVICE_ACCOUNT_PASSWORD` | yes | Service account the gateway uses for privileged IAM calls. Must equal the gateway's `IAM_ADMIN_EMAIL` / `IAM_ADMIN_PASSWORD`. |
+
+### 5.5 Email and other services
+
+| Variable | Req | Description |
+|---|---|---|
+| `NOTIFICATION_SERVICE_URL` | **yes (IAM will not boot without it)** | Base URL of notification-service, for example `http://notification-service:4000/v1`. Locally the core compose file injects it. |
+| `NOTIFICATION_SERVICE_API_KEY` | yes for email | Sent as `x-api-key` on every notification request. Must equal notification-service `API_KEY`. |
+| `FILE_UPLOAD_SERVICE_URL` | **yes** | Base URL of file-upload-service. Required to boot even if unused. |
+| `FILE_UPLOAD_HMAC_SECRET` | opt | Signs calls to the upload service; must equal its secret. |
+| `ENABLE_FILE_UPLOAD`, `ENABLE_EXPORTS` | opt | Feature toggles. |
+| `ENABLE_KAFKA`, `KAFKA_BROKERS`, `KAFKA_CLIENT_ID`, `KAFKA_SSL`, `KAFKA_SASL_USERNAME`, `KAFKA_SASL_PASSWORD`, `KAFKA_SASL_MECHANISM` | opt | Event streaming. Leave `ENABLE_KAFKA=false` unless you run a broker. |
+
+### 5.6 Protection and sign-up rules
+
+| Variable | Req | Description |
+|---|---|---|
+| `ENABLE_RATE_LIMIT` | prod | `true` in production. |
+| `RATE_LIMIT_TTL`, `RATE_LIMIT_MAX` | opt | Window in seconds and max requests per window per IP. |
+| `TURNSTILE_SECRET_KEY` | opt | Cloudflare Turnstile secret to require CAPTCHA on sign-up/login. |
+| `EMAIL_NORMALIZATION_ENABLED` | opt | Treat `a.b+tag@gmail.com` and `ab@gmail.com` as the same mailbox. |
+| `EMAIL_ALIAS_DETECTION_ENABLED`, `EMAIL_ALIAS_ALLOWED_FOR_PAID`, `EMAIL_ALIAS_ALLOWED_FOR_TRIAL` | opt | Detect `+alias` addresses and whether paid/trial tenants may use them. |
+| `DISPOSABLE_EMAIL_DETECTION_ENABLED`, `DISPOSABLE_EMAIL_PROVIDER_REFRESH_ENABLED` | opt | Block throwaway email domains, and refresh that domain list periodically. |
+| `EMAIL_PROVIDER_RULES_ENABLED` | opt | Apply per-provider email rules. |
 
 ### Social login credentials
 
@@ -228,51 +331,97 @@ https://<DOMAIN_GATEWAY>/api/auth/social/<provider>/callback (production)
 
 ## 6. API gateway (`stacks/core/env/.env.gateway`, host port 3301)
 
-| Variable | Req | Notes |
-|---|---|---|
-| `PORT`, `APP_NAME`, `CLUSTER_MODE`, `DISABLE_FILE_LOGGING` | opt | |
-| `FRONTEND_URL`, `CORS_ORIGINS` | yes | Must include `http://localhost:3000` locally |
-| `AUTH_SERVICE_URL` | yes | `http://auth-service:3304` |
-| `IAM_ADMIN_EMAIL`, `IAM_ADMIN_PASSWORD`, `IAM_ADMIN_JWT` | yes | Match IAM `BOOTSTRAP_SERVICE_ACCOUNT_*` |
-| `REDIS_URL`, `REDIS_DB` | yes | |
-| `MONGODB_URI` | yes | |
-| `COMMUNICATION_URL/_API_KEY`, `JOB_AGENT_URL/_API_KEY`, `AI_WORKFLOW_URL/_SIGNING_SECRET`, `SUPPORT_AI_URL/_API_KEY`, `PAYMENT_SERVICE_API_KEY`, `RAZORPAY_KEY_ID` | only for those products | **The RAG project does not need payment, lead, job-agent, support-ai or communication services.** Leave unset/placeholder locally |
-| `FROM_EMAIL`, `FROM_NAME`, `ADMIN_EMAIL` | prod | |
+The gateway is the browser/API entry point (`web-agency-backend-api`). It proxies `/api/auth/*` and `/api/iam/*` to IAM and forwards other calls to product services.
+
+| Variable | Req | Local / example | Description |
+|---|---|---|---|
+| `PORT` | opt | `3000` (published 3301) | Listen port inside the container. |
+| `APP_NAME` | opt | `EasyDev` | Name in logs and emails. |
+| `CLUSTER_MODE`, `DISABLE_FILE_LOGGING` | opt | `false`, `false` | Run multiple worker processes; skip writing log files. |
+| `FRONTEND_URL` | yes | `http://localhost:3000` | Frontend origin. |
+| `CORS_ORIGINS` | yes | includes `http://localhost:3000` | Browser origins allowed to call the gateway. |
+| `AUTH_SERVICE_URL` | yes | `http://auth-service:3000` | Where `/api/auth/*` and `/api/iam/*` are proxied. |
+| `IAM_ADMIN_EMAIL`, `IAM_ADMIN_PASSWORD` | yes | service account | Credentials for privileged IAM calls. Must equal IAM `BOOTSTRAP_SERVICE_ACCOUNT_EMAIL` / `_PASSWORD`. |
+| `IAM_ADMIN_JWT` | opt | empty | Pre-issued admin token; leave empty (the gateway logs in with the two values above). |
+| `REDIS_URL`, `REDIS_DB` | yes | `redis://:PASSWORD@core-redis:6379/3`, `3` | Gateway cache uses Redis database 3. |
+| `MONGODB_URI` | optional | empty | Shared platform Mongo, only for features that store data in Mongo. |
+| `FROM_EMAIL`, `FROM_NAME`, `ADMIN_EMAIL` | prod | `noreply@easydev.in`, `EasyDev`, admin address | Default sender and admin contact. |
+| `COMMUNICATION_URL`, `COMMUNICATION_API_KEY` | product only | | AI communication product service. **Not needed for the RAG project.** |
+| `JOB_AGENT_URL`, `JOB_AGENT_API_KEY` | product only | | Job-agent product. **Not needed for RAG.** |
+| `AI_WORKFLOW_URL`, `AI_WORKFLOW_SIGNING_SECRET` | product only | | AI workflow platform. **Not needed for RAG.** |
+| `SUPPORT_AI_URL`, `SUPPORT_AI_API_KEY` | product only | | Support-AI product. **Not needed for RAG.** |
+| `PAYMENT_SERVICE_API_KEY`, `RAZORPAY_KEY_ID` | product only | | Payments. **Not needed for RAG.** Leave placeholders locally. |
 
 ---
 
 ## 7. notification-service (`stacks/utility/env/.env.app`, host port 4004)
 
-| Variable | Req | Local | Notes |
-|---|---|---|---|
-| `PORT`, `NODE_ENV` | yes | | |
-| `API_KEY` | yes | = IAM `NOTIFICATION_SERVICE_API_KEY` | |
-| `DEFAULT_TENANT_ID` | opt | | |
-| `MONGODB_URI` | yes | | |
-| `REDIS_URL`, `REDIS_PASSWORD` | yes | | |
-| `ENABLE_BULL`, `ENABLE_KAFKA`, `ENABLE_CACHE` | opt | | |
-| `EMAIL_SERVICE`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_SECURE`, `EMAIL_USER`, `EMAIL_PASS`, `EMAIL_FROM`, `DEFAULT_FROM_NAME` | yes | **Mailpit:** `EMAIL_HOST=mailpit`, `EMAIL_PORT=1025`, no auth | Production: a real SMTP relay |
-| `EMAIL_TLS_REJECT_UNAUTHORIZED`, `EMAIL_TLS_MIN_VERSION`, `EMAIL_DEBUG`, `EMAIL_MAX_*`, `EMAIL_RATE_*` | opt | | |
-| `FALLBACK_EMAIL_*`, `OAUTH2_*` | opt | | Secondary SMTP / Gmail OAuth2 |
-| `SMS_DEFAULT_PROVIDER` | opt | | |
-| `THROTTLE_TTL`, `THROTTLE_LIMIT`, `CORS_ORIGINS` | opt | | |
+Sends email (and SMS) for IAM: invitations, verification, "account connected". Variable names come from the app's own `configuration.ts`.
 
-Local email is caught by Mailpit - open its web UI to read invitation and verification emails; nothing is delivered externally.
+| Variable | Req | Local / example | Description |
+|---|---|---|---|
+| `PORT` | yes | `4000` (published 4004) | Listen port inside the container (code default 4000). |
+| `NODE_ENV` | yes | `production` | Runtime mode. |
+| `API_KEY` | yes | equals IAM `NOTIFICATION_SERVICE_API_KEY` | Callers must send this as `x-api-key`. |
+| `DEFAULT_TENANT_ID` | opt | empty | Tenant used when a request does not name one. |
+| `MONGODB_URI` | yes | shared platform Mongo | Stores templates and delivery records. Shared with other services; collections do not collide. |
+| `REDIS_URL`, `REDIS_PASSWORD` | yes | `redis://utility-redis:6379` | Queue backend. Password must equal `.env.redis`. |
+| `ENABLE_BULL` | opt | `true` | Send email/SMS through BullMQ queues. |
+| `ENABLE_KAFKA`, `ENABLE_CACHE` | opt | `false`, `false` | Event streaming and response cache. |
+| `CORS_ORIGINS` | opt | `http://localhost:3000` | Allowed browser origins. |
+| `THROTTLE_TTL`, `THROTTLE_LIMIT` | opt | `60`, `100` | Requests per window (seconds) per caller. |
+| `BULL_CONCURRENCY_SMS`, `BULL_CONCURRENCY_EMAIL` | opt | `5`, `10` | Parallel queue workers per channel. |
+| `SMS_FALLBACK_PROVIDER`, `SMS_RETRY_ATTEMPTS`, `SMS_RETRY_DELAY_MS` | opt | empty, `3`, `5000` | SMS failover and retry policy. |
+| `KAFKA_BROKERS`, `KAFKA_GROUP_ID`, `KAFKA_CLIENT_ID`, `KAFKA_TOPIC_*` | opt | | Only with `ENABLE_KAFKA=true`. |
+| `SMS_DEFAULT_PROVIDER` | opt | `mock` | `mock` logs the SMS instead of sending. Set a real provider plus its credentials to send. |
+| `EMAIL_SERVICE` | opt | empty | Well-known provider name (for example `gmail`). Empty means use host/port. |
+| `EMAIL_HOST`, `EMAIL_PORT` | yes | **Mailpit:** `mailpit`, `1025`. Gmail: `smtp.gmail.com`, `587` | SMTP server. |
+| `EMAIL_SECURE` | opt | `false` | `true` for implicit TLS (port 465). |
+| `EMAIL_USER`, `EMAIL_PASS` | prod | empty for Mailpit | SMTP login. Use an app password for Gmail. |
+| `EMAIL_FROM`, `DEFAULT_FROM_NAME` | yes | `noreply@easydev.in`, `Easydev` | Sender address and display name. Some providers reject an address they do not own. |
+| `EMAIL_MAX_CONNECTIONS`, `EMAIL_MAX_MESSAGES` | opt | `5`, `100` | SMTP connection pool size and messages per connection. |
+| `EMAIL_RATE_DELTA`, `EMAIL_RATE_LIMIT` | opt | `1000`, `5` | At most `EMAIL_RATE_LIMIT` messages per `EMAIL_RATE_DELTA` ms. |
+| `EMAIL_TLS_REJECT_UNAUTHORIZED` | opt | `true` | Set `false` only for a self-signed SMTP certificate. |
+| `EMAIL_TLS_MIN_VERSION` | opt | `TLSv1.2` | Minimum TLS version. |
+| `EMAIL_DEBUG` | opt | `false` | Log the SMTP conversation. |
+| `OAUTH2_CLIENT_ID`, `OAUTH2_CLIENT_SECRET`, `OAUTH2_REDIRECT_URI`, `OAUTH2_REFRESH_TOKEN` | opt | empty | Gmail OAuth2 SMTP instead of a password. |
+| `FALLBACK_EMAIL_SERVICE`, `_HOST`, `_PORT`, `_SECURE`, `_USER`, `_PASS` | opt | empty | Second SMTP account used if the primary fails. |
+
+Locally, mail is caught by Mailpit (SMTP 1025, web UI 8025); nothing leaves your machine.
 
 ---
 
 ## 8. file-upload-service (`stacks/utility/env/.env.file-upload`, host port 4005)
 
-| Variable | Req | Notes |
-|---|---|---|
-| `PORT`, `NODE_ENV`, `CORS_ORIGIN` | yes | |
-| `MONGO_URI` | yes | |
-| `GATEWAY_INTERNAL_SECRET`, `FILE_UPLOAD_HMAC_SECRET` | yes | Shared secrets, see section 2 |
-| `GATEWAY_AUTH_REQUIRED`, `TENANCY_ENABLED` | opt | |
-| `STORAGE_TYPE` | yes | `local` \| `r2` \| `s3` \| `azure` |
-| `LOCAL_SIGNED_URL_SECRET` | if `local` | |
-| `R2_*` / `S3_*` / `AZURE_*` | if that backend | Bucket + credentials |
-| `ALLOWED_MIME_TYPES`, `ALLOWED_FILE_EXTENSIONS` | opt | Must permit the document types you ingest (pdf, docx, txt, md, csv...) |
+Stores uploaded documents; the RAG worker fetches them through signed URLs. Startup validation (`src/config/validateEnv.js`) fails fast: `MONGO_URI` is required; `GATEWAY_INTERNAL_SECRET` (min 32 chars) is required while `GATEWAY_AUTH_REQUIRED` is true (the default); `LOCAL_SIGNED_URL_SECRET` (min 32) is required when `STORAGE_TYPE=local`; and each cloud backend's own variables are required when selected.
+
+With `GATEWAY_AUTH_REQUIRED=true` every request must carry `X-Gateway-Hmac` plus `X-User-Id` and `X-User-Role` (`user` or `admin`). The RAG API sends these automatically when `FILE_UPLOAD_HMAC_SECRET` is set.
+
+| Variable | Req | Local / example | Description |
+|---|---|---|---|
+| `PORT` | yes | `3000` (published 4005) | Listen port inside the container (code default 4001). |
+| `NODE_ENV` | yes | `production` | Runtime mode. |
+| `CORS_ORIGIN` | yes | `http://localhost:3000` | Allowed browser origin. |
+| `MONGO_URI` | yes | shared platform Mongo | File metadata. **Note the name: `MONGO_URI`, not `MONGODB_URI`.** |
+| `GATEWAY_INTERNAL_SECRET` | yes (min 32 chars) | random | The secret used to verify `X-Gateway-Hmac`. |
+| `FILE_UPLOAD_HMAC_SECRET` | alt | same value | Accepted as a fallback name when `GATEWAY_INTERNAL_SECRET` is unset. Callers (RAG, gateway, IAM) know it by this name. Setting both to the same value is what the infra example does. |
+| `GATEWAY_AUTH_REQUIRED` | opt | `true` | Require calls to come through the gateway or carry a valid signature. |
+| `TENANCY_ENABLED` | opt | `true` | Separate files per tenant. |
+| `STORAGE_TYPE` | yes | `local` | `local`, `r2` (Cloudflare), `azure`, `s3` or `gcs`. Production uses R2 or Azure. |
+| `LOCAL_UPLOAD_DIR` | opt | `uploads` | Directory for `local` storage (a volume in Docker). |
+| `MAX_FILE_SIZE` | opt | `10485760` (10 MB) | Largest accepted upload in bytes. RAG also enforces its own limit. |
+| `UPLOAD_RATE_LIMIT`, `UPLOAD_RATE_WINDOW` | opt | `10`, `900000` | Uploads per window (ms) per caller. |
+| `GENERAL_RATE_LIMIT`, `GENERAL_RATE_WINDOW` | opt | `300`, `60000` | General request rate limit. |
+| `SIGNED_URL_EXPIRY` | opt | `3600` | Signed download URL lifetime in seconds. |
+| `TENANCY_MODE` | opt | `shared` | `shared` (one database) or `per-db`. |
+| `REDIS_URL` | opt | empty | Optional cache/rate-limit store. |
+| `CLAMAV_HOST`, `CLAMAV_PORT` | opt | empty, `3310` | Enables virus scanning when a ClamAV host is set. |
+| `GCS_BUCKET`, `GCS_PROJECT_ID`, `GCS_KEY_FILE` | if `gcs` | | Google Cloud Storage. |
+| `LOCAL_SIGNED_URL_SECRET` | if `local` | random | Signs download URLs for local storage. |
+| `R2_ENDPOINT`, `R2_ACCESS_KEY`, `R2_SECRET`, `R2_BUCKET`, `R2_PUBLIC_DOMAIN` | if `r2` | | Cloudflare R2 bucket and credentials. |
+| `AZURE_CONNECTION_STRING`, `AZURE_CONTAINER` | if `azure` | | Azure Blob Storage. |
+| `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_ENDPOINT` | if `s3` | | AWS S3 or compatible. Not in use today. |
+| `ALLOWED_MIME_TYPES`, `ALLOWED_FILE_EXTENSIONS` | opt | wide default list | Whitelist of accepted uploads. Must include every type you ingest (pdf, docx, txt, md, csv...). |
 
 ---
 
@@ -309,8 +458,20 @@ The RAG API and frontend are not part of this generator yet: they need their own
 2. **IAM** (`.env.auth`): keys, secrets, `BACKUP_CODE_ENCRYPTION_KEY`, `CORS_ORIGINS`, bootstrap admin, notification URL/key. Check: `POST :3301/api/auth/login` with the bootstrap admin returns 200.
 3. **notification-service** (`.env.app`): API key = IAM's, Mailpit or SMTP. Check: invite a user, see the email in Mailpit.
 4. **file-upload-service**: secrets and storage. Check: upload a document from the UI.
-5. **RAG** `.env`: LLM/embedding keys, `IAM_*`, `UPLOAD_*`, `AUTH_REQUIRED`. Check: `GET :8088/api/v1/health` = 200, and `GET /api/v1/knowledge-bases` without a token = 401.
+5. **RAG** `.env`: LLM/embedding keys, `IAM_*`, `UPLOAD_*` **including `FILE_UPLOAD_HMAC_SECRET`**, `AUTH_REQUIRED`. Check: `POST /api/v1/documents` with a token returns 202 and the upload job reaches `SUCCEEDED`; then `GET :8088/api/v1/health` = 200, and `GET /api/v1/knowledge-bases` without a token = 401.
 6. **Frontend** `.env.local`: three URLs. Restart `npm run dev` after any change (env is read at start).
 7. **OAuth providers**: create apps, register the redirect URIs from section 5, set credentials, then enable in IAM settings. Check: the login page shows the buttons; sign in with an email that already has a password account and confirm it links instead of creating a duplicate.
 
 After changing any `.env`, recreate containers (`docker compose up -d`) - a plain restart does not always re-read `env_file`.
+
+---
+
+## 12. Known runtime issues that look like configuration problems
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Document upload returns 400 `Missing gateway signature` | `FILE_UPLOAD_HMAC_SECRET` not set in RAG `.env`, or differs from the upload service's `GATEWAY_INTERNAL_SECRET` | Set the same 32+ char value on both, recreate `api` and `worker` |
+| First chat hangs, then 500 with `Can't load the model for 'cross-encoder/ms-marco-MiniLM-L-6-v2'` | The ~90 MB reranker model is downloaded from HuggingFace on first use and large downloads can fail on flaky TLS | The model cache is a Docker volume (`hf-cache`), so it only has to succeed once: run `snapshot_download("cross-encoder/ms-marco-MiniLM-L6-v2")` inside the `api` container until it completes, or set `ENABLE_RERANKING=false` |
+| Chat returns 500 `An unexpected internal server error` and logs show `503 UNAVAILABLE ... high demand` | The Gemini API is overloaded; the client retries with backoff and then gives up | Retry later, or switch `LLM_PROVIDER` / `LLM_MODEL` |
+| Social login: `Untrusted base URL override` | Gateway origin missing from IAM `CORS_ORIGINS` | Add it (section 5.1) |
+| IAM container exits at start | A variable in the "IAM refuses to start" list is missing or too short | Read `docker logs auth-service` for the Joi message |

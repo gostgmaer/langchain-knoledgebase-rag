@@ -14,6 +14,7 @@ import {
 
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
+import { QueryError } from "@/components/shared/query-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -58,7 +59,7 @@ function ChartTooltip({
 
 export function UsageView() {
   const [days, setDays] = useState<number>(30);
-  const { data, isLoading } = useUsage(days);
+  const { data, isLoading, isError, error, refetch } = useUsage(days);
 
   const stats = data
     ? [
@@ -86,7 +87,9 @@ export function UsageView() {
         </TabsList>
       </Tabs>
 
-      {isLoading ? (
+      {isError ? (
+        <QueryError error={error} onRetry={() => void refetch()} />
+      ) : isLoading ? (
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (

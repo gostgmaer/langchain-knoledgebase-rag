@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Send } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { HistoryRail } from "@/components/chat/history-rail";
@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useConversationHistory } from "@/hooks/use-conversation-history";
 import { useConversationMessages } from "@/hooks/use-api";
-import { streamChat } from "@/lib/api/client";
+import { ApiError, streamChat } from "@/lib/api/client";
 import { conversations } from "@/lib/api/resources";
 import type { Message } from "@/lib/api/types";
 import { useSession } from "@/lib/session";
@@ -32,7 +32,7 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data } = useConversationMessages(conversationId);
-  const messages: Message[] = data?.messages ?? [];
+  const messages: Message[] = useMemo(() => data?.messages ?? [], [data]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -61,10 +61,15 @@ export default function ChatPage() {
           if (event.type === "token" && typeof event.content === "string") {
             setPendingAssistant((prev) => (prev ?? "") + event.content);
           }
+          if (event.type === "error") {
+            toast.error(typeof event.message === "string" ? event.message : "The answer could not be completed.");
+          }
         },
       );
-    } catch {
-      toast.error("Chat request failed — is the backend running?");
+    } catch (err) {
+      // ApiError carries the server's own message (for example "not a member of any workspace",
+      // or the provider-unavailable text); only fall back to the generic hint for network failures.
+      toast.error(err instanceof ApiError ? err.message : "Chat request failed — is the backend running?");
     } finally {
       setSending(false);
       // Explicit fetch + setQueryData rather than invalidateQueries/

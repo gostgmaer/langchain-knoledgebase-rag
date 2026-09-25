@@ -1,6 +1,6 @@
 "use client";
 
-import { Library } from "lucide-react";
+import { Library, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -14,10 +14,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { useCreateKnowledgeBase, useKnowledgeBases } from "@/hooks/use-api";
+import { useCreateKnowledgeBase, useDeleteKnowledgeBase, useKnowledgeBases } from "@/hooks/use-api";
 
 export function KnowledgeBasesView() {
   const { data, isLoading } = useKnowledgeBases();
+  const deleteKnowledgeBase = useDeleteKnowledgeBase();
   const createKb = useCreateKnowledgeBase();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -62,6 +63,23 @@ export function KnowledgeBasesView() {
               <CardContent className="flex items-center justify-between text-xs text-neutral-500">
                 <span>{kb.document_count} documents</span>
                 <span>{kb.embedding_model}</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Delete ${kb.name}`}
+                  disabled={deleteKnowledgeBase.isPending}
+                  onClick={async () => {
+                    if (!confirm(`Delete the knowledge base "${kb.name}"? Only an empty one can be deleted.`)) return;
+                    try {
+                      await deleteKnowledgeBase.mutateAsync(kb.id);
+                      toast.success("Knowledge base deleted.");
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : "Could not delete the knowledge base.");
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </CardContent>
             </Card>
           ))}

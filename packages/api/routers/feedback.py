@@ -8,6 +8,7 @@ from packages.api.dependencies import (
     DEFAULT_USER_ID,
     get_scoped_container,
     require_uuid_header,
+    require_admin,
 )
 from packages.api.responses import ApiResponse
 from packages.api.schemas.feedback import (
@@ -89,6 +90,7 @@ async def submit_feedback(
     "",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[FeedbackListResponseSchema],
+    dependencies=[Depends(require_admin())],
     summary="Review feedback",
     description="Lists the calling tenant's feedback, optionally filtered by rating, most recent first.",
 )

@@ -10,7 +10,7 @@ import { PENDING_INVITE_KEY } from "@/lib/invite";
 import { useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
-type Result = { ok: true } | { ok: false; message: string };
+type Result = { ok: true; switched: boolean } | { ok: false; message: string };
 
 export default function AcceptInvitePage() {
   // useSearchParams needs a Suspense boundary so the page can still prerender.
@@ -61,10 +61,22 @@ function AcceptInvite() {
         } catch {
           // ignore
         }
-        // The session's tenant is baked into the access token, so it can't
-        // see the new membership until a fresh sign-in mints a new one.
-        await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
-        setResult({ ok: true });
+        // The session's workspace is baked into the access token, so switch into the one
+        // just joined (IAM issues a fresh session for it). If that is not possible, fall
+        // back to signing out so the next sign-in picks the new membership up.
+        const joined = (json?.data?.data ?? json?.data)?.tenantId as string | undefined;
+        let switched = false;
+        if (joined) {
+          switched = await fetch("/api/auth/switch-workspace", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tenantId: joined }),
+          })
+            .then((r) => r.ok)
+            .catch(() => false);
+        }
+        if (!switched) await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+        setResult({ ok: true, switched });
       })
       .catch((err) => {
         setResult({ ok: false, message: err instanceof Error ? err.message : "Could not accept this invitation." });
@@ -118,11 +130,12 @@ function AcceptInvite() {
             {view === "accepted" && (
               <>
                 <p className="text-green-700 dark:text-green-400">
-                  You&apos;ve joined the workspace. For security we&apos;ve signed you out - sign in again
-                  to enter it.
+                  {result?.ok && result.switched
+                    ? "You've joined the workspace and switched into it."
+                    : "You've joined the workspace. Sign in again to enter it."}
                 </p>
                 <Link href="/" className={cn(buttonVariants({ size: "lg" }))}>
-                  Sign in
+                  {result?.ok && result.switched ? "Continue" : "Sign in"}
                 </Link>
               </>
             )}

@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
+import { QueryError } from "@/components/shared/query-error";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,7 +23,7 @@ import { formatDateTime } from "@/lib/utils";
 
 export function FeedbackView() {
   const [filter, setFilter] = useState<FeedbackRating | "ALL">("ALL");
-  const { data, isLoading } = useFeedbackList(filter === "ALL" ? undefined : filter);
+  const { data, isLoading, isError, error, refetch } = useFeedbackList(filter === "ALL" ? undefined : filter);
 
   return (
     <div>
@@ -43,7 +44,9 @@ export function FeedbackView() {
         </TabsList>
       </Tabs>
 
-      {isLoading ? (
+      {isError ? (
+        <QueryError error={error} onRetry={() => void refetch()} />
+      ) : isLoading ? (
         <Skeleton className="h-40 w-full" />
       ) : !data || data.feedback.length === 0 ? (
         <EmptyState icon={MessagesSquare} title="No feedback yet" />

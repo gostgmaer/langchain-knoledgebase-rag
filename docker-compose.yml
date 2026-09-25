@@ -20,6 +20,9 @@ services:
     volumes:
       - .:/app
       - /app/.venv
+      # Reranker model (~90MB) downloaded once from HuggingFace and kept across
+      # container rebuilds instead of re-fetching it on the first query.
+      - hf-cache:/home/app/.cache/huggingface
 
     depends_on:
       postgres:
@@ -43,6 +46,9 @@ services:
     volumes:
       - .:/app
       - /app/.venv
+      # Reranker model (~90MB) downloaded once from HuggingFace and kept across
+      # container rebuilds instead of re-fetching it on the first query.
+      - hf-cache:/home/app/.cache/huggingface
     profiles: [full]
 
     depends_on:
@@ -126,7 +132,7 @@ services:
 volumes:
   postgres-data:
   redis-data:
-
+  hf-cache:
 networks:
   ai-platform:
     driver: bridge

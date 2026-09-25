@@ -19,7 +19,8 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import { notFound } from "next/navigation";
+import Link from "next/link";
+import { notFound, usePathname } from "next/navigation";
 import { use, type ReactNode } from "react";
 
 import { AppShell } from "@/components/layout/app-shell";
@@ -76,6 +77,17 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
   ],
 };
 
+/**
+ * A page is reachable only if it is in this role's own navigation (or a sub-page of one).
+ * Hiding a link is not access control: without this a customer could open
+ * /customer/analytics or /customer/feature-flags just by typing the URL.
+ */
+function isAllowedPath(pathname: string, slug: string, items: NavItem[]): boolean {
+  const clean = pathname.replace(/\/+$/, "");
+  if (clean === `/${slug}`) return true;
+  return items.some((item) => clean === item.href || clean.startsWith(`${item.href}/`));
+}
+
 const HOME_BY_ROLE: Record<Role, string> = {
   customer: "/customer/chat",
   tenant_admin: "/tenant-admin",
@@ -90,13 +102,28 @@ export default function RoleLayout({
   params: Promise<{ role: string }>;
 }) {
   const { role: slug } = use(params);
+  const pathname = usePathname();
   const role = SLUG_TO_ROLE[slug];
 
   if (!role) notFound();
 
+  const allowed = isAllowedPath(pathname, slug, NAV_BY_ROLE[role]);
+
   return (
     <AppShell role={role} navItems={NAV_BY_ROLE[role]} homeHref={HOME_BY_ROLE[role]}>
-      {children}
+      {allowed ? (
+        children
+      ) : (
+        <div className="mx-auto mt-16 max-w-md space-y-3 text-center">
+          <h1 className="text-lg font-semibold">You don&apos;t have access to this page</h1>
+          <p className="text-sm text-muted-foreground">
+            This page is not part of your role. Use the menu, or ask a workspace admin if you need it.
+          </p>
+          <Link href={HOME_BY_ROLE[role]} className="text-sm underline">
+            Go to your home page
+          </Link>
+        </div>
+      )}
     </AppShell>
   );
 }

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useRegistrationOpen } from "@/lib/auth/use-registration-open";
 import { PENDING_INVITE_KEY } from "@/lib/invite";
 import { ROLE_HOME, useSession } from "@/lib/session";
 
@@ -22,6 +23,7 @@ export default function LoginPage() {
 }
 
 function LoginForm() {
+  const registrationOpen = useRegistrationOpen();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { session, login, isLoading } = useSession();
@@ -114,10 +116,16 @@ function LoginForm() {
         </form>
 
         <p className="mt-4 text-center text-sm text-neutral-500 dark:text-neutral-400">
-          New here?{" "}
-          <Link href="/register" className="font-medium text-primary hover:underline">
-            Create an account
-          </Link>
+          {registrationOpen ? (
+            <>
+              New here?{" "}
+              <Link href="/register" className="font-medium text-primary hover:underline">
+                Create an account
+              </Link>
+            </>
+          ) : (
+            "Sign-up is by invitation only. Use the link in your invitation email."
+          )}
         </p>
       </div>
     </div>

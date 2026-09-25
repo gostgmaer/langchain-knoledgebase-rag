@@ -25,6 +25,7 @@ from packages.infrastructure.container import ApplicationContainer
 router = APIRouter(
     prefix="/agents",
     tags=["Agents"],
+    dependencies=[Depends(require_admin())],
 )
 
 

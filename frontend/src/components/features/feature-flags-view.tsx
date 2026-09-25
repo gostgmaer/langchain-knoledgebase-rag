@@ -1,6 +1,6 @@
 "use client";
 
-import { Flag } from "lucide-react";
+import { Flag, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -21,12 +21,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useCreateFeatureFlag, useFeatureFlags, useToggleFeatureFlag } from "@/hooks/use-api";
+import { useCreateFeatureFlag, useDeleteFeatureFlag, useFeatureFlags, useToggleFeatureFlag } from "@/hooks/use-api";
 
 export function FeatureFlagsView() {
   const { data, isLoading } = useFeatureFlags();
   const createFlag = useCreateFeatureFlag();
   const toggleFlag = useToggleFeatureFlag();
+  const deleteFlag = useDeleteFeatureFlag();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ key: "", tenant_id: "", description: "" });
 
@@ -79,6 +80,7 @@ export function FeatureFlagsView() {
               <TableHead>Scope</TableHead>
               <TableHead>Description</TableHead>
               <TableHead>Enabled</TableHead>
+              <TableHead className="w-12" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -104,6 +106,25 @@ export function FeatureFlagsView() {
                     disabled={toggleFlag.isPending}
                     aria-label={`Toggle ${flag.key}`}
                   />
+                </TableCell>
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Delete ${flag.key}`}
+                    disabled={deleteFlag.isPending}
+                    onClick={async () => {
+                      if (!confirm(`Delete the flag "${flag.key}"? Its value falls back to the default.`)) return;
+                      try {
+                        await deleteFlag.mutateAsync(flag.id);
+                        toast.success("Feature flag deleted.");
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : "Could not delete the flag.");
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}

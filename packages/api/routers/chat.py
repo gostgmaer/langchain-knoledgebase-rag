@@ -289,19 +289,34 @@ async def _sse_events(
     scope boundary, not a silent gap.
     """
 
-    async for event in chat_service.stream(chat_request):
-        if event["type"] == "interrupt":
-            payload = {
-                "type": "interrupt",
-                "conversation_id": str(conversation_id),
-                "tool_calls": event["tool_calls"],
-            }
-            yield f"data: {json.dumps(payload)}\n\n"
-            return
-        if event["type"] == "citations":
-            yield f"data: {json.dumps({'type': 'citations', 'citations': event['citations']})}\n\n"
-            continue
-        yield f"data: {json.dumps({'type': 'token', 'content': event['content']})}\n\n"
+    try:
+        async for event in chat_service.stream(chat_request):
+            if event["type"] == "interrupt":
+                payload = {
+                    "type": "interrupt",
+                    "conversation_id": str(conversation_id),
+                    "tool_calls": event["tool_calls"],
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+                return
+            if event["type"] == "citations":
+                yield f"data: {json.dumps({'type': 'citations', 'citations': event['citations']})}\n\n"
+                continue
+            yield f"data: {json.dumps({'type': 'token', 'content': event['content']})}\n\n"
+    except Exception as exc:  # noqa: BLE001 - the response has already started; report in-band
+        # Once streaming has begun the HTTP status can no longer change, so exception
+        # handlers cannot help: without this the connection just dropped mid-answer.
+        from packages.api.exception_handlers import _is_provider_outage
+
+        outage = _is_provider_outage(exc)
+        logger.warning("Chat stream failed", exc_info=exc)
+        message = (
+            "The AI provider is temporarily unavailable or overloaded. Please try again in a moment."
+            if outage
+            else "Something went wrong while generating the answer. Please try again."
+        )
+        yield f"data: {json.dumps({'type': 'error', 'message': message, 'retryable': outage})}\n\n"
+        return
 
     background_tasks.add_task(
         _extract_memory_in_background,

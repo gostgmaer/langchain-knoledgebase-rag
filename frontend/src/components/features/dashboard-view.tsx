@@ -1,5 +1,6 @@
 "use client";
 
+import { QueryError } from "@/components/shared/query-error";
 import { Bot, FileText, Library, MessagesSquare } from "lucide-react";
 import Link from "next/link";
 
@@ -17,10 +18,11 @@ import { useSession } from "@/lib/session";
 export function DashboardView({ basePath }: { basePath: string }) {
   const { session } = useSession();
   const { data: health } = useHealth();
-  const { data: documents } = useDocuments();
-  const { data: knowledgeBases } = useKnowledgeBases();
-  const { data: agents } = useAgents();
-  const { data: feedback } = useFeedbackList();
+  const { data: documents, isError: documentsFailed } = useDocuments();
+  const { data: knowledgeBases, isError: knowledgeBasesFailed } = useKnowledgeBases();
+  const { data: agents, isError: agentsFailed } = useAgents();
+  const { data: feedback, isError: feedbackFailed } = useFeedbackList();
+  const someFailed = documentsFailed || knowledgeBasesFailed || agentsFailed || feedbackFailed;
 
   const stats = [
     { label: "Documents", value: documents?.total ?? "—", href: `${basePath}/documents`, icon: FileText },
@@ -31,6 +33,11 @@ export function DashboardView({ basePath }: { basePath: string }) {
 
   return (
     <div>
+      {someFailed && (
+        <div className="mb-4">
+          <QueryError message="Some dashboard figures could not be loaded." />
+        </div>
+      )}
       <PageHeader
         title={`Welcome, ${session?.displayName ?? ""}`}
         description={`Browsing tenant ${session?.tenantId}`}

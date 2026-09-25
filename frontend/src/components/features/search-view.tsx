@@ -4,6 +4,7 @@ import { Search as SearchIcon } from "lucide-react";
 import { useState } from "react";
 
 import { EmptyState } from "@/components/shared/empty-state";
+import { QueryError } from "@/components/shared/query-error";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,14 @@ export function SearchView() {
           Search
         </Button>
       </form>
+
+      {runSearch.isError && (
+        <QueryError
+          error={runSearch.error}
+          message="The search failed."
+          onRetry={() => runSearch.mutate({ query: query.trim(), limit: 10 })}
+        />
+      )}
 
       {runSearch.data && runSearch.data.results.length === 0 && (
         <EmptyState icon={SearchIcon} title="No results" description="Nothing matched that query." />

@@ -106,6 +106,9 @@ export const knowledgeBases = {
     apiFetch<KnowledgeBase>(`/knowledge-bases/${id}`, identity),
   create: (identity: Identity, body: CreateKnowledgeBaseRequest) =>
     apiFetch<KnowledgeBase>("/knowledge-bases", identity, { method: "POST", body }),
+  // Only an EMPTY knowledge base can be deleted (409 otherwise).
+  delete: (identity: Identity, id: string) =>
+    apiFetch<null>(`/knowledge-bases/${id}`, identity, { method: "DELETE" }),
 };
 
 // ---------------------------------------------------------------
@@ -223,4 +226,6 @@ export const featureFlags = {
       method: "PATCH",
       body: { enabled },
     }),
+  delete: (identity: Identity, id: string) =>
+    apiFetch<null>(`/feature-flags/${id}`, identity, { method: "DELETE" }),
 };

@@ -58,7 +58,8 @@ WORKDIR /app
 # ~/.cache/huggingface the first time an actual RAG query needed
 # reranking, since nothing had ever exercised this path in a fresh
 # container before.
-RUN groupadd -r app && useradd -r -m -g app app
+RUN groupadd -r app && useradd -r -m -g app app \
+ && install -d -o app -g app /home/app/.cache/huggingface
 
 # --chown at COPY time, not a separate `RUN chown -R` afterwards: a
 # metadata-only chown on files already materialized by an earlier COPY

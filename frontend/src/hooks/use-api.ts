@@ -127,6 +127,24 @@ export function useUploadDocument() {
   });
 }
 
+export function useDeleteKnowledgeBase() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => knowledgeBases.delete(identity!, id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["knowledge-bases", identity?.tenantId] }),
+  });
+}
+
+export function useDeleteFeatureFlag() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => featureFlags.delete(identity!, id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["feature-flags"] }),
+  });
+}
+
 export function useDeleteDocument() {
   const identity = useIdentity();
   const queryClient = useQueryClient();

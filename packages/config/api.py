@@ -55,6 +55,26 @@ class APISettings(BaseSettings):
             return [role.strip() for role in value.split(",") if role.strip()]
         return value
 
+    # Roles allowed to act on behalf of ANOTHER tenant by sending X-Tenant-ID
+    # (the platform operator's "browse as tenant" feature). For everyone else
+    # the tenant always comes from the verified token.
+    tenant_override_roles: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["super_admin"],
+        alias="TENANT_OVERRIDE_ROLES",
+    )
+
+    @field_validator("tenant_override_roles", mode="before")
+    @classmethod
+    def _split_override_roles(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [role.strip() for role in value.split(",") if role.strip()]
+        return value
+
+    # Refuse verified-token requests from accounts whose email IAM has not
+    # verified (403). Off by default; turn on together with IAM's
+    # registration email verification for anything internet-facing.
+    require_verified_email: bool = Field(default=False, alias="REQUIRE_VERIFIED_EMAIL")
+
     # Production hardening's own "Rate limiting" gap — see
     # packages/api/middleware/rate_limit.py. Per-tenant (or per-IP
     # fallback) sliding window, requests per 60s. Default is generous
