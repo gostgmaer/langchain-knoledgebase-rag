@@ -1,5 +1,7 @@
 # Environment variables - every service in the RAG stack
 
+> Looking for how to start everything? See [`LOCAL_SETUP.md`](LOCAL_SETUP.md) (prerequisites, start order, checks, troubleshooting).
+
 How to configure the RAG platform end to end: which file each service reads, what every
 variable does, which values must match across services, and what to create at the providers
 (Google / Microsoft / Facebook OAuth, SMTP, LLM keys).

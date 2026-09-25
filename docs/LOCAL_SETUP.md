@@ -15,6 +15,7 @@ Only the services this RAG project actually depends on. The payment, lead, job-a
 | 1 | Core Postgres + PgBouncer + Redis | `easydev-infra` (core stack) | 5432, 6379 | IAM's database and cache |
 | 2 | **IAM auth-service** (+ `auth-worker`) | `Backend/multi-tannet-auth-services` | 3304 | Users, tenants, roles, invitations, social login, tokens |
 | 3 | **API gateway** (+ `gateway-worker`) | `Backend/web-agency-backend-api` | 3301 | Browser/API entry point to IAM (`/api/auth/*`, `/api/iam/*`) |
+| 3a | **MongoDB** (external, not started by any compose file) | your own instance or Atlas | 27017 | notification-service and file-upload-service store their data here (`MONGODB_URI` / `MONGO_URI`) |
 | 4 | Utility Redis | `easydev-infra` (utility stack) | 6383 | Queue for notifications |
 | 5 | **notification-service** (+ `notification-worker`) | `Backend/notification-service` | 4004 | Sends invitation / verification emails for IAM |
 | 6 | **Mailpit** | container `axllent/mailpit` | SMTP 1025, UI 8025 | Catches all local email (nothing is delivered for real) |
@@ -24,7 +25,7 @@ Only the services this RAG project actually depends on. The payment, lead, job-a
 | 10 | Jaeger (optional) | this repo | 16686 | Trace viewer |
 | 11 | **Frontend** | `frontend/` | 3000 | The web UI |
 
-Dependency order: **1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 11.** IAM needs notification and file-upload URLs to boot, but they only need to *exist* by name on the Docker network - starting them right after is fine as long as you start all of them before testing.
+Dependency order (MongoDB first): **3a -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 11.** IAM needs notification and file-upload URLs to boot, but they only need to *exist* by name on the Docker network - starting them right after is fine as long as you start all of them before testing.
 
 ---
 
@@ -40,6 +41,7 @@ Dependency order: **1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 11.** IAM needs
 | Docker Desktop | Running **before** any command below | If you see `failed to connect to the docker API ... dockerDesktopLinuxEngine`, Docker Desktop is not running: start it and wait for "Engine running". |
 | Git Bash | Installed | Do **not** use WSL's `bash`; path handling differs. |
 | Node.js | 20+ (this machine: 24) | Only for the frontend (`npm`). |
+| MongoDB | Reachable instance (section 1.2b) | Needed by notification and file-upload. |
 | Internet | Required on first start | Pulls base images, npm packages, and downloads the reranker model from huggingface.co. |
 
 ### 1.2 Repositories (expected locations)
@@ -55,6 +57,15 @@ C:\Users\kisho\WorkSpace\
 ```
 
 The infra compose files build images from these sibling folders using relative paths, so keep the layout.
+
+### 1.2b MongoDB (required, not provided by the stacks)
+
+notification-service and file-upload-service will not start without a reachable MongoDB, and no compose file starts one. Use whichever you already have (a local install, Atlas, or the platform's shared instance) and put its URI in `.env.app` (`MONGODB_URI`) and `.env.file-upload` (`MONGO_URI`). If you have none, a throwaway local one **[check]**:
+
+```bash
+docker run -d --name mongo --restart unless-stopped -p 27017:27017 -v mongo-data:/data/db mongo:7
+# URI for the containers:  mongodb://host.docker.internal:27017/easydev
+```
 
 ### 1.3 Docker networks (create once)
 
@@ -104,11 +115,12 @@ Values that must be consistent across files are the ones that break things when 
 - `API_KEY` = the value IAM sends as `NOTIFICATION_SERVICE_API_KEY`
 - `EMAIL_HOST=mailpit`, `EMAIL_PORT=1025`, `EMAIL_SECURE=false`, no `EMAIL_USER` / `EMAIL_PASS`
 - `EMAIL_FROM=noreply@easydev.in` (any address is fine for Mailpit)
+- `MONGODB_URI`: a reachable MongoDB (see 1.2b)
 
 **Utility - `stacks/utility/env/.env.file-upload`**
 - `STORAGE_TYPE=local`, `LOCAL_SIGNED_URL_SECRET` = 32+ random chars
 - `GATEWAY_INTERNAL_SECRET` = 32+ random chars, and `FILE_UPLOAD_HMAC_SECRET` = the same value
-- `MONGO_URI`: a reachable MongoDB (the service will not start without one)
+- `MONGO_URI`: a reachable MongoDB (see 1.2b; the service will not start without one)
 - `ALLOWED_MIME_TYPES` / `ALLOWED_FILE_EXTENSIONS` must include the document types you will ingest (pdf, docx, txt, md, csv)
 
 ### 1.6 Recommended settings - RAG (`.env`)
@@ -206,7 +218,8 @@ docker run -d --name mailpit --restart unless-stopped --network utility-network 
 Check steps 2-3:
 ```bash
 docker ps --format '{{.Names}}  {{.Status}}' | grep -E "notification|file-upload|utility-redis|mailpit"
-curl -s -o /dev/null -w "upload health -> %{http_code}\n" http://localhost:4005/health   # path may differ: check docker logs file-upload-service
+curl -s -o /dev/null -w "upload health -> %{http_code}\n" http://localhost:4005/health/live
+curl -s -o /dev/null -w "notification health -> %{http_code}\n" http://localhost:4004/v1/health/live
 ```
 
 ### Step 4 - RAG database, cache, API and worker
