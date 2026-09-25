@@ -55,12 +55,28 @@ function LoginForm() {
     );
   }, [isLoading, session, router]);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+
+    // Read what is actually in the fields: browser autofill does not always update React
+    // state, and can drop in a saved username from another app on the same host.
+    const data = new FormData(e.currentTarget);
+    const emailValue = String(data.get("email") ?? email).trim();
+    const passwordValue = String(data.get("password") ?? password);
+
+    if (!emailValue || !passwordValue) {
+      setError("Enter your email address and password.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
+      setError(`"${emailValue}" is not an email address. Sign in with the email of your account, for example name@example.com.`);
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const user = await login(email.trim(), password);
+      const user = await login(emailValue, passwordValue);
       router.push(ROLE_HOME[user.role]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed.");
@@ -79,29 +95,29 @@ function LoginForm() {
           </p>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           <Card>
             <CardContent className="grid gap-4 pt-5">
               <div className="grid gap-1.5">
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
+                  name="email"
                   type="email"
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  required
                 />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
+                  name="password"
                   type="password"
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  required
                 />
               </div>
               {(error ?? redirectError) && (
