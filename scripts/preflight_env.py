@@ -7,6 +7,7 @@ Secret VALUES are never printed - only key names and PASS/WARN/FAIL.
 
     python scripts/preflight_env.py
     python scripts/preflight_env.py --infra "C:/path/to/easydev-infra"
+    python scripts/preflight_env.py --providers     # also list provider keys still to fill
 
 Exit code 0 when there are no FAIL lines.
 """
@@ -135,6 +136,8 @@ def reachable(uri: str, timeout: float = 2.0) -> bool | None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--infra", default=str(DEFAULT_INFRA))
+    ap.add_argument("--all", action="store_true", help="also list passing checks")
+    ap.add_argument("--providers", action="store_true", help="also list provider keys still to fill")
     args = ap.parse_args()
     infra = Path(args.infra)
     core = infra / "stacks" / "core" / "env"
@@ -333,6 +336,24 @@ def main() -> int:
                 rec("FAIL", env.name, f"{key} host is NOT reachable from this machine (is MongoDB running?)")
             else:
                 rec("WARN", env.name, f"{key} is a mongodb+srv URI - reachability not probed")
+
+    # ------------------------------------------------ provider values (todo)
+    if "--providers" in sys.argv:
+        prov_keys = [
+            (rag, ["GOOGLE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENWEATHER_API_KEY", "NEWSAPI_API_KEY", "SERPER_API_KEY", "TAVILY_API_KEY", "LANGCHAIN_API_KEY"]),
+            (iam, ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET", "MICROSOFT_TENANT_ID", "FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET", "TURNSTILE_SECRET_KEY"]),
+            (notif, ["MONGODB_URI", "EMAIL_USER", "EMAIL_PASS"]),
+            (upl, ["MONGO_URI", "R2_ENDPOINT", "R2_ACCESS_KEY", "R2_SECRET", "R2_BUCKET", "AZURE_CONNECTION_STRING", "AZURE_CONTAINER"]),
+        ]
+        print("Provider values (state only - validity cannot be checked):")
+        for env, keys in prov_keys:
+            print()
+            print(f"  {env.name}")
+            for k in keys:
+                v = env.get(k)
+                s = "MISSING" if k not in env.values else ("empty" if not v else ("placeholder" if is_placeholder(v) else "set"))
+                print(f"    {k:28s} {s}")
+        print()
 
     # --------------------------------------------------------------- report
     order = {"FAIL": 0, "WARN": 1, "PASS": 2}

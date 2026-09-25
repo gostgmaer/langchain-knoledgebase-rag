@@ -182,7 +182,7 @@ python scripts/preflight_env.py            # add --all to list the passing check
 python scripts/preflight_env.py --infra "C:/path/to/easydev-infra"   # if your layout differs
 ```
 
-It reads (never changes) the env files of the RAG API, frontend, IAM, gateway, notification and file-upload, and reports **FAIL** (will break: missing/placeholder/too-short values, secrets that must match across services but do not, CORS origins missing, a hosted service URL where a local one is expected, MongoDB not reachable) and **WARN** (works but check). Secret values are never printed, only key names and a short fingerprint when two values differ. Fix every FAIL first. It checks that values are present and consistent; it cannot tell whether an API key is valid or an OAuth app is configured correctly.
+It reads (never changes) the env files of the RAG API, frontend, IAM, gateway, notification and file-upload, and reports **FAIL** (will break: missing/placeholder/too-short values, secrets that must match across services but do not, CORS origins missing, a hosted service URL where a local one is expected, MongoDB not reachable) and **WARN** (works but check). Secret values are never printed, only key names and a short fingerprint when two values differ. Fix every FAIL first. Provider keys still to fill (LLM, OAuth, MongoDB, ...) are listed in [`PROVIDER_VALUES.md`](PROVIDER_VALUES.md); `--providers` shows their live state. It checks that values are present and consistent; it cannot tell whether an API key is valid or an OAuth app is configured correctly.
 
 ---
 
