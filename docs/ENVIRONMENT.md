@@ -1,5 +1,7 @@
 # Environment variables - every service in the RAG stack
 
+> What depends on what? See [`SERVICE_DEPENDENCIES.md`](SERVICE_DEPENDENCIES.md).
+
 > Looking for how to start everything? See [`LOCAL_SETUP.md`](LOCAL_SETUP.md) (prerequisites, start order, checks, troubleshooting).
 
 How to configure the RAG platform end to end: which file each service reads, what every

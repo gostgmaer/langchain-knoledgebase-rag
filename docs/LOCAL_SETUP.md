@@ -1,6 +1,6 @@
 # Local setup runbook - everything needed to run and test the RAG platform
 
-Step-by-step: prerequisites, what to install, which services to start (and in which order), the recommended settings, and how to check each step worked. Companion to [`ENVIRONMENT.md`](ENVIRONMENT.md), which explains every variable.
+Step-by-step: prerequisites, what to install, which services to start (and in which order), the recommended settings, and how to check each step worked. See [`SERVICE_DEPENDENCIES.md`](SERVICE_DEPENDENCIES.md) for what each service needs and what needs it. Companion to [`ENVIRONMENT.md`](ENVIRONMENT.md), which explains every variable.
 
 Legend: **[verified]** = run successfully on this machine during development. **[check]** = derived from the compose files/code but not re-run from a clean machine; if it fails, the "If it fails" note says where to look.
 
