@@ -25,6 +25,7 @@ from packages.infrastructure.container import ApplicationContainer
 router = APIRouter(
     prefix="/tool-definitions",
     tags=["Tool Definitions"],
+    dependencies=[Depends(require_admin())],
 )
 
 

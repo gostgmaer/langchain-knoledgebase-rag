@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from packages.api.dependencies import get_scoped_container
+from packages.api.dependencies import get_scoped_container, require_admin
 from packages.api.responses import ApiResponse
 from packages.api.schemas.model_profile import (
     CreateModelProfileRequestSchema,
@@ -20,6 +20,7 @@ from packages.infrastructure.container import ApplicationContainer
 router = APIRouter(
     prefix="/model-profiles",
     tags=["Model Profiles"],
+    dependencies=[Depends(require_admin())],
 )
 
 

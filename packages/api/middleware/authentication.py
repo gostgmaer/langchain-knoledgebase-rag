@@ -85,6 +85,17 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         if required and access_token and current_user is None and not self._is_public(request):
             return self._deny(401, "Invalid or expired access token.")
 
+        if (
+            current_user is not None
+            and settings.api.require_verified_email
+            and current_user.is_email_verified is False
+            and not self._is_public(request)
+        ):
+            return self._deny(
+                403,
+                "Verify your email address to continue. Check your inbox for the verification link.",
+            )
+
         if current_user is not None:
             request.state.current_user = current_user
             request.state.tenant_id = str(current_user.tenant_id)

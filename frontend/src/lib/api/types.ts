@@ -18,6 +18,9 @@ export interface ApiErrorResponse {
   timestamp: string;
 }
 
+// The type parameter documents which item type a list response carries (the concrete
+// response interfaces below add the item array); it is intentionally unused here.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export interface Page<T> {
   total: number;
   limit: number;

@@ -3,25 +3,23 @@
 Test date: 2026-09-25. Stack: local Docker (IAM, gateway, notification, file-upload, Mailpit, RAG API/worker) + Next.js dev server.
 Every finding below was reproduced against the running stack unless marked **(code review)**.
 
-## 1. Summary
+## 1. Summary (updated after the fixes)
 
 | # | Severity | Finding | Status |
 |---|---|---|---|
-| B1 | **High** | Any signed-in **member** can create and toggle **global feature flags** (including the master `enable_rbac` switch) | Open |
-| B2 | **High** | **Open self-registration** puts anyone in the admin's workspace as `member`, with read access to its data | Open (product decision) |
-| B3 | **Medium** | A member can read admin-only data and open admin-only pages by URL (analytics, usage, feedback, model profiles, prompts, tools, agents, feature flags) and can create knowledge bases | Open |
-| B4 | **Medium** | The super-admin **"browse as tenant"** feature no longer works: the API now ignores the tenant header (regression from my IAM-enforcement change) | Open (mine) |
-| B5 | **Medium** | New **social-login users have no workspace** and cannot get one without an admin invite | Partly fixed (clear screen); no way forward |
-| B6 | **Medium** | **Invite into a second workspace does nothing** for a user who already has the default one (member cannot switch) | Open (IAM role design) |
-| B7 | Low | Provider outage (Gemini 503) surfaces as **HTTP 500** "unexpected internal server error" | Open |
-| B8 | Low | Six views have **no error state**: analytics, usage, search, document detail, dashboard, feedback | Open (code review) |
-| B9 | Low | **No DELETE** for knowledge bases or feature flags (405); test/mistaken rows cannot be removed from the UI or API | Open |
-| B10 | Low | Email verification is not required: unverified accounts can sign in and use the API | Open |
-| B11 | Low | Frontend lint: 3 errors (`react-hooks/set-state-in-effect`) in files unrelated to recent work | Open |
-| B12 | Info | IAM login rate limit is easy to hit (429) during repeated logins; how the UI words a 429 was not verified | Note |
-| Fixed | - | Crash (HTTP 500) for accounts without a workspace -> now 403 + "You are not in a workspace yet" screen (commit `9f601d9`) | Done |
-| Fixed | - | Microsoft sign-in failed with `AADSTS9002325` -> Entra redirect URI must be type **Web**, not SPA; now reaches Microsoft's sign-in page | Done |
-| Fixed | - | Microsoft ignored the tenant in env (IAM database setting overrode it) -> setting updated | Done |
+| B1 | **High** | Members could create/toggle **global feature flags** (incl. `enable_rbac`) | **Fixed** - admin-only always; global flags need a platform admin; tenant admins limited to their own tenant's flags |
+| B2 | **High** | **Open self-registration** put anyone in the admin workspace, and IAM's `auth.registration.enabled` setting was **not enforced at all** | **Fixed** in IAM (invite-only enforced for password and social sign-up). Local instance is now **invite-only** |
+| B3 | **Medium** | Members could read admin-only data and open admin pages by URL; could create knowledge bases | **Fixed** - server: every non-chat route is admin-only; UI: per-page role guard |
+| B4 | **Medium** | Super-admin "browse as tenant" broken by my earlier change | **Fixed** - `X-Tenant-ID` honoured for `TENANT_OVERRIDE_ROLES` (default `super_admin`) only |
+| B5 | **Medium** | New social users had no workspace | **Resolved by B2**: unknown emails can no longer create stranded accounts in invite-only mode. Existing stranded accounts still need an invite |
+| B6 | **Medium** | Invite into a second workspace had no effect | **Fixed for sign-up** (an invitee registers into *only* the invited workspace). **Not changed:** an existing user accepting an invite still cannot switch workspace (member lacks the switch permission) |
+| B7 | Low | Provider outage returned HTTP 500 | **Fixed** - mapped to 503 + `Retry-After` with a clear message (unit-tested; not reproduced live) |
+| B8 | Low | Six views had no error state | **Fixed** - shared `QueryError` component with retry |
+| B9 | Low | No DELETE for knowledge bases / feature flags | **Fixed** - API + UI buttons (KB only when empty) |
+| B10 | Low | Email verification not enforced | **Option added** - `REQUIRE_VERIFIED_EMAIL` (off by default; unit-tested). Turn on with IAM verification for public deployments |
+| B11 | Low | 3 lint errors | **Fixed** - frontend `tsc` and `eslint` now report **0 problems** |
+| B12 | Info | Raw 429 text on rate-limited login | **Fixed** - friendly message (code only; not triggered in a browser) |
+| Earlier | - | No-workspace crash (500), Microsoft `AADSTS9002325`, Microsoft tenant setting | Fixed before this round |
 
 ## 2. What was tested
 
@@ -39,7 +37,7 @@ Every finding below was reproduced against the running stack unless marked **(co
 - **Mobile/responsive layout** and the **frontend production build** (would corrupt the running dev server's cache).
 - How the UI words an IAM **429** (rate limit) response.
 
-## 4. Findings in detail
+## 4. Findings in detail (original write-up; see the table above for current status)
 
 ### B1 - Members can create and toggle feature flags (High)
 - **Repro:** signed in as a `member`: `POST /api/rag/feature-flags {"key":"x","enabled":false}` -> **201** with `tenant_id: null` (a global flag). `PATCH /feature-flags/{id}/toggle {"enabled":true}` -> **200**.
@@ -113,3 +111,28 @@ Every finding below was reproduced against the running stack unless marked **(co
 - Placeholders that are intentional: RAG `IAM_CLIENT_ID/SECRET`, dev bootstrap passwords.
 
 **Test leftovers in the local database** (safe to delete): throwaway users `e2e.invitee.*`, `e2e2.invitee.*`, `inviteA.*`, `intruderB.*`, `noinvite.*`, `reuse.*`, `rbac.probe.*`; workspace "E2E Co"; test documents `smoke.txt`, `e2e_doc*.txt`, `test document` files in the admin workspace; test conversations.
+
+## 7. Fix log and verification
+
+**What changed**
+- **RAG API:** `require_admin()` on every admin-only router (knowledge bases, documents, agents, prompts, tools, model profiles, usage, analytics, upload jobs, feedback list, feature flags); feature-flag rules (`_may_manage`: global flags = platform admin only, tenant admin = own tenant only) plus `DELETE /feature-flags/{id}`; `DELETE /knowledge-bases/{id}` (empty only, else 409); `TENANT_OVERRIDE_ROLES`; `REQUIRE_VERIFIED_EMAIL`; provider outages -> 503 + `Retry-After`.
+- **IAM:** `assertRegistrationAllowed` / `findUsableInvitation` enforced in `register()` and in the first social sign-up; invitee into a non-default workspace as plain member no longer also joins the default workspace.
+- **Frontend:** per-page role guard (`isAllowedPath`), shared `QueryError` + error states in six views, delete buttons (knowledge bases, feature flags), invite-only login/register pages, friendly 429 message, 0 lint problems.
+- **Config/docs:** `.env.example`, `ENVIRONMENT.md`, IAM `INTEGRATION.md`.
+
+**Verification (live, rebuilt stack)**
+- Live script: **48/48** (invite-only refusal and acceptance, member 403 on all 14 checked routes, admin CRUD incl. flag and KB delete, KB-with-documents 409, super-admin override honoured and member override ignored, tenant-2 invitee lands only in tenant 2).
+- `scripts/e2e_local.sh`: **37/37**. IAM: **52/52** tests (10 new), `tsc` clean. Frontend: `tsc` and `eslint` **0 problems**. RAG unit tests for every new rule (`test_authorization_fixes.py`, `test_auth_no_tenant.py`).
+- Browser (logged out): login shows "Sign-up is by invitation only"; `/register` shows the invitation-only page, and with `?inviteToken=` shows the form.
+
+**Behaviour changes to be aware of**
+- The local IAM is now **invite-only**. To reopen sign-up: `PUT /api/iam/settings/auth.registration.enabled {"value":false}` -> `true`. The setting is stored in IAM's database, not in an env file.
+- Plain members now see **only Chat and Settings**; direct URLs to other pages show "You don't have access to this page" and their APIs return 403.
+- `X-Tenant-ID` is ignored for everyone except `TENANT_OVERRIDE_ROLES`.
+
+**Still open / not verified**
+- Signed-in screens in a browser (the session was signed out; I do not enter passwords): the new role-guard page, `QueryError` states, delete buttons and the 429 message are verified by type-check, lint and API only.
+- Existing users accepting an invite into a second workspace still cannot switch (member lacks the permission) - needs an IAM permission/UX decision.
+- The stranded account `kishor81160@gmail.com` still needs an admin invite.
+- Provider-outage 503 was unit-tested but not reproduced against a real Gemini outage.
+- A real Google/Microsoft login end to end, and Facebook.

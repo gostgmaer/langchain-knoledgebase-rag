@@ -14,6 +14,7 @@ from packages.api.dependencies import (
     get_scoped_container,
     request_scoped_session,
     require_uuid_header,
+    require_admin,
 )
 from packages.api.responses import ApiResponse
 from packages.api.schemas.document import (
@@ -39,6 +40,7 @@ logger = get_logger(__name__)
 router = APIRouter(
     prefix="/documents",
     tags=["Documents"],
+    dependencies=[Depends(require_admin())],
 )
 
 

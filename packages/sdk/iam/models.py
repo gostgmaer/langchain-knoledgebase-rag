@@ -88,6 +88,8 @@ class CurrentUser(BaseModel):
 
     is_super_admin: bool | None = Field(default=None, alias="isSuperAdmin")
 
+    is_email_verified: bool | None = Field(default=None, alias="isEmailVerified")
+
     roles: list[str] = Field(default_factory=list)
 
     permissions: list[str] = Field(default_factory=list)

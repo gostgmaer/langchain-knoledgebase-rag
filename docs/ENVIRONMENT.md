@@ -105,7 +105,9 @@ The API verifies each request by sending the caller's bearer token to IAM (`GET 
 | Variable | Default | Description |
 |---|---|---|
 | **`AUTH_REQUIRED`** | `false` | `true`: every route except `/api/v1/health*`, `/api/v1/auth/refresh`, docs and CORS preflight needs a valid IAM bearer token. No or bad token = 401, IAM unreachable = 503. Tenant and user come from the token; the `X-Tenant-ID` / `X-User-ID` headers are ignored. `false`: anonymous callers get a default tenant (dev only). **Set `true` in every real environment.** With it on, only the frontend (through `/api/rag`) sends tokens, so curl, the CLI and `/docs` "Try it out" get 401. |
-| `ADMIN_ROLES` | `super_admin,admin,tenant_admin` | Comma-separated IAM role codes allowed to create agents, tool definitions and prompts. Enforced only when `AUTH_REQUIRED=true`. |
+| `ADMIN_ROLES` | `super_admin,admin,tenant_admin` | IAM role codes counted as administrators. Enforced only when `AUTH_REQUIRED=true`. Everyone else (a plain `member`) can use chat and conversations only; knowledge bases, documents, agents, prompts, tools, model profiles, the feedback list, usage, analytics, upload jobs and feature flags are admin-only. |
+| `TENANT_OVERRIDE_ROLES` | `super_admin` | Roles that may act on behalf of another tenant with `X-Tenant-ID` ("browse as tenant") and manage **global** feature flags. Everyone else is pinned to the tenant in their token. |
+| `REQUIRE_VERIFIED_EMAIL` | `false` | `true`: refuse (403) accounts whose email IAM has not verified. Turn on with IAM email verification for internet-facing deployments. |
 | `IAM_BASE_URL` | none (required) | The **gateway** base URL, not the auth-service. Local Docker: `http://host.docker.internal:3301`. |
 | `IAM_CLIENT_ID`, `IAM_CLIENT_SECRET` | none (required) | Credentials for IAM's `client_credentials` service token. Not used for per-request auth. Placeholders are fine until a feature calls the service token. |
 | `IAM_INTROSPECTION_API_KEY` | none (required) | Sent as `x-api-key` when the API calls IAM's session-introspection endpoint. Set it to IAM's value if you use introspection; otherwise a placeholder. |

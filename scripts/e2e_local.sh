@@ -17,7 +17,7 @@ try:
 except Exception:
     print(''); sys.exit()
 $1"; }
-login(){ curl -s -X POST $GW/api/auth/login -H 'Content-Type: application/json' -H "$O" -d "{\"email\":\"$1\",\"password\":\"$2\"}" | J "print(d['data']['accessToken'])"; }
+login(){ for _ in $(seq 1 20); do r=$(curl -s -X POST $GW/api/auth/login -H 'Content-Type: application/json' -H "$O" -d "{\"email\":\"$1\",\"password\":\"$2\"}" | J "print(d['data']['accessToken'])"); [ -n "$r" ] && { echo "$r"; return; }; sleep 6; done; }
 
 echo "== 1. Email/password login and session"
 ATOK=$(login $ADMIN_EMAIL "$ADMIN_PW"); [ ${#ATOK} -gt 100 ] && ok "admin login returns an access token" || bad "admin login"
@@ -32,12 +32,16 @@ chk "garbage token -> 401" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/knowle
 chk "health is public" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/health)" 200
 chk "valid token -> 200" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/knowledge-bases -H "Authorization: Bearer $ATOK")" 200
 SPOOF=99999999-9999-9999-9999-999999999999
-CID=$(curl -s -X POST $RAG/conversations -H "Authorization: Bearer $ATOK" -H "X-Tenant-ID: $SPOOF" -H 'Content-Type: application/json' -d '{}' | J "print((d.get('data') or {}).get('id',''))")
-if [ -n "$CID" ]; then
-  T=$(docker compose -f "c:/Users/kisho/WorkSpace/learning/ai/langchain-knoledgebase-rag/docker-compose.yml" exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"select tenant_id from conversations where id='$CID'\"" 2>/dev/null | tr -d '\r\n ')
-  [ "$T" = "$TENANT" ] && ok "spoofed X-Tenant-ID ignored (stored under the token's tenant)" || bad "spoof: stored tenant '$T' != '$TENANT'"
-  docker compose -f "c:/Users/kisho/WorkSpace/learning/ai/langchain-knoledgebase-rag/docker-compose.yml" exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"delete from conversations where id='$CID'\"" >/dev/null 2>&1
-else bad "could not create a conversation for the spoof test"; fi
+tenant_of_conversation(){  # $1 = bearer token, $2 = X-Tenant-ID header value -> prints the tenant the row was stored under
+  local cid tenant
+  cid=$(curl -s -X POST $RAG/conversations -H "Authorization: Bearer $1" -H "X-Tenant-ID: $2" -H 'Content-Type: application/json' -d '{}' | J "print((d.get('data') or {}).get('id',''))")
+  [ -z "$cid" ] && return
+  tenant=$(docker compose -f "c:/Users/kisho/WorkSpace/learning/ai/langchain-knoledgebase-rag/docker-compose.yml" exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"select tenant_id from conversations where id='$cid'\"" 2>/dev/null | tr -d '\r\n ')
+  docker compose -f "c:/Users/kisho/WorkSpace/learning/ai/langchain-knoledgebase-rag/docker-compose.yml" exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"delete from conversations where id='$cid'\"" >/dev/null 2>&1
+  echo "$tenant"
+}
+T=$(tenant_of_conversation "$ATOK" "$SPOOF")
+[ "$T" = "$SPOOF" ] && ok "super admin can act on behalf of another tenant (X-Tenant-ID honoured)" || bad "super admin override: stored '$T', expected '$SPOOF'"
 
 echo; echo "== 3. Invite: admin invites an email, the email arrives in Mailpit"
 INV="e2e.invitee.$TS@example.com"
@@ -65,10 +69,28 @@ UTOK=$(login "$INV" "$PW")
 if [ -n "$UTOK" ]; then
   UT=$(curl -s $GW/api/auth/me -H "Authorization: Bearer $UTOK" -H "$O" | J "print(d['data'].get('tenantId',''))")
   [ "$UT" = "$TENANT" ] && ok "invitee landed in the admin's workspace" || bad "invitee tenant '$UT' != '$TENANT'"
-  chk "invitee can use the RAG API" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/knowledge-bases -H "Authorization: Bearer $UTOK")" 200
+  chk "invitee (member) can use the chat API" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/conversations -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{}')" 201
   chk "invitee (member) cannot create agents" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/agents -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{"name":"x","system_prompt":"x"}')" 403
 fi
 echo "$INV" > "$TMPD/e2e_last_user.txt"
+
+echo; echo "== 4b. Authorization: a member is restricted, admin is not"
+if [ -n "$UTOK" ]; then
+  MA="Authorization: Bearer $UTOK"
+  chk "member cannot create a feature flag" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/feature-flags -H "$MA" -H 'Content-Type: application/json' -d '{"key":"e2e_probe","enabled":false}')" 403
+  chk "member cannot create a knowledge base" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/knowledge-bases -H "$MA" -H 'Content-Type: application/json' -d '{"name":"e2e-probe"}')" 403
+  for ep in feature-flags analytics/summary usage feedback model-profiles documents agents; do
+    chk "member cannot read /$ep" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/$ep -H "$MA")" 403
+  done
+  T=$(tenant_of_conversation "$UTOK" "$SPOOF")
+  [ "$T" = "$TENANT" ] && ok "a member sending X-Tenant-ID is pinned to their own tenant" || bad "member override leaked: stored '$T', expected '$TENANT'"
+  chk "member can still open a conversation" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/conversations -H "$MA" -H 'Content-Type: application/json' -d '{}')" 201
+fi
+FLAG=$(curl -s -X POST $RAG/feature-flags -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d "{\"key\":\"e2e_flag_$TS\",\"enabled\":false}" | J "print((d.get('data') or {}).get('id',''))")
+if [ -n "$FLAG" ]; then
+  chk "admin toggles a feature flag" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $RAG/feature-flags/$FLAG/toggle -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"enabled":true}')" 200
+  chk "admin deletes it again" "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE $RAG/feature-flags/$FLAG -H "Authorization: Bearer $ATOK")" 200
+else bad "admin could not create a feature flag"; fi
 
 echo; echo "== 5. Document upload and ingestion"
 DOCF="$TMPD/e2e_doc_$TS.txt"   # unique file name, so this run's document is unambiguous

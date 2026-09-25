@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import { useSession } from "@/lib/session";
 
@@ -11,6 +11,47 @@ export interface ConversationHistoryEntry {
 }
 
 const MAX_ENTRIES = 30;
+
+// localStorage is an external store: subscribe to it instead of copying it into state
+// from an effect. The "storage" event covers other tabs; our own writes notify directly.
+const listeners = new Set<() => void>();
+
+function subscribe(callback: () => void) {
+  listeners.add(callback);
+  window.addEventListener("storage", callback);
+  return () => {
+    listeners.delete(callback);
+    window.removeEventListener("storage", callback);
+  };
+}
+
+function readRaw(key: string | null): string | null {
+  if (!key) return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function write(key: string, entries: ConversationHistoryEntry[]) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(entries));
+  } catch {
+    // Storage unavailable (private browsing, quota): history just won't persist.
+  }
+  listeners.forEach((notify) => notify());
+}
+
+function parse(raw: string | null): ConversationHistoryEntry[] {
+  if (!raw) return [];
+  try {
+    const value = JSON.parse(raw);
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * The backend has no "list my conversations" endpoint — every
@@ -23,33 +64,26 @@ const MAX_ENTRIES = 30;
  */
 export function useConversationHistory() {
   const { session } = useSession();
-  const [entries, setEntries] = useState<ConversationHistoryEntry[]>([]);
 
   const storageKey = session ? `rag-console-conversations-${session.tenantId}-${session.userId}` : null;
 
-  useEffect(() => {
-    if (!storageKey) return;
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      setEntries(raw ? JSON.parse(raw) : []);
-    } catch {
-      setEntries([]);
-    }
-  }, [storageKey]);
+  const raw = useSyncExternalStore(
+    subscribe,
+    () => readRaw(storageKey),
+    () => null,
+  );
+  const entries = useMemo(() => parse(raw), [raw]);
 
   const touch = useCallback(
     (id: string, preview: string) => {
       if (!storageKey) return;
-      setEntries((prev) => {
-        const withoutThis = prev.filter((e) => e.id !== id);
-        const existing = prev.find((e) => e.id === id);
-        const next = [
-          { id, preview: preview || existing?.preview || "New conversation", updatedAt: new Date().toISOString() },
-          ...withoutThis,
-        ].slice(0, MAX_ENTRIES);
-        window.localStorage.setItem(storageKey, JSON.stringify(next));
-        return next;
-      });
+      const current = parse(readRaw(storageKey));
+      const existing = current.find((e) => e.id === id);
+      const next = [
+        { id, preview: preview || existing?.preview || "New conversation", updatedAt: new Date().toISOString() },
+        ...current.filter((e) => e.id !== id),
+      ].slice(0, MAX_ENTRIES);
+      write(storageKey, next);
     },
     [storageKey],
   );
@@ -57,11 +91,10 @@ export function useConversationHistory() {
   const remove = useCallback(
     (id: string) => {
       if (!storageKey) return;
-      setEntries((prev) => {
-        const next = prev.filter((e) => e.id !== id);
-        window.localStorage.setItem(storageKey, JSON.stringify(next));
-        return next;
-      });
+      write(
+        storageKey,
+        parse(readRaw(storageKey)).filter((e) => e.id !== id),
+      );
     },
     [storageKey],
   );

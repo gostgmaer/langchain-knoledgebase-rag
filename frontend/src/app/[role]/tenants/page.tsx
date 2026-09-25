@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
@@ -14,16 +14,17 @@ const HISTORY_KEY = "rag-console-tenant-history";
 export default function TenantsPage() {
   const { session, setViewingTenant } = useSession();
   const [draft, setDraft] = useState(session?.tenantId ?? "");
-  const [history, setHistory] = useState<string[]>([]);
-
-  useEffect(() => {
+  // Lazy initial state (this page renders only after the session has loaded on the client),
+  // rather than copying localStorage into state from an effect.
+  const [history, setHistory] = useState<string[]>(() => {
     try {
-      const raw = window.localStorage.getItem(HISTORY_KEY);
-      if (raw) setHistory(JSON.parse(raw));
+      const raw = typeof window === "undefined" ? null : window.localStorage.getItem(HISTORY_KEY);
+      const value = raw ? JSON.parse(raw) : [];
+      return Array.isArray(value) ? value : [];
     } catch {
-      // ignore
+      return [];
     }
-  }, []);
+  });
 
   function switchTo(tenantId: string) {
     setViewingTenant(tenantId);
@@ -44,7 +45,7 @@ export default function TenantsPage() {
             The backend has no endpoint that lists every tenant across the platform — every
             resource route (documents, agents, knowledge bases, ...) is scoped by whichever{" "}
             <code className="rounded bg-neutral-100 px-1 dark:bg-neutral-800">X-Tenant-ID</code>{" "}
-            header is sent. This page can only switch which single tenant you're currently
+            header is sent. This page can only switch which single tenant you&apos;re currently
             browsing as, one ID at a time — it can&apos;t show you a real list of tenants to pick
             from.
           </CardDescription>

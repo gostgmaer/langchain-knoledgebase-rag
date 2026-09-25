@@ -24,6 +24,7 @@ from packages.infrastructure.container import ApplicationContainer
 router = APIRouter(
     prefix="/prompts",
     tags=["Prompts"],
+    dependencies=[Depends(require_admin())],
 )
 
 

@@ -9,6 +9,7 @@ from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
     get_scoped_container,
     require_uuid_header,
+    require_admin,
 )
 from packages.api.responses import ApiResponse
 from packages.api.schemas.upload_job import UploadJobResponseSchema
@@ -17,6 +18,7 @@ from packages.infrastructure.container import ApplicationContainer
 router = APIRouter(
     prefix="/upload-jobs",
     tags=["Upload Jobs"],
+    dependencies=[Depends(require_admin())],
 )
 
 

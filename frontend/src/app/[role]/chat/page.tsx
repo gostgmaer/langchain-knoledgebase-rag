@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Send } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { HistoryRail } from "@/components/chat/history-rail";
@@ -32,7 +32,7 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data } = useConversationMessages(conversationId);
-  const messages: Message[] = data?.messages ?? [];
+  const messages: Message[] = useMemo(() => data?.messages ?? [], [data]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });

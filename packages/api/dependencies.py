@@ -115,6 +115,11 @@ DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
 DEFAULT_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
 
 
+def can_override_tenant(user: CurrentUser) -> bool:
+    """True for platform operators (TENANT_OVERRIDE_ROLES, default super_admin)."""
+    return bool(set(user.roles) & set(settings.api.tenant_override_roles))
+
+
 def require_uuid_header(
     request: Request,
     header: str,
@@ -125,6 +130,16 @@ def require_uuid_header(
     verified = getattr(request.state, "current_user", None)
     if verified is not None:
         if header.lower() == "x-tenant-id":
+            # Platform operators may act on behalf of another tenant.
+            override = request.headers.get(header)
+            if override and can_override_tenant(verified):
+                try:
+                    return UUID(override)
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"{header} must be a valid UUID.",
+                    ) from exc
             return verified.tenant_id
         if header.lower() == "x-user-id":
             return verified.id
@@ -246,6 +261,30 @@ def require_admin():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Administrator role required.",
+            )
+
+    return _check
+
+
+def require_super_admin():
+    """Platform-operator-only guard (TENANT_OVERRIDE_ROLES). Active with AUTH_REQUIRED."""
+
+    async def _check(
+        current_user: CurrentUser | None = Depends(get_current_user),
+    ) -> None:
+        if not settings.api.auth_required:
+            return
+
+        if current_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required.",
+            )
+
+        if not can_override_tenant(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Platform administrator role required.",
             )
 
     return _check

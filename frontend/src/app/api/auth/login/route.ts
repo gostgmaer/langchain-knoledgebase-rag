@@ -23,7 +23,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ user: sessionFromClaims(claims) });
   } catch (error) {
     const status = error instanceof GatewayError ? error.status : 502;
-    const message = error instanceof GatewayError ? error.message : "Login failed.";
+    // IAM rate-limits sign-ins per IP; its own text ("ThrottlerException: Too Many
+    // Requests") is meaningless to a user, so say what to do instead.
+    const message =
+      status === 429
+        ? "Too many sign-in attempts. Please wait a minute and try again."
+        : error instanceof GatewayError
+          ? error.message
+          : "Login failed.";
     return NextResponse.json({ error: message }, { status });
   }
 }

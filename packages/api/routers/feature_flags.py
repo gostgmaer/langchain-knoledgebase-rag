@@ -5,7 +5,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from packages.api.dependencies import get_scoped_container, require_role
+from packages.api.dependencies import (
+    can_override_tenant,
+    get_current_user,
+    get_scoped_container,
+    require_admin,
+)
 from packages.api.responses import ApiResponse
 from packages.api.schemas.feature_flag import (
     CreateFeatureFlagRequestSchema,
@@ -15,17 +20,35 @@ from packages.api.schemas.feature_flag import (
 )
 from packages.domain.models.feature_flag import FeatureFlag
 from packages.infrastructure.container import ApplicationContainer
+from packages.sdk.iam.models import CurrentUser
 
 router = APIRouter(
     prefix="/feature-flags",
     tags=["Feature Flags"],
-    # Dogfoods the dynamic system this router itself manages: while
-    # the enable_rbac flag is off (the default), this no-ops like
-    # every other require_role() route; once flipped on via the
-    # toggle endpoint below, this router is the first place that
-    # enforcement becomes observable.
-    dependencies=[Depends(require_role("admin"))],
+    # Admin-only whenever AUTH_REQUIRED is on. This deliberately does NOT depend on
+    # the dynamic enable_rbac flag that this very router manages: gating the router
+    # on its own flag let any signed-in member create/toggle flags (including
+    # enable_rbac itself). On top of this, GLOBAL flags (tenant_id null) and other
+    # tenants' flags can only be changed by a platform administrator - see _may_manage.
+    dependencies=[Depends(require_admin())],
 )
+
+
+def _may_manage(flag_tenant_id: UUID | None, user: CurrentUser | None) -> bool:
+    """A tenant admin manages only their own tenant's flags; global flags need a platform admin."""
+    if user is None:  # AUTH_REQUIRED is off: legacy open behaviour
+        return True
+    if can_override_tenant(user):
+        return True
+    return flag_tenant_id is not None and flag_tenant_id == user.tenant_id
+
+
+def _forbid_unless_may_manage(flag_tenant_id: UUID | None, user: CurrentUser | None) -> None:
+    if not _may_manage(flag_tenant_id, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Global flags and other tenants' flags can only be changed by a platform administrator.",
+        )
 
 
 @router.post(
@@ -43,7 +66,10 @@ router = APIRouter(
 async def create_feature_flag(
     payload: CreateFeatureFlagRequestSchema,
     container: ApplicationContainer = Depends(get_scoped_container),
+    current_user: CurrentUser | None = Depends(get_current_user),
 ):
+    _forbid_unless_may_manage(payload.tenant_id, current_user)
+
     flags = container.repositories.feature_flag()
 
     existing = await flags.get_by_key_and_tenant(payload.key, payload.tenant_id)
@@ -79,10 +105,20 @@ async def list_feature_flags(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     container: ApplicationContainer = Depends(get_scoped_container),
+    current_user: CurrentUser | None = Depends(get_current_user),
 ):
     flags = container.repositories.feature_flag()
 
     rows = await flags.list_all(limit=limit, offset=offset)
+    # Global flags and the caller's own tenant overrides; platform admins see everything.
+    rows = [
+        r
+        for r in rows
+        if current_user is None
+        or can_override_tenant(current_user)
+        or r.tenant_id is None
+        or r.tenant_id == current_user.tenant_id
+    ]
 
     return ApiResponse(
         message="Feature flags retrieved.",
@@ -132,12 +168,15 @@ async def toggle_feature_flag(
     flag_id: UUID,
     payload: ToggleFeatureFlagRequestSchema,
     container: ApplicationContainer = Depends(get_scoped_container),
+    current_user: CurrentUser | None = Depends(get_current_user),
 ):
     flags = container.repositories.feature_flag()
     flag = await flags.get(flag_id)
 
     if flag is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feature flag not found.")
+
+    _forbid_unless_may_manage(flag.tenant_id, current_user)
 
     flag.enabled = payload.enabled
     updated = await flags.update(flag)
@@ -149,3 +188,34 @@ async def toggle_feature_flag(
         message="Feature flag updated.",
         data=FeatureFlagResponseSchema.model_validate(updated),
     )
+
+
+@router.delete(
+    "/{flag_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[None],
+    summary="Delete a feature flag",
+    description=(
+        "Removes a flag row; the effective value then falls back to the static settings "
+        "default. Global flags and other tenants' flags need a platform administrator."
+    ),
+)
+async def delete_feature_flag(
+    flag_id: UUID,
+    container: ApplicationContainer = Depends(get_scoped_container),
+    current_user: CurrentUser | None = Depends(get_current_user),
+):
+    flags = container.repositories.feature_flag()
+    flag = await flags.get(flag_id)
+
+    if flag is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feature flag not found.")
+
+    _forbid_unless_may_manage(flag.tenant_id, current_user)
+
+    key, tenant_id = flag.key, flag.tenant_id
+    await flags.delete(flag)
+
+    container.feature_flags.service().invalidate(key, tenant_id)
+
+    return ApiResponse(message="Feature flag deleted.")

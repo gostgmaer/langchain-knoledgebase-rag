@@ -17,6 +17,7 @@ import {
 
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
+import { QueryError } from "@/components/shared/query-error";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -69,7 +70,7 @@ function ChartTooltip({
 
 export function AnalyticsView() {
   const [days, setDays] = useState<number>(30);
-  const { data, isLoading } = useAnalyticsSummary(days);
+  const { data, isLoading, isError, error, refetch } = useAnalyticsSummary(days);
 
   const feedbackByDay = useMemo(() => {
     if (!data) return [];
@@ -105,7 +106,9 @@ export function AnalyticsView() {
         </TabsList>
       </Tabs>
 
-      {isLoading ? (
+      {isError ? (
+        <QueryError error={error} onRetry={() => void refetch()} />
+      ) : isLoading ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <Skeleton className="h-72 w-full" />
           <Skeleton className="h-72 w-full" />

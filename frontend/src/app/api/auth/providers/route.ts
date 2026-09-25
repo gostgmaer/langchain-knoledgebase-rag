@@ -25,8 +25,11 @@ export async function GET(request: Request) {
       google: master && settings["auth.social.google"] === true,
       microsoft: master && settings["auth.social.microsoft"] === true,
       facebook: master && settings["auth.social.facebook"] === true,
+      // false = invite-only: sign-up needs an invitation (IAM enforces this too).
+      registrationOpen: settings["auth.registration.enabled"] !== false,
     });
   } catch {
-    return NextResponse.json({ google: false, microsoft: false, facebook: false });
+    // Unknown: keep sign-up visible rather than hiding it because a lookup failed.
+    return NextResponse.json({ google: false, microsoft: false, facebook: false, registrationOpen: true });
   }
 }

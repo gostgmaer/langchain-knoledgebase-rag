@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useRegistrationOpen } from "@/lib/auth/use-registration-open";
 import { PENDING_INVITE_KEY } from "@/lib/invite";
 
 export default function RegisterPage() {
@@ -23,6 +24,7 @@ function RegisterForm() {
   // Invite emails link here as /register?inviteToken=... for people who
   // don't have an account yet.
   const inviteToken = useSearchParams().get("inviteToken") ?? "";
+  const registrationOpen = useRegistrationOpen();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -71,6 +73,23 @@ function RegisterForm() {
       setError(err instanceof Error ? err.message : "Registration failed.");
       setSubmitting(false);
     }
+  }
+
+  // Invite-only: without an invitation link there is nothing to submit (IAM would refuse it).
+  if (!registrationOpen && !inviteToken) {
+    return (
+      <div className="flex min-h-screen flex-1 items-center justify-center p-6">
+        <div className="w-full max-w-sm space-y-4 text-center">
+          <h1 className="text-2xl font-semibold tracking-tight">Sign-up is by invitation only</h1>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            Ask a workspace admin to invite your email address, then open the link in the invitation email.
+          </p>
+          <Link href="/" className="text-sm font-medium text-primary hover:underline">
+            Back to sign in
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   return (
