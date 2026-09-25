@@ -214,6 +214,7 @@ def main() -> int:
     for k in ("FRONTEND_URL", "AUTH_PUBLIC_BASE_URL"):
         iam.require(k, url=True)
     iam.require("DATABASE_URL", url=True)
+    iam.require("TENANT")  # required by IAM's notification config (tenant slug)
     iam.require("BACKUP_CODE_ENCRYPTION_KEY", hexlen=64, secret=True)
     if not (iam.get("JWT_PRIVATE_KEY") or iam.get("JWT_PRIVATE_KEY_PATH")) or not (iam.get("JWT_PUBLIC_KEY") or iam.get("JWT_PUBLIC_KEY_PATH")):
         rec("FAIL", iam.name, "RS256 key pair missing (JWT_PRIVATE_KEY/JWT_PUBLIC_KEY or their _PATH variants)")

@@ -219,7 +219,7 @@ Cookies are `httpOnly`; `secure` is on automatically when `NODE_ENV=production`,
 
 IAM (NestJS + Prisma) owns users, tenants, roles, sessions, invitations and social login. It is the only service that signs tokens.
 
-**IAM refuses to start unless these are set** (Joi validation in `app.module.ts`): `FRONTEND_URL`, `AUTH_PUBLIC_BASE_URL` (must be a URL), `DATABASE_URL`, `COOKIE_SECRET` (16+ chars), `SSO_SECRET` (16+), `JWT_REFRESH_SECRET` (32+), `JWT_MAGIC_LINK_SECRET` (16+), `FILE_UPLOAD_SERVICE_URL` (must be a URL, even if you never upload) and `NOTIFICATION_SERVICE_URL`. Separately, `BACKUP_CODE_ENCRYPTION_KEY` (64 hex) and, in production, `CORS_ORIGINS` are enforced at runtime.
+**IAM refuses to start unless these are set** (Joi validation in `app.module.ts`): `FRONTEND_URL`, `AUTH_PUBLIC_BASE_URL` (must be a URL), `DATABASE_URL`, `COOKIE_SECRET` (16+ chars), `SSO_SECRET` (16+), `JWT_REFRESH_SECRET` (32+), `JWT_MAGIC_LINK_SECRET` (16+), `FILE_UPLOAD_SERVICE_URL` (must be a URL, even if you never upload), `NOTIFICATION_SERVICE_URL` and `TENANT` (the platform tenant slug, for example `easydev`). Separately, `BACKUP_CODE_ENCRYPTION_KEY` (64 hex) and, in production, `CORS_ORIGINS` are enforced at runtime.
 
 ### 5.1 Core
 
