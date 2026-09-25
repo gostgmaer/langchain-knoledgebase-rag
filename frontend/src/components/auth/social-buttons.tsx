@@ -37,8 +37,10 @@ export function SocialButtons({ verb = "Continue" }: { verb?: string }) {
     };
   }, []);
 
-  const available = PROVIDERS.filter((p) => enabled?.[p.id]);
-  if (available.length === 0) return null;
+  // Always show every provider so the options are discoverable. One an admin
+  // has not enabled in IAM yet is shown disabled (rather than hidden, or a
+  // live button that would only bounce back with an error).
+  const anyUnavailable = enabled !== null && PROVIDERS.some((p) => !enabled[p.id]);
 
   return (
     <div className="grid gap-3">
@@ -47,15 +49,32 @@ export function SocialButtons({ verb = "Continue" }: { verb?: string }) {
         or
         <span className="h-px flex-1 bg-neutral-200 dark:bg-neutral-800" />
       </div>
-      {available.map((p) => (
-        <a
-          key={p.id}
-          href={`/api/auth/social/${p.id}/start`}
-          className={cn(buttonVariants({ variant: "outline", size: "lg" }), "w-full")}
-        >
-          {verb} with {p.label}
-        </a>
-      ))}
+      {PROVIDERS.map((p) =>
+        enabled?.[p.id] ? (
+          <a
+            key={p.id}
+            href={`/api/auth/social/${p.id}/start`}
+            className={cn(buttonVariants({ variant: "outline", size: "lg" }), "w-full")}
+          >
+            {verb} with {p.label}
+          </a>
+        ) : (
+          <span
+            key={p.id}
+            role="link"
+            aria-disabled="true"
+            title={enabled === null ? "Checking availability..." : `${p.label} sign-in is not set up yet`}
+            className={cn(buttonVariants({ variant: "outline", size: "lg" }), "w-full cursor-not-allowed opacity-50")}
+          >
+            {verb} with {p.label}
+          </span>
+        ),
+      )}
+      {anyUnavailable && (
+        <p className="text-center text-xs text-neutral-500">
+          Greyed-out options are not set up yet. An administrator can enable them in IAM settings.
+        </p>
+      )}
     </div>
   );
 }
