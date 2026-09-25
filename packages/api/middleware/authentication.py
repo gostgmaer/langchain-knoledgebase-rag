@@ -7,7 +7,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
-from packages.auth.service import AuthService
+from packages.auth.service import AuthService, NoTenantError
 from packages.config.loader import settings
 from packages.infrastructure.container import ApplicationContainer
 
@@ -73,6 +73,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             current_user = await auth_service.resolve(access_token, fail_open=not required)
         except httpx.HTTPError:
             return self._deny(503, "Could not reach the IAM service.")
+        except NoTenantError:
+            if self._is_public(request):
+                return await call_next(request)
+            return self._deny(
+                403,
+                "Your account is not a member of any workspace yet. "
+                "Ask a workspace admin to invite you, then sign in again.",
+            )
 
         if required and access_token and current_user is None and not self._is_public(request):
             return self._deny(401, "Invalid or expired access token.")

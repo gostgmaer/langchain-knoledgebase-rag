@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
 import { Sidebar, type NavItem } from "@/components/layout/sidebar";
+import { Button } from "@/components/ui/button";
 import { Topbar } from "@/components/layout/topbar";
 import { type Role, useSession } from "@/lib/session";
 
@@ -19,7 +20,7 @@ export function AppShell({
   children: ReactNode;
 }) {
   const router = useRouter();
-  const { session, isLoading } = useSession();
+  const { session, isLoading, logout } = useSession();
 
   useEffect(() => {
     if (isLoading) return;
@@ -34,6 +35,25 @@ export function AppShell({
 
   if (isLoading || !session || session.role !== role) {
     return <div className="flex h-screen items-center justify-center text-sm text-neutral-400">Loading…</div>;
+  }
+
+  // An IAM account that belongs to no workspace has no tenant, so every API call
+  // would be refused. Say so, instead of showing an app that silently fails.
+  if (!session.tenantId) {
+    return (
+      <div className="flex h-screen items-center justify-center p-6">
+        <div className="max-w-md space-y-4 rounded-lg border p-6 text-center">
+          <h1 className="text-lg font-semibold">You are not in a workspace yet</h1>
+          <p className="text-sm text-muted-foreground">
+            Your account ({session.displayName}) is not a member of any workspace, so there is nothing to show yet. Ask a
+            workspace admin to invite this email address, open the invitation link, and then sign in again.
+          </p>
+          <Button variant="outline" onClick={() => void logout().then(() => router.replace("/"))}>
+            Sign out
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   return (
