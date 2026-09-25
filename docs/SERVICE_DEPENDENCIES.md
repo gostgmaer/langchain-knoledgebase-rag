@@ -1,6 +1,6 @@
 # Service dependencies - what each service needs, and what needs it
 
-Answers, per service: *"what must be running (or configured) before this starts, what stops working if a dependency is down, and which services depend on this one?"* Companion to [`LOCAL_SETUP.md`](LOCAL_SETUP.md) (how to start everything) and [`ENVIRONMENT.md`](ENVIRONMENT.md) (every variable).
+Answers, per service: *"what must be running (or configured) before this starts, what stops working if a dependency is down, and which services depend on this one?"* Services outside the RAG project (payment, lead, product apps, support-ai, AI platform, UIs) are in [`OTHER_SERVICES_DEPENDENCIES.md`](OTHER_SERVICES_DEPENDENCIES.md). Companion to [`LOCAL_SETUP.md`](LOCAL_SETUP.md) (how to start everything) and [`ENVIRONMENT.md`](ENVIRONMENT.md) (every variable).
 
 Source of the facts below: the compose `depends_on` entries, each service's config validation and env files, and grep of the code that makes the outbound calls. Where something could not be confirmed from code it is marked **(assumed)**.
 
