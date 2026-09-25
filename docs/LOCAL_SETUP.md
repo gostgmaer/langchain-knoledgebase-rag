@@ -288,6 +288,8 @@ npm run dev        # http://localhost:3000
 | 9 | Chat | Ask a question about the uploaded document | Answer with citations (needs a working LLM key) |
 | 10 | Social login | Login page shows a provider button only when that provider is enabled in IAM | Buttons hidden until configured |
 
+**Automated version of rows 1-9:** `bash scripts/e2e_local.sh` runs login, IAM enforcement, tenant-spoof, invite (email in Mailpit, register with the token), upload and ingestion, chat with citations, and the social authorize redirects, then prints PASS/FAIL. It needs the whole stack running, leaves throwaway test data in the local workspace, and takes about two minutes (repeated runs can trip IAM's login rate limit; wait a minute between runs).
+
 `scripts/verify-stack.sh` in `easydev-infra` (read-only) checks container health and DB state for the core stack.
 
 ### Enabling social login locally (optional)
