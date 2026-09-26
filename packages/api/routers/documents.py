@@ -66,7 +66,7 @@ async def upload_document(
     request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    chunking_strategy: ChunkingStrategy = "auto",
+    chunking_strategy: ChunkingStrategy = "recursive",
     container: ApplicationContainer = Depends(get_scoped_container),
 ):
     tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)

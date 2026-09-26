@@ -237,7 +237,7 @@ class IngestionPipeline:
             scratch_path.write_bytes(content)
 
             # Re-chunk with the strategy the user originally asked for; without this a
-            # re-index silently fell back to "auto" and changed how the document was split.
+            # re-index silently fell back to the default and changed how the document was split.
             previous_choice = ((document.metadata_ or {}).get("chunking") or {}).get("requested")
             request = IngestionRequest(
                 tenant_id=document.tenant_id,
@@ -246,7 +246,7 @@ class IngestionPipeline:
                 file=scratch_path,
                 file_id=document.file_id,
                 document_name=document.file_name,
-                chunking_strategy=previous_choice if previous_choice in ("auto", "recursive", "markdown", "semantic") else "auto",
+                chunking_strategy=previous_choice if previous_choice in ("auto", "recursive", "markdown", "semantic") else "recursive",
             )
 
             await self.vector_store.store.delete_document(

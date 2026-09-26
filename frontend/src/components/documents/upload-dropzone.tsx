@@ -10,8 +10,8 @@ import type { ChunkingStrategy } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 const CHUNKING_STRATEGIES: { value: ChunkingStrategy; label: string; description: string }[] = [
-  { value: "auto", label: "Auto (recommended)", description: "Picks a strategy based on the file type." },
-  { value: "recursive", label: "Recursive", description: "Fixed-size chunks with overlap — works for any text." },
+  { value: "auto", label: "Auto", description: "Picks a strategy based on the file type." },
+  { value: "recursive", label: "Recursive (default)", description: "Fixed-size chunks with overlap — accurate for any text." },
   { value: "markdown", label: "Markdown", description: "Splits along headings — best for structured docs." },
   { value: "semantic", label: "Semantic", description: "Splits at meaning boundaries via embeddings — slower." },
 ];
@@ -20,7 +20,7 @@ export function UploadDropzone() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
-  const [chunkingStrategy, setChunkingStrategy] = useState<ChunkingStrategy>("auto");
+  const [chunkingStrategy, setChunkingStrategy] = useState<ChunkingStrategy>("recursive");
   const upload = useUploadDocument();
   const { data: job } = useUploadJob(jobId, true);
   // Tracks which job we've already toasted for, so the one-shot success/

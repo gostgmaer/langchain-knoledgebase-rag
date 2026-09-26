@@ -22,7 +22,7 @@ class IngestionRequest:
     document_name: str
 
     file_id: str | None = None
-    chunking_strategy: ChunkingStrategy = "auto"
+    chunking_strategy: ChunkingStrategy = "recursive"
 
     metadata: dict[str, object] = field(default_factory=dict)
 
