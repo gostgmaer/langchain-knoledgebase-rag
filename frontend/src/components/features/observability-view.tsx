@@ -14,7 +14,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useAuditEvents, useObservabilitySummary, useTopDocuments } from "@/hooks/use-api";
+import { toast } from "sonner";
+
+import { useAuditEvents, useObservabilitySummary, useReindexOutdated, useTopDocuments } from "@/hooks/use-api";
 import { formatDateTime } from "@/lib/utils";
 
 const RANGES = [
@@ -47,6 +49,7 @@ export function ObservabilityView() {
   const summary = useObservabilitySummary(days);
   const top = useTopDocuments(days);
   const audit = useAuditEvents(AUDIT_PAGE, auditOffset);
+  const reindexOutdated = useReindexOutdated();
 
   const r = summary.data?.retrieval;
   const d = summary.data?.documents;
@@ -97,6 +100,22 @@ export function ObservabilityView() {
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+            <Button
+              variant="outline"
+              size="sm"
+              loading={reindexOutdated.isPending}
+              disabled={d.stale_embeddings === 0}
+              onClick={async () => {
+                try {
+                  const result = await reindexOutdated.mutateAsync();
+                  toast.success(`Re-index queued for ${result.queued} document(s).`);
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Could not queue the re-index.");
+                }
+              }}
+            >
+              Re-index {d.stale_embeddings} outdated
+            </Button>
             <span className="text-neutral-500">Documents ({d.total}):</span>
             {Object.entries(d.by_status).map(([status, count]) => (
               <Badge key={status} variant={status === "FAILED" ? "destructive" : "secondary"}>

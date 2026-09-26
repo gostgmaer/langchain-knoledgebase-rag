@@ -16,6 +16,7 @@ from packages.worker.jobs import (
     ingest_document_job,
     purge_expired_logs_job,
     recover_stuck_conversations_job,
+    reindex_document_job,
     reindex_stale_documents_job,
 )
 
@@ -73,6 +74,7 @@ class WorkerSettings:
         reindex_stale_documents_job,
         recover_stuck_conversations_job,
         purge_expired_logs_job,
+        reindex_document_job,
     ]
 
     cron_jobs = [

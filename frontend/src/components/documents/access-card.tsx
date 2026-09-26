@@ -17,6 +17,9 @@ export function AccessCard({ doc }: { doc: DocumentRecord }) {
   const [documentType, setDocumentType] = useState(doc.document_type ?? "");
   const [category, setCategory] = useState(doc.category ?? "");
   const [tags, setTags] = useState((doc.tags ?? []).join(", "));
+  const [roles, setRoles] = useState((doc.allowed_roles ?? []).join(", "));
+  const [users, setUsers] = useState((doc.allowed_users ?? []).join(", "));
+  const list = (value: string) => value.split(",").map((t) => t.trim()).filter(Boolean);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -25,7 +28,9 @@ export function AccessCard({ doc }: { doc: DocumentRecord }) {
         visibility,
         document_type: documentType.trim() || null,
         category: category.trim() || null,
-        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+        tags: list(tags),
+        allowed_roles: list(roles),
+        allowed_users: list(users),
       });
       toast.success("Document access and classification saved.");
     } catch (err) {
@@ -44,9 +49,21 @@ export function AccessCard({ doc }: { doc: DocumentRecord }) {
             <span className="text-neutral-500">Who can retrieve it</span>
             <Select value={visibility} onChange={(e) => setVisibility(e.target.value as "tenant" | "restricted")}>
               <option value="tenant">All members of the workspace</option>
-              <option value="restricted">Administrators only</option>
+              <option value="restricted">Restricted (administrators, plus the grants below)</option>
             </Select>
           </label>
+          {visibility === "restricted" && (
+            <>
+              <label className="grid gap-1">
+                <span className="text-neutral-500">Also allow these roles (comma-separated)</span>
+                <Input value={roles} onChange={(e) => setRoles(e.target.value)} placeholder="member, finance" />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-neutral-500">Also allow these user ids (comma-separated)</span>
+                <Input value={users} onChange={(e) => setUsers(e.target.value)} placeholder="user uuid, user uuid" />
+              </label>
+            </>
+          )}
           <label className="grid gap-1">
             <span className="text-neutral-500">Type</span>
             <Input value={documentType} onChange={(e) => setDocumentType(e.target.value)} placeholder="policy" />

@@ -4,7 +4,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
@@ -121,7 +121,13 @@ async def _with_sources(container: ApplicationContainer, history) -> list[Messag
     if ids:
         rows = (
             await container.database.session().execute(
-                select(MessageCitation.message_id, MessageCitation.rank, Document.file_name, DocumentChunk.page_number, DocumentChunk.section)
+                select(
+                    MessageCitation.message_id,
+                    MessageCitation.rank,
+                    func.coalesce(MessageCitation.document_name, Document.file_name),
+                    func.coalesce(MessageCitation.page_number, DocumentChunk.page_number),
+                    func.coalesce(MessageCitation.section, DocumentChunk.section),
+                )
                 .join(Document, Document.id == MessageCitation.document_id, isouter=True)
                 .join(DocumentChunk, DocumentChunk.id == MessageCitation.chunk_id, isouter=True)
                 .where(MessageCitation.message_id.in_(ids))

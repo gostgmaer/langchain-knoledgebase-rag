@@ -207,3 +207,24 @@ def test_conversation_is_visible_to_owner_and_admin_but_not_other_members_or_ten
     assert not conversation_visible_to(conv, tenant, member)  # another member of the same tenant
     assert not conversation_visible_to(conv, other_tenant, admin)  # another tenant, even an admin
     assert conversation_visible_to(conv, tenant, None)  # anonymous dev mode keeps tenant-only
+
+
+# ---- role / user grants ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_restricted_documents_can_be_granted_to_roles_and_users():
+    sql = await _search_sql(include_restricted=False, user_roles=("finance",), user_id="u-1")
+    assert "documents.allowed_roles ?|" in sql
+    assert "documents.allowed_users @>" in sql
+    cleared = await _search_sql(include_restricted=True, user_roles=("finance",), user_id="u-1")
+    assert "documents.visibility" not in cleared  # administrators need no grant
+
+
+def test_chat_filters_keep_only_known_non_empty_keys():
+    from packages.shared.access import retrieval_filters, set_retrieval_filters
+
+    set_retrieval_filters({"document_types": ["policy"], "tags": [], "language": None, "evil": ["x"], "categories": ["hr"]})
+    try:
+        assert retrieval_filters() == {"document_types": ["policy"], "categories": ["hr"]}
+    finally:
+        set_retrieval_filters(None)
+    assert retrieval_filters() == {}

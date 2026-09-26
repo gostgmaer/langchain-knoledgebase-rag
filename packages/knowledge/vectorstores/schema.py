@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from packages.domain.models.document_chunk import DocumentChunk
-from packages.shared.access import can_read_restricted
+from packages.shared.access import can_read_restricted, current_user_id, current_user_roles
 
 
 @dataclass(slots=True)
@@ -20,6 +20,8 @@ class SearchFilter:
 
     # Access: fail-closed. Defaults to the current request's clearance (False outside a request).
     include_restricted: bool = field(default_factory=can_read_restricted)
+    user_id: str | None = field(default_factory=current_user_id)
+    user_roles: tuple[str, ...] = field(default_factory=current_user_roles)
 
     # Metadata filters, applied inside the search query itself.
     knowledge_base_id: UUID | None = None

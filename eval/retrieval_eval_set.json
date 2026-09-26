@@ -1,18 +1,158 @@
 [
-  {"query": "How many vacation days do I get each year?", "expected_documents": ["eval_corp_vacation_policy.txt"]},
-  {"query": "Can I carry over leave I did not use?", "expected_documents": ["eval_corp_vacation_policy.txt"]},
-  {"query": "How long is maternity or paternity leave?", "expected_documents": ["eval_corp_parental_leave.txt"]},
-  {"query": "Can I return to work part time after having a baby?", "expected_documents": ["eval_corp_parental_leave.txt"]},
-  {"query": "Do I need a receipt for a small purchase?", "expected_documents": ["eval_corp_expense_policy.txt"]},
-  {"query": "How long do I have to file a reimbursement claim?", "expected_documents": ["eval_corp_expense_policy.txt"]},
-  {"query": "What is the maximum nightly hotel price?", "expected_documents": ["eval_corp_travel_booking.txt"]},
-  {"query": "How early must flights be booked?", "expected_documents": ["eval_corp_travel_booking.txt"]},
-  {"query": "How many days a week can I work from home?", "expected_documents": ["eval_corp_remote_work.txt"]},
-  {"query": "Is there money for buying a home office desk?", "expected_documents": ["eval_corp_remote_work.txt"]},
-  {"query": "What is the minimum length of a password?", "expected_documents": ["eval_corp_password_security.txt"]},
-  {"query": "Which systems require two-factor login?", "expected_documents": ["eval_corp_password_security.txt"]},
-  {"query": "Who helps me during my first three months at the company?", "expected_documents": ["eval_corp_onboarding.txt"]},
-  {"query": "Where do I pick up my computer on day one?", "expected_documents": ["eval_corp_onboarding.txt"]},
-  {"query": "How quickly must the on-call engineer respond to a total outage?", "expected_documents": ["eval_corp_incident_response.txt"]},
-  {"query": "When is the postmortem due after a major incident?", "expected_documents": ["eval_corp_incident_response.txt"]}
+  {
+    "query": "How many vacation days do I get each year?",
+    "expected_documents": [
+      "eval_corp_vacation_policy.txt"
+    ]
+  },
+  {
+    "query": "Can I carry over leave I did not use?",
+    "expected_documents": [
+      "eval_corp_vacation_policy.txt"
+    ]
+  },
+  {
+    "query": "How long is maternity or paternity leave?",
+    "expected_documents": [
+      "eval_corp_parental_leave.txt"
+    ]
+  },
+  {
+    "query": "Can I return to work part time after having a baby?",
+    "expected_documents": [
+      "eval_corp_parental_leave.txt"
+    ]
+  },
+  {
+    "query": "Do I need a receipt for a small purchase?",
+    "expected_documents": [
+      "eval_corp_expense_policy.txt"
+    ]
+  },
+  {
+    "query": "How long do I have to file a reimbursement claim?",
+    "expected_documents": [
+      "eval_corp_expense_policy.txt"
+    ]
+  },
+  {
+    "query": "What is the maximum nightly hotel price?",
+    "expected_documents": [
+      "eval_corp_travel_booking.txt"
+    ]
+  },
+  {
+    "query": "How early must flights be booked?",
+    "expected_documents": [
+      "eval_corp_travel_booking.txt"
+    ]
+  },
+  {
+    "query": "How many days a week can I work from home?",
+    "expected_documents": [
+      "eval_corp_remote_work.txt"
+    ]
+  },
+  {
+    "query": "Is there money for buying a home office desk?",
+    "expected_documents": [
+      "eval_corp_remote_work.txt"
+    ]
+  },
+  {
+    "query": "What is the minimum length of a password?",
+    "expected_documents": [
+      "eval_corp_password_security.txt"
+    ]
+  },
+  {
+    "query": "Which systems require two-factor login?",
+    "expected_documents": [
+      "eval_corp_password_security.txt"
+    ]
+  },
+  {
+    "query": "Who helps me during my first three months at the company?",
+    "expected_documents": [
+      "eval_corp_onboarding.txt"
+    ]
+  },
+  {
+    "query": "Where do I pick up my computer on day one?",
+    "expected_documents": [
+      "eval_corp_onboarding.txt"
+    ]
+  },
+  {
+    "query": "How quickly must the on-call engineer respond to a total outage?",
+    "expected_documents": [
+      "eval_corp_incident_response.txt"
+    ]
+  },
+  {
+    "query": "When is the postmortem due after a major incident?",
+    "expected_documents": [
+      "eval_corp_incident_response.txt"
+    ]
+  },
+  {
+    "query": "How many annual leave days do employees in Europe get?",
+    "expected_documents": [
+      "eval_corp_vacation_policy_eu.txt"
+    ]
+  },
+  {
+    "query": "How many annual leave days do staff in the United States get?",
+    "expected_documents": [
+      "eval_corp_vacation_policy_us.txt"
+    ]
+  },
+  {
+    "query": "What does ERR-5023 mean?",
+    "expected_documents": [
+      "eval_corp_billing_runbook.txt"
+    ]
+  },
+  {
+    "query": "How do I handle ERR-5031?",
+    "expected_documents": [
+      "eval_corp_billing_runbook.txt"
+    ]
+  },
+  {
+    "query": "How much memory does the ZX-4420 have?",
+    "expected_documents": [
+      "eval_corp_hardware_catalog.txt"
+    ]
+  },
+  {
+    "query": "Which docking station works with the ZX-4410?",
+    "expected_documents": [
+      "eval_corp_hardware_catalog.txt"
+    ]
+  },
+  {
+    "query": "How long do we keep information about our clients before deleting it?",
+    "expected_documents": [
+      "eval_corp_data_retention.txt"
+    ]
+  },
+  {
+    "query": "How soon must a deletion request from a person be honoured?",
+    "expected_documents": [
+      "eval_corp_data_retention.txt"
+    ]
+  },
+  {
+    "query": "Someone emailed me pretending to be from the help desk asking for my code, what should I do?",
+    "expected_documents": [
+      "eval_corp_security_awareness.txt"
+    ]
+  },
+  {
+    "query": "What should I do if my work phone is stolen?",
+    "expected_documents": [
+      "eval_corp_security_awareness.txt"
+    ]
+  }
 ]

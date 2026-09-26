@@ -3,6 +3,8 @@
 # (eval/corpus, labelled by eval/retrieval_eval_set.json). Needs the local stack (docs/LOCAL_SETUP.md).
 #   scripts/eval_corpus.sh up      upload the corpus and wait for ingestion
 #   scripts/eval_corpus.sh down    delete it again
+# NOTE: the upload service rate-limits to UPLOAD_RATE_LIMIT (default 10) uploads per 15 minutes; raise it in
+# its env for local use (this corpus is 14 files).
 # Then:  docker compose exec api sh -c "cd /app && PYTHONPATH=. python scripts/evaluate_retrieval.py eval/retrieval_eval_set.json --tenant-id <tenant>
 GW=http://localhost:3301; RAG=http://localhost:8088/api/v1; O="Origin: http://localhost:3000"
 EMAIL=${E2E_ADMIN_EMAIL:-super-admin@example.com}; PW=${E2E_ADMIN_PASSWORD:-'ChangeMe@Local123!'}

@@ -6,6 +6,8 @@ import re
 
 from rank_bm25 import BM25Okapi
 
+from packages.config.loader import settings
+
 from packages.knowledge.retrievers.base import BaseRetriever
 from packages.knowledge.retrievers.schemas import RetrievalRequest
 from packages.knowledge.vectorstores.manager import VectorStoreManager
@@ -115,11 +117,11 @@ class HybridRetriever(BaseRetriever):
         vector_scores = {r.chunk.id: r.score for r in vector_results}
         keyword_scores = {r.chunk.id: r.score for r in keyword_results}
 
-        for ranked_list in (vector_results, keyword_results):
+        for weight, ranked_list in ((1.0, vector_results), (settings.rag.keyword_weight, keyword_results)):
             for rank, result in enumerate(ranked_list):
                 chunk_id = result.chunk.id
                 fused_scores[chunk_id] = (
-                    fused_scores.get(chunk_id, 0.0) + 1 / (RRF_K + rank + 1)
+                    fused_scores.get(chunk_id, 0.0) + weight / (RRF_K + rank + 1)
                 )
                 chunks.setdefault(chunk_id, result)
 

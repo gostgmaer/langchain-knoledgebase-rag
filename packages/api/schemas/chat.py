@@ -5,6 +5,15 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ChatFiltersSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_types: list[str] | None = Field(default=None, max_length=20)
+    categories: list[str] | None = Field(default=None, max_length=20)
+    tags: list[str] | None = Field(default=None, max_length=20)
+    language: str | None = Field(default=None, max_length=20)
+
+
 class ChatRequestSchema(BaseModel):
     """
     Incoming chat request.
@@ -30,6 +39,11 @@ class ChatRequestSchema(BaseModel):
     )
 
     stream: bool = False
+
+    filters: "ChatFiltersSchema | None" = Field(
+        default=None,
+        description="Restrict retrieval to documents with this metadata (applied inside the search).",
+    )
 
 
 class CitationSchema(BaseModel):

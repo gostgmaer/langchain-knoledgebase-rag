@@ -108,6 +108,8 @@ def _doc(**over):
         error_reason=None,
         processed_at=None,
         visibility=None,
+        allowed_roles=None,
+        allowed_users=None,
         document_type=None,
         category=None,
         tags=None,

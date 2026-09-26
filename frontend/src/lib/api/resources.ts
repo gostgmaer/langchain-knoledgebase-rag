@@ -14,6 +14,9 @@ import type {
   AuditList,
   DocumentChunkListResponse,
   ObservabilitySummary,
+  ReindexResult,
+  RetrievalSettings,
+  RetrievalSettingsUpdate,
   RetrievalLogDetail,
   RetrievalLogList,
   TopDocument,
@@ -112,6 +115,10 @@ export const documents = {
       },
     });
   },
+  reindex: (identity: Identity, id: string) =>
+    apiFetch<ReindexResult>(`/documents/${id}/reindex`, identity, { method: "POST" }),
+  reindexOutdated: (identity: Identity) =>
+    apiFetch<ReindexResult>("/documents/reindex-outdated", identity, { method: "POST" }),
   update: (identity: Identity, id: string, body: DocumentUpdate) =>
     apiFetch<DocumentRecord>(`/documents/${id}`, identity, { method: "PATCH", body }),
 };
@@ -269,4 +276,10 @@ export const observability = {
     apiFetch<TopDocument[]>("/observability/top-documents", identity, { query: { days, limit: 10 } }),
   audit: (identity: Identity, limit: number, offset: number) =>
     apiFetch<AuditList>("/observability/audit", identity, { query: { limit, offset } }),
+};
+
+export const retrievalSettings = {
+  get: (identity: Identity) => apiFetch<RetrievalSettings>("/retrieval-settings", identity),
+  save: (identity: Identity, body: RetrievalSettingsUpdate) =>
+    apiFetch<RetrievalSettings>("/retrieval-settings", identity, { method: "PUT", body }),
 };

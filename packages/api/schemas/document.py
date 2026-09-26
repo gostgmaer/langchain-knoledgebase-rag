@@ -90,6 +90,8 @@ class DocumentResponseSchema(BaseModel):
     processed_at: datetime | None = None
     embedding_is_stale: bool | None = None
     visibility: str = "tenant"
+    allowed_roles: list[str] | None = None
+    allowed_users: list[str] | None = None
     document_type: str | None = None
     category: str | None = None
     tags: list[str] | None = None
@@ -181,6 +183,8 @@ class DocumentUpdateSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     visibility: Literal["tenant", "restricted"] | None = None
+    allowed_roles: list[str] | None = Field(default=None, max_length=50)
+    allowed_users: list[str] | None = Field(default=None, max_length=200)
     document_type: str | None = Field(default=None, max_length=64)
     category: str | None = Field(default=None, max_length=64)
     tags: list[str] | None = None

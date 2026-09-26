@@ -14,7 +14,12 @@ from packages.application.services.retrieval_log_service import (
     RetrievalLogService,
     RetrievalRecord,
 )
+from packages.application.services.retrieval_settings_service import (
+    RetrievalSettingsService,
+    platform_defaults,
+)
 from packages.config.loader import settings
+from packages.shared.access import retrieval_filters
 from packages.graph.state import GraphState
 from packages.knowledge.manager import KnowledgeManager
 from packages.knowledge.reranking.cross_encoder import (
@@ -51,10 +56,12 @@ class RetrieveNode:
         knowledge_manager: KnowledgeManager,
         reranker: CrossEncoderReranker,
         retrieval_log: RetrievalLogService | None = None,
+        retrieval_settings: RetrievalSettingsService | None = None,
     ) -> None:
         self._knowledge = knowledge_manager
         self._reranker = reranker
         self._retrieval_log = retrieval_log
+        self._retrieval_settings = retrieval_settings
 
     async def __call__(
         self,
@@ -65,9 +72,16 @@ class RetrieveNode:
         primary_query = state.get("rewritten_query") or state["messages"][-1].content
         queries = [primary_query, *state.get("expanded_queries", [])]
 
+        config = (
+            await self._retrieval_settings.get_effective(state["tenant_id"])
+            if self._retrieval_settings is not None
+            else platform_defaults()
+        )
+
         filters = SearchFilter(
             tenant_id=state["tenant_id"],
             model_profile_id=state["model_profile_id"],
+            **retrieval_filters(),
         )
 
         # Independent sub-queries, fetched concurrently rather than
@@ -96,17 +110,21 @@ class RetrieveNode:
 
         candidates = list(merged.values())
 
-        top_k = settings.rag.max_results
+        top_k = config.max_results
 
         rerank_started = time.perf_counter()
-        reranked = await self._reranker.rerank(
-            primary_query,
-            candidates,
-            top_k=top_k,
-        )
+        if config.reranking_enabled:
+            reranked = await self._reranker.rerank(
+                primary_query,
+                candidates,
+                top_k=top_k,
+            )
+            reranked = apply_relevance_floor(reranked, config.min_relevance_score)
+        else:
+            # Reranking switched off for this workspace: keep the search ranking. The relevance
+            # floor is defined on reranker scores, so it does not apply here.
+            reranked = sorted(candidates, key=lambda r: r.score, reverse=True)[:top_k]
         rerank_done = time.perf_counter()
-
-        reranked = apply_relevance_floor(reranked, settings.rag.min_relevance_score)
 
         retrieval_id = await self._log_retrieval(
             state,
@@ -115,6 +133,7 @@ class RetrieveNode:
             candidates=candidates,
             reranked=reranked,
             top_k=top_k,
+            config=config,
             search_ms=int((search_done - started) * 1000),
             rerank_ms=int((rerank_done - rerank_started) * 1000),
             total_ms=int((time.perf_counter() - started) * 1000),
@@ -155,6 +174,7 @@ class RetrieveNode:
         candidates: list,
         reranked: list,
         top_k: int,
+        config,
         search_ms: int,
         rerank_ms: int,
         total_ms: int,
@@ -178,9 +198,9 @@ class RetrieveNode:
             sub_query_count=query_count,
             strategy=settings.rag.retrieval_strategy,
             top_k=top_k,
-            min_relevance_score=settings.rag.min_relevance_score,
-            reranking_enabled=True,
-            reranker_model=getattr(self._reranker, "_model_name", None),
+            min_relevance_score=config.min_relevance_score if config.reranking_enabled else None,
+            reranking_enabled=config.reranking_enabled,
+            reranker_model=getattr(self._reranker, "_model_name", None) if config.reranking_enabled else None,
             search_latency_ms=search_ms,
             rerank_latency_ms=rerank_ms,
             latency_ms=total_ms,
@@ -194,7 +214,9 @@ class RetrieveNode:
                     retrieval_score=float(r.score),
                     vector_score=r.vector_score,
                     keyword_score=r.keyword_score,
-                    reranker_score=by_rerank[r.chunk.id][1] if r.chunk.id in by_rerank else None,
+                    reranker_score=(
+                        by_rerank[r.chunk.id][1] if config.reranking_enabled and r.chunk.id in by_rerank else None
+                    ),
                     final_rank=by_rerank[r.chunk.id][0] if r.chunk.id in by_rerank else None,
                     selected=r.chunk.id in by_rerank,
                 )

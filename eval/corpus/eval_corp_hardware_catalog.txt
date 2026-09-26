@@ -1,0 +1,3 @@
+Approved Hardware Catalog
+
+The ZX-4410 laptop ships with 16 GB of memory and a 512 GB drive and is the standard developer machine. The ZX-4420 laptop ships with 32 GB of memory and a 1 TB drive and is reserved for data and machine learning roles. The DK-7731 docking station works with both models and provides two monitor outputs. Peripherals are ordered through the IT service desk.

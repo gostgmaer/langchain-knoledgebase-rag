@@ -1,0 +1,3 @@
+Security Awareness and Phishing
+
+If you receive a suspicious message that claims to come from IT, the CEO or a supplier, do not click any link or open attachments. Report it with the Report Phishing button in the mail client or forward it to the security desk. Never share one-time codes with anyone, even someone who says they are from the help desk. Lost or stolen devices must be reported within one hour.

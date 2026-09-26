@@ -41,6 +41,8 @@ UPGRADES: tuple[str, ...] = (
     # --- documents: classification and access
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS visibility varchar(16)",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS document_type varchar(64)",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS allowed_roles jsonb",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS allowed_users jsonb",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS category varchar(64)",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags jsonb",
     "CREATE INDEX IF NOT EXISTS ix_document_type ON documents (tenant_id, document_type)",
@@ -48,6 +50,22 @@ UPGRADES: tuple[str, ...] = (
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS retrieval_id uuid",
     # citations store reranker logits, which can be negative
     "ALTER TABLE message_citations DROP CONSTRAINT IF EXISTS ck_citation_score",
+    # citations survive a re-index: chunk link becomes SET NULL, and the reader-facing facts are snapshotted
+    "ALTER TABLE message_citations ADD COLUMN IF NOT EXISTS document_name varchar(512)",
+    "ALTER TABLE message_citations ADD COLUMN IF NOT EXISTS page_number integer",
+    "ALTER TABLE message_citations ADD COLUMN IF NOT EXISTS section varchar(512)",
+    "ALTER TABLE message_citations ALTER COLUMN chunk_id DROP NOT NULL",
+    "DO $$ BEGIN "
+    "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_message_citations_chunk_id_document_chunks' "
+    "AND confdeltype = 'n') THEN "
+    "ALTER TABLE message_citations DROP CONSTRAINT IF EXISTS message_citations_chunk_id_fkey; "
+    "ALTER TABLE message_citations DROP CONSTRAINT IF EXISTS fk_message_citations_chunk_id_document_chunks; "
+    "ALTER TABLE message_citations ADD CONSTRAINT fk_message_citations_chunk_id_document_chunks "
+    "FOREIGN KEY (chunk_id) REFERENCES document_chunks (id) ON DELETE SET NULL; "
+    "END IF; END $$",
+    "UPDATE message_citations mc SET document_name = d.file_name, page_number = c.page_number, section = c.section "
+    "FROM documents d, document_chunks c "
+    "WHERE mc.document_name IS NULL AND d.id = mc.document_id AND c.id = mc.chunk_id",
     # --- indexes for the lookups the admin/observability views make
     "CREATE INDEX IF NOT EXISTS ix_document_tenant_status ON documents (tenant_id, status)",
     "CREATE INDEX IF NOT EXISTS ix_document_checksum ON documents (knowledge_base_id, checksum)",

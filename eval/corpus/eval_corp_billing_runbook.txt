@@ -1,0 +1,3 @@
+Billing Error Runbook
+
+ERR-5023 means the payment gateway timed out; restart the billing-worker service and retry the charge. ERR-5024 means a duplicate charge was detected; issue a refund through the finance tool and note the ticket number. ERR-5031 indicates an expired card token; ask the customer to update the payment method. Escalate to the payments on-call engineer if an error persists after two retries.

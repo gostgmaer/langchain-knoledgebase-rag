@@ -30,6 +30,7 @@ from packages.graph.nodes.llm import LLMNode
 from packages.graph.nodes.load_memory import LoadMemoryNode
 from packages.graph.nodes.researcher import ResearcherNode
 from packages.application.services.retrieval_log_service import RetrievalLogService
+from packages.application.services.retrieval_settings_service import RetrievalSettingsService
 from packages.graph.nodes.retrieve import RetrieveNode
 from packages.graph.nodes.supervisor import SupervisorNode
 from packages.graph.nodes.tool import GraphToolNode
@@ -252,11 +253,18 @@ class GraphContainer(containers.DeclarativeContainer):
         session_factory=database.session_factory,
     )
 
+    # Singleton: holds a short-lived per-tenant cache and only the session factory.
+    retrieval_settings = providers.Singleton(
+        RetrievalSettingsService,
+        session_factory=database.session_factory,
+    )
+
     retrieve = providers.Factory(
         RetrieveNode,
         knowledge_manager=rag.knowledge_manager,
         reranker=rag.reranker,
         retrieval_log=retrieval_log,
+        retrieval_settings=retrieval_settings,
     )
 
     tool = providers.Factory(
@@ -285,6 +293,7 @@ class GraphContainer(containers.DeclarativeContainer):
         ResearchRetrieveNode,
         knowledge_manager=rag.knowledge_manager,
         reranker=rag.reranker,
+        retrieval_settings=retrieval_settings,
     )
 
     research_synthesize = providers.Factory(

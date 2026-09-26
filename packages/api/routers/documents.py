@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
+from pydantic import BaseModel
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
 
 from packages.api.dependencies import (
@@ -31,6 +32,7 @@ from packages.api.schemas.document import (
     DocumentVersionResponseSchema,
 )
 from packages.application.services.ingestion_audit import audit_ingestion
+from packages.application.services.reindex import run_reindex
 from packages.config.loader import settings
 from packages.conversation.bootstrap import ensure_default_model_profile
 from packages.domain.enums.document_status import DocumentStatus
@@ -311,6 +313,8 @@ async def _document_responses(container: ApplicationContainer, rows) -> list[Doc
                 error_reason=d.error_reason,
                 processed_at=d.processed_at,
                 visibility=d.visibility or "tenant",
+                allowed_roles=d.allowed_roles,
+                allowed_users=d.allowed_users,
                 document_type=d.document_type,
                 category=d.category,
                 tags=d.tags,
@@ -531,6 +535,91 @@ async def list_document_versions(
     )
 
 
+class ReindexResponseSchema(BaseModel):
+    queued: int
+    skipped: int = 0
+
+
+async def _queue_reindex(
+    container: ApplicationContainer,
+    background_tasks: BackgroundTasks,
+    document_ids: list[UUID],
+    actor_id: UUID,
+) -> None:
+    """Queue on the worker when Redis is up; otherwise run after the response, in-process."""
+    pool = container.queue.pool()
+    for document_id in document_ids:
+        if pool is not None:
+            await pool.enqueue_job("reindex_document_job", str(document_id), str(actor_id))
+        else:
+            background_tasks.add_task(run_reindex, container, document_id, actor_id)
+
+
+@router.post(
+    "/reindex-outdated",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=ApiResponse[ReindexResponseSchema],
+    summary="Re-index every document processed by an older (or unrecorded) pipeline",
+    description=(
+        "Queues a re-index for this workspace's current, ready documents whose recorded pipeline version "
+        f"is not the running one (or was never recorded). Runs in the background, one document at a time "
+        "per worker; the previous chunks stay searchable until each document's new ones are stored."
+    ),
+)
+async def reindex_outdated(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+    user_id = require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID)
+
+    rows = await container.repositories.document().list_by_tenant(tenant_id, limit=200, offset=0)
+    outdated = [
+        d.id
+        for d in rows
+        if d.is_current and d.status == DocumentStatus.READY and d.processing_version != PIPELINE_VERSION
+    ]
+    await _queue_reindex(container, background_tasks, outdated, user_id)
+    return ApiResponse(
+        message="Re-index queued.",
+        data=ReindexResponseSchema(queued=len(outdated), skipped=len(rows) - len(outdated)),
+    )
+
+
+@router.post(
+    "/{document_id}/reindex",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=ApiResponse[ReindexResponseSchema],
+    summary="Re-index one document",
+    description=(
+        "Re-downloads the original file and re-runs chunking and embedding with the current pipeline and "
+        "the strategy it was uploaded with. Use it to fill in provenance for older documents or pick up a "
+        "changed embedding model."
+    ),
+)
+async def reindex_document(
+    document_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+    user_id = require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID)
+
+    document = await container.repositories.document().get(document_id)
+    if document is None or document.tenant_id != tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+    if not document.is_current:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only the current version of a document can be re-indexed.",
+        )
+
+    await _queue_reindex(container, background_tasks, [document_id], user_id)
+    return ApiResponse(message="Re-index queued.", data=ReindexResponseSchema(queued=1))
+
+
 @router.patch(
     "/{document_id}",
     status_code=status.HTTP_200_OK,
@@ -560,6 +649,9 @@ async def update_document(
     changes = payload.model_dump(exclude_unset=True)
     if "tags" in changes and changes["tags"] is not None:
         changes["tags"] = _parse_tags(",".join(changes["tags"]))
+    for grant in ("allowed_roles", "allowed_users"):
+        if changes.get(grant) is not None:
+            changes[grant] = _parse_tags(",".join(changes[grant]))
 
     before = {field: getattr(document, field) for field in changes}
     for field, value in changes.items():
@@ -576,14 +668,24 @@ async def update_document(
             resource_id=document_id,
             detail={"from": before["visibility"] or "tenant", "to": changes["visibility"] or "tenant"},
         )
-    if set(changes) - {"visibility"}:
+    grant_fields = sorted({"allowed_roles", "allowed_users"} & set(changes))
+    if grant_fields:
+        await audit.record(
+            tenant_id=tenant_id,
+            actor_id=user_id,
+            action="document.access_changed",
+            resource_type="document",
+            resource_id=document_id,
+            detail={"grants_changed": grant_fields},
+        )
+    if set(changes) - {"visibility", "allowed_roles", "allowed_users"}:
         await audit.record(
             tenant_id=tenant_id,
             actor_id=user_id,
             action="document.metadata_updated",
             resource_type="document",
             resource_id=document_id,
-            detail={"fields": sorted(set(changes) - {"visibility"})},
+            detail={"fields": sorted(set(changes) - {"visibility", "allowed_roles", "allowed_users"})},
         )
 
     return ApiResponse(

@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse, Response
 
 from packages.auth.service import AuthService, NoTenantError
 from packages.config.loader import settings
-from packages.shared.access import set_can_read_restricted
+from packages.shared.access import set_can_read_restricted, set_user
 from packages.infrastructure.container import ApplicationContainer
 
 
@@ -109,5 +109,6 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         else:
             clearance = not required
         set_can_read_restricted(clearance)
+        set_user(str(current_user.id) if current_user is not None else None, current_user.roles if current_user is not None else ())
 
         return await call_next(request)

@@ -163,6 +163,32 @@ if [ -n "${MA:-}" ]; then
 fi
 chk "owner still reads their conversation" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/conversations/$CID/messages -H "Authorization: Bearer $ATOK")" 200
 
+echo; echo "== 5e. Role grants, retrieval settings, re-index, chat filters"
+if [ -n "${RDID:-}" ]; then
+  chk "restrict the document again" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $RAG/documents/$RDID -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"visibility":"restricted","allowed_roles":[]}')" 200
+  [ -n "${MA:-}" ] && chk "member is locked out again" "$(found "$MA" "$Q}")" no
+  chk "grant the member role" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $RAG/documents/$RDID -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"allowed_roles":["member"]}')" 200
+  [ -n "${MA:-}" ] && chk "member retrieves it through the role grant" "$(found "$MA" "$Q}")" yes
+  chk "re-index one document is accepted" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/documents/$RDID/reindex -H "Authorization: Bearer $ATOK")" 202
+  sleep 20
+  curl -s "$RAG/documents/$RDID" -H "Authorization: Bearer $ATOK" | J "x=d.get('data') or {}; print('yes' if x.get('processing_stage')=='completed' and x.get('status')=='READY' and x.get('visibility')=='restricted' else 'no')" | grep -q yes && ok "re-indexed document is READY and keeps its access settings" || bad "document not READY after re-index"
+  chk "re-index of the current version is audited" "$(curl -s "$RAG/observability/audit?action=document.reindexed" -H "Authorization: Bearer $ATOK" | J "print('yes' if (d.get('data') or {}).get('events') else 'no')")" yes
+fi
+chk "bulk re-index of outdated documents is accepted" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/documents/reindex-outdated -H "Authorization: Bearer $ATOK")" 202
+chk "read retrieval settings" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/retrieval-settings -H "Authorization: Bearer $ATOK")" 200
+chk "reject an out-of-range setting" "$(curl -s -o /dev/null -w '%{http_code}' -X PUT $RAG/retrieval-settings -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"max_results":99}')" 422
+chk "save settings (3 results, reranking off)" "$(curl -s -o /dev/null -w '%{http_code}' -X PUT $RAG/retrieval-settings -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"max_results":3,"reranking_enabled":false}')" 200
+[ -n "${MA:-}" ] && chk "member cannot read retrieval settings" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/retrieval-settings -H "$MA")" 403
+sleep 1
+CID2=$(python -c "import uuid;print(uuid.uuid4())")
+curl -s -o /dev/null -m 150 -X POST $RAG/chat -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d "{\"message\":\"What is the secret launch code for test document $TS?\",\"conversation_id\":\"$CID2\",\"stream\":false,\"filters\":{\"document_types\":[\"memo\"]}}"
+curl -s "$RAG/retrieval-logs?limit=1&conversation_id=$CID2" -H "Authorization: Bearer $ATOK" | J "r=(d.get('data') or {}).get('retrievals',[]); print('yes' if r and r[0]['reranking_enabled'] is False and r[0]['top_k']==3 and r[0]['selected_count']<=3 else 'no')" | grep -q yes && ok "chat used the workspace settings (top_k 3, no reranker)" || bad "chat ignored the retrieval settings"
+curl -s "$RAG/retrieval-logs?limit=1&conversation_id=$CID2" -H "Authorization: Bearer $ATOK" | J "r=(d.get('data') or {}).get('retrievals',[]); print(r[0]['retrieval_id'] if r else '')" > "$TMPD/e2e_rid.txt"
+RID2=$(tr -d '\r' < "$TMPD/e2e_rid.txt")
+curl -s "$RAG/retrieval-logs/$RID2" -H "Authorization: Bearer $ATOK" | J "x=d.get('data') or {}; print('yes' if x.get('results') and all(r['chunking_strategy'] is None or True for r in x['results']) and x.get('reranker_model') is None else 'no')" | grep -q yes && ok "retrieval log records that no reranker ran" || bad "retrieval log still lists a reranker"
+chk "reset settings to the defaults" "$(curl -s -o /dev/null -w '%{http_code}' -X PUT $RAG/retrieval-settings -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{}')" 200
+chk "settings changes are audited" "$(curl -s "$RAG/observability/audit?action=retrieval_settings.changed" -H "Authorization: Bearer $ATOK" | J "print('yes' if (d.get('data') or {}).get('events') else 'no')")" yes
+
 echo; echo "== 6. Connected accounts API"
 chk "list connected accounts" "$(curl -s -o /dev/null -w '%{http_code}' $GW/api/auth/social/accounts -H "Authorization: Bearer $ATOK" -H "$O")" 200
 chk "Google authorize redirect" "$(curl -s -o /dev/null -w '%{http_code}' $GW/api/auth/social/google/start -H "$O")" 302

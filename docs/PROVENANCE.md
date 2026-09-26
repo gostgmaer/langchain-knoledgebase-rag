@@ -184,13 +184,46 @@ slightly more often than hybrid. It shows **no benefit from hybrid retrieval or 
 not evidence they are worse in general. A meaningful comparison needs a larger set built from your own
 documents, with questions that share little vocabulary with the text and near-duplicate documents.
 
-## 14. Known gaps (not done)
+## 14. Retrieval settings, grants, re-indexing
 
-* Only two access levels (`tenant`, `restricted`); no per-user or per-group ACLs.
-* Chat has no metadata filters (the search API does).
-* Row-level security is not enforced while the application connects as a superuser (see section 10).
-* Documents ingested before provenance existed show "not recorded"; re-index them to fill it in. Documents
-  ingested before access control exist as `tenant` visibility.
+* **Retrieval settings** (`GET/PUT /retrieval-settings`, UI: *Retrieval settings*): per workspace, how many chunks an
+  answer uses (1-20), the reranker score below which weaker chunks are dropped (best chunk always kept), and whether the
+  cross-encoder runs. Empty = platform default (`RAG_MAX_RESULTS`, `RAG_MIN_RELEVANCE_SCORE`, `ENABLE_RERANKING`). Applied
+  by chat and the multi-agent researcher within ~30 s; audited. With reranking off, chunks are ranked by search score
+  and the relevance floor does not apply. The search *strategy* stays platform-wide.
+* **Role and user grants**: a restricted document can also be opened to members holding named roles or listed by user id
+  (`allowed_roles`, `allowed_users`, set with `PATCH /documents/{id}` or the Access card). Enforced in the retrieval SQL.
+* **Chat filters**: `POST /chat` accepts `filters` (`document_types`, `categories`, `tags`, `language`); the chat page has
+  a "Limit answers to documents" panel.
+* **Re-indexing**: `POST /documents/{id}/reindex` and `POST /documents/reindex-outdated` (buttons on the document page and
+  Observability). Runs on the worker with the current pipeline and the chunking strategy the document was uploaded with.
+  Re-indexing replaces a document's chunks; earlier answers keep their sources because `message_citations` now snapshots
+  document name, page and section and the chunk link is `SET NULL`. (Deleting a document used to leave its chunk rows
+  behind and made re-indexing collide with them; both fixed.)
+
+## 15. Running as an ordinary database role (row-level security)
+
+`scripts/create_app_role.sql` creates `rag_app` (no superuser, no BYPASSRLS) with the grants the app needs. Then:
+`DATABASE_URL` = `rag_app`, `MIGRATION_DATABASE_URL` = the owner (used by `alembic upgrade head`),
+`SCHEMA_INIT_AT_STARTUP=false`. Verified: an API container connected as `rag_app` to an alembic-built database started,
+served documents, settings, observability and search, and wrote its own rows without permission errors. The API logs a
+warning at startup when its role would bypass row-level security.
+
+## 16. Hybrid weighting (measured)
+
+`RETRIEVAL_KEYWORD_WEIGHT` (default 1.0 = standard reciprocal-rank fusion) scales the BM25 ranking against the dense
+ranking. On the bundled 26-question set (k=3, 14 documents including near-duplicate regional policies and
+error/product codes), hybrid-without-rerank scored MRR 0.865 / hit 0.92 at weight 1.0, 0.897 / 0.96 at 0.5 and
+0.930 / 1.0 at 0.25, while dense-only scored 0.981 / 1.0 and hybrid+rerank 0.936 / 1.0 regardless. Equal weighting let
+keyword matches on common words outrank the right document; exact-code queries (`ERR-5023`, `ZX-4420`) were found by
+every mode, so this set does not show BM25 helping. The default is unchanged: 26 questions on 14 documents is
+direction, not proof. Re-measure on your own documents (`scripts/evaluate_retrieval.py`) before changing it.
+
+## 17. Known gaps
+
+* Access is per document with two levels plus role and user grants; there are no groups or inheritance beyond IAM roles.
+* Row-level security is not enforced in the local stack (superuser); the app-role setup in section 15 is what enforces it.
+* Documents ingested before provenance existed show "not recorded" until re-indexed (a bulk button exists).
 * No `documentVersionId` column: the version is the document row (`document_id`) plus `document_versions`.
 * Retrieval-log purge is platform-wide by design; its endpoint is super-admin only.
-* Accuracy is only measured on the tiny bundled set (section 13).
+* Accuracy is only measured on the small bundled set (sections 13 and 16).

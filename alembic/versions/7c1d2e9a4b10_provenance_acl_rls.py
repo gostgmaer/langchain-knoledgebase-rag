@@ -13,6 +13,8 @@ the columns, indexes and row-level-security policies on top.
 from alembic import op
 from sqlalchemy import text
 
+from packages.domain import models  # noqa: F401 - registers every model on Base.metadata
+from packages.infrastructure.database.base import Base
 from packages.infrastructure.database.upgrades import UPGRADES, rls_statements
 
 revision = "7c1d2e9a4b10"
@@ -23,6 +25,8 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
+    # Tables added since the baseline (retrieval_logs, audit_events, retrieval_settings, ...).
+    Base.metadata.create_all(bind=bind, checkfirst=True)
     for statement in (*UPGRADES, *rls_statements()):
         bind.execute(text(statement))
 

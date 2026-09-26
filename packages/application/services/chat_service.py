@@ -583,6 +583,9 @@ class ChatService:
                     message_id=message.id,
                     document_id=citation.document_id,
                     chunk_id=citation.chunk_id,
+                    document_name=citation.document_name,
+                    page_number=citation.page_number,
+                    section=citation.section,
                     rank=rank,
                     score=max(-99.0, min(99.0, float(citation.score))),
                 )

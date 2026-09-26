@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy.dialects.postgresql import array as pg_array
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -32,7 +33,15 @@ def _retrievable_chunk(filters: SearchFilter):
     ]
 
     if not filters.include_restricted:
-        conditions.append(or_(Document.visibility.is_(None), Document.visibility == "tenant"))
+        # Open documents, plus restricted ones this caller was let into by role or by user id.
+        grants = []
+        if filters.user_roles:
+            grants.append(Document.allowed_roles.has_any(pg_array(list(filters.user_roles))))
+        if filters.user_id:
+            grants.append(Document.allowed_users.contains([filters.user_id]))
+        conditions.append(
+            or_(Document.visibility.is_(None), Document.visibility == "tenant", *grants)
+        )
     if filters.knowledge_base_id is not None:
         conditions.append(Document.knowledge_base_id == filters.knowledge_base_id)
     if filters.document_ids:
@@ -267,6 +276,19 @@ class PostgresVectorStore(BaseVectorStore):
         )
 
         result = await self.session.execute(stmt)
+
+        # The chunk rows go too. Leaving them behind (as this once did) orphaned them, and made a
+        # re-index collide with its own old chunks on (document_id, chunk_index).
+        await self.session.execute(
+            delete(DocumentChunk)
+            .where(
+                DocumentChunk.tenant_id == tenant_id,
+                DocumentChunk.document_id == document_id,
+            )
+            # Drops the deleted rows from the session's identity map without expiring unrelated
+            # objects (an expire here made the re-index's own Document lazy-load and fail).
+            .execution_options(synchronize_session="fetch")
+        )
 
         return result.rowcount or 0
 

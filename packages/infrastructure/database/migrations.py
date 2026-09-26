@@ -28,11 +28,14 @@ def _configure_url() -> None:
     this module from inside `alembic/env.py`.
     """
 
+    import os
+
     settings = Settings()
 
+    # Migrations need a role that owns the tables; the application may run as a less privileged one.
     context.config.set_main_option(
         "sqlalchemy.url",
-        to_sync_database_url(str(settings.database.url)),
+        to_sync_database_url(os.environ.get("MIGRATION_DATABASE_URL") or str(settings.database.url)),
     )
 
 

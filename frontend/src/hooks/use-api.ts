@@ -16,6 +16,7 @@ import {
   observability,
   prompts,
   retrievalLogs,
+  retrievalSettings,
   search,
   tools,
   uploadJobs,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/api/resources";
 import type {
   DocumentUpdate,
+  RetrievalSettingsUpdate,
   DocumentUploadOptions,
   CreateAgentRequest,
   CreateFeatureFlagRequest,
@@ -137,6 +139,45 @@ export function useUploadDocument() {
     mutationFn: ({ file, options }: { file: File; options?: DocumentUploadOptions }) =>
       documents.upload(identity!, file, options),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["documents", identity?.tenantId] }),
+  });
+}
+
+export function useReindexDocument(id: string) {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => documents.reindex(identity!, id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["document", identity?.tenantId, id] }),
+  });
+}
+
+export function useReindexOutdated() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => documents.reindexOutdated(identity!),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["documents", identity?.tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["observability-summary", identity?.tenantId] });
+    },
+  });
+}
+
+export function useRetrievalSettings() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["retrieval-settings", identity?.tenantId],
+    queryFn: () => retrievalSettings.get(identity!),
+    enabled: !!identity,
+  });
+}
+
+export function useSaveRetrievalSettings() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RetrievalSettingsUpdate) => retrievalSettings.save(identity!, body),
+    onSuccess: (data) => queryClient.setQueryData(["retrieval-settings", identity?.tenantId], data),
   });
 }
 

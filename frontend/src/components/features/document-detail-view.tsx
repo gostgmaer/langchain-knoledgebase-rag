@@ -14,13 +14,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useDocument, useDocumentVersions } from "@/hooks/use-api";
+import { toast } from "sonner";
+
+import { useDocument, useDocumentVersions, useReindexDocument } from "@/hooks/use-api";
 import { formatBytes, formatDateTime } from "@/lib/utils";
 
 export function DocumentDetailView({ documentId, basePath }: { documentId: string; basePath: string }) {
   const router = useRouter();
   const { data: doc, isLoading, isError, error, refetch } = useDocument(documentId);
   const { data: versions } = useDocumentVersions(documentId);
+  const reindex = useReindexDocument(documentId);
 
   if (isError) {
     return <QueryError error={error} onRetry={() => void refetch()} />;
@@ -36,9 +39,27 @@ export function DocumentDetailView({ documentId, basePath }: { documentId: strin
         title={doc.file_name}
         description={doc.description ?? undefined}
         actions={
-          <Button variant="outline" size="sm" onClick={() => router.push(basePath)}>
-            Back to documents
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              loading={reindex.isPending}
+              disabled={!doc.is_current}
+              onClick={async () => {
+                try {
+                  await reindex.mutateAsync();
+                  toast.success("Re-index queued. Refresh in a moment to see the new provenance.");
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Could not queue the re-index.");
+                }
+              }}
+            >
+              Re-index
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => router.push(basePath)}>
+              Back to documents
+            </Button>
+          </div>
         }
       />
 

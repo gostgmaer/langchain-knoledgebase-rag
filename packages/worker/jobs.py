@@ -147,6 +147,16 @@ async def ingest_document_job(
         path.unlink(missing_ok=True)
 
 
+async def reindex_document_job(ctx: dict[str, Any], document_id: str, actor_id: str | None = None) -> bool:
+    """Re-embeds one document on request (see POST /documents/{id}/reindex)."""
+    from uuid import UUID
+
+    from packages.application.services.reindex import run_reindex
+
+    container: ApplicationContainer = ctx["container"]
+    return await run_reindex(container, UUID(document_id), UUID(actor_id) if actor_id else None)
+
+
 async def purge_expired_logs_job(ctx: dict[str, Any]) -> dict[str, int]:
     """Daily retention sweep: deletes retrieval logs and audit events past their retention window."""
     from packages.application.services.retention_service import purge_expired

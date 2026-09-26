@@ -136,6 +136,9 @@ export interface DocumentRecord {
   embedding_is_stale: boolean | null;
   /** "tenant" = every member may retrieve it; "restricted" = administrators only. */
   visibility: "tenant" | "restricted";
+  /** For restricted documents: members with one of these roles, or listed by user id, may also retrieve it. */
+  allowed_roles: string[] | null;
+  allowed_users: string[] | null;
   document_type: string | null;
   category: string | null;
   tags: string[] | null;
@@ -151,6 +154,8 @@ export interface DocumentUploadOptions {
 
 export interface DocumentUpdate {
   visibility?: "tenant" | "restricted";
+  allowed_roles?: string[] | null;
+  allowed_users?: string[] | null;
   document_type?: string | null;
   category?: string | null;
   tags?: string[] | null;
@@ -674,4 +679,43 @@ export interface AuditList {
   limit: number;
   offset: number;
   events: AuditEvent[];
+}
+
+// ---------------------------------------------------------------
+// Retrieval settings & re-indexing
+// ---------------------------------------------------------------
+
+export interface RetrievalValues {
+  max_results: number;
+  min_relevance_score: number;
+  reranking_enabled: boolean;
+}
+
+export interface RetrievalSettings {
+  effective: RetrievalValues;
+  /** Only what this workspace changed; null = using the platform default. */
+  overrides: {
+    max_results: number | null;
+    min_relevance_score: number | null;
+    reranking_enabled: boolean | null;
+  };
+  defaults: RetrievalValues;
+  retrieval_strategy: string;
+}
+
+export interface RetrievalSettingsUpdate {
+  max_results: number | null;
+  min_relevance_score: number | null;
+  reranking_enabled: boolean | null;
+}
+
+export interface ReindexResult {
+  queued: number;
+  skipped?: number;
+}
+
+export interface ChatFilters {
+  document_types?: string[];
+  categories?: string[];
+  tags?: string[];
 }
