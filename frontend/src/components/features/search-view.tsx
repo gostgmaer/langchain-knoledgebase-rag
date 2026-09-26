@@ -14,12 +14,26 @@ import { useSearch } from "@/hooks/use-api";
 
 export function SearchView() {
   const [query, setQuery] = useState("");
+  const [documentType, setDocumentType] = useState("");
+  const [category, setCategory] = useState("");
+  const [tags, setTags] = useState("");
   const runSearch = useSearch();
+
+  function request() {
+    const list = (value: string) => value.split(",").map((s) => s.trim()).filter(Boolean);
+    return {
+      query: query.trim(),
+      limit: 10,
+      document_types: list(documentType),
+      categories: list(category),
+      tags: list(tags),
+    };
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
-    runSearch.mutate({ query: query.trim(), limit: 10 });
+    runSearch.mutate(request());
   }
 
   return (
@@ -41,11 +55,19 @@ export function SearchView() {
         </Button>
       </form>
 
+      <div className="mb-6 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+        <span>Filter by</span>
+        <Input className="h-8 w-36 text-xs" placeholder="type, e.g. policy" value={documentType} onChange={(e) => setDocumentType(e.target.value)} />
+        <Input className="h-8 w-36 text-xs" placeholder="category, e.g. hr" value={category} onChange={(e) => setCategory(e.target.value)} />
+        <Input className="h-8 w-40 text-xs" placeholder="tags (all required)" value={tags} onChange={(e) => setTags(e.target.value)} />
+        <span className="text-neutral-400">Comma-separated. Applied inside the search, not afterwards.</span>
+      </div>
+
       {runSearch.isError && (
         <QueryError
           error={runSearch.error}
           message="The search failed."
-          onRetry={() => runSearch.mutate({ query: query.trim(), limit: 10 })}
+          onRetry={() => runSearch.mutate(request())}
         />
       )}
 

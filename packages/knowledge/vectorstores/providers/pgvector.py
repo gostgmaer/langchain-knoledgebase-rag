@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,18 +18,46 @@ from packages.knowledge.vectorstores.schema import (
 )
 
 
-def _retrievable_chunk():
+def _retrievable_chunk(filters: SearchFilter):
     """
     Only chunks of a live, fully ingested document may be returned by retrieval: not a superseded
-    version, not a document still processing or failed, not a deleted one. Applied inside the
-    search query itself so excluded content never leaves the database.
+    version, not a document still processing or failed, not a deleted one - and only documents the
+    caller may see (restricted ones need clearance) that match the requested metadata filters.
+    Applied inside the search query itself so excluded content never leaves the database.
     """
-    return Embedding.chunk.has(
-        DocumentChunk.document.has(
-            (Document.is_current.is_(True))
-            & (Document.status == DocumentStatus.READY)
-            & (Document.is_deleted.is_(False))
-        )
+    conditions = [
+        Document.is_current.is_(True),
+        Document.status == DocumentStatus.READY,
+        Document.is_deleted.is_(False),
+    ]
+
+    if not filters.include_restricted:
+        conditions.append(or_(Document.visibility.is_(None), Document.visibility == "tenant"))
+    if filters.knowledge_base_id is not None:
+        conditions.append(Document.knowledge_base_id == filters.knowledge_base_id)
+    if filters.document_ids:
+        conditions.append(Document.id.in_(filters.document_ids))
+    if filters.document_types:
+        conditions.append(Document.document_type.in_(filters.document_types))
+    if filters.categories:
+        conditions.append(Document.category.in_(filters.categories))
+    if filters.language:
+        conditions.append(Document.language == filters.language)
+    if filters.tags:
+        conditions.append(Document.tags.contains(filters.tags))
+
+    return Embedding.chunk.has(DocumentChunk.document.has(and_(*conditions)))
+
+
+async def _scope_session_to_tenant(session: AsyncSession, tenant_id: UUID) -> None:
+    """
+    Tells Postgres which tenant this transaction serves (`app.tenant_id`, transaction-local).
+    Row-level-security policies on the tenant tables then enforce it in the database even if a
+    query were ever written without its tenant filter (see infrastructure/database/upgrades.py).
+    """
+    await session.execute(
+        text("SELECT set_config('app.tenant_id', :tenant, true)"),
+        {"tenant": str(tenant_id)},
     )
 
 
@@ -57,6 +85,8 @@ class PostgresVectorStore(BaseVectorStore):
 
         options = options or SearchOptions()
 
+        await _scope_session_to_tenant(self.session, filters.tenant_id)
+
         stmt = (
             select(
                 Embedding,
@@ -71,7 +101,7 @@ class PostgresVectorStore(BaseVectorStore):
             .where(
                 Embedding.tenant_id == filters.tenant_id,
                 Embedding.model_profile_id == filters.model_profile_id,
-                _retrievable_chunk(),
+                _retrievable_chunk(filters),
             )
         )
 
@@ -139,6 +169,8 @@ class PostgresVectorStore(BaseVectorStore):
         Bounded, unranked candidate pool for keyword (BM25) scoring.
         """
 
+        await _scope_session_to_tenant(self.session, filters.tenant_id)
+
         stmt = (
             select(Embedding)
             .options(
@@ -148,7 +180,7 @@ class PostgresVectorStore(BaseVectorStore):
             .where(
                 Embedding.tenant_id == filters.tenant_id,
                 Embedding.model_profile_id == filters.model_profile_id,
-                _retrievable_chunk(),
+                _retrievable_chunk(filters),
             )
         )
 

@@ -24,6 +24,10 @@ class IngestionRequest:
     file_id: str | None = None
     chunking_strategy: ChunkingStrategy = "recursive"
     uploaded_by: UUID | None = None
+    document_type: str | None = None
+    category: str | None = None
+    tags: list[str] | None = None
+    visibility: str = "tenant"
 
     metadata: dict[str, object] = field(default_factory=dict)
 
@@ -34,6 +38,8 @@ class IngestionResponse:
     chunk_count: int
     embedding_count: int
     skipped: bool = False
+    superseded_document_id: UUID | None = None
+    """Set when this ingestion created a new version of an existing document."""
 
 
 # ============================================================

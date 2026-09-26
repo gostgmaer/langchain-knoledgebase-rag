@@ -9,6 +9,7 @@ from starlette.responses import JSONResponse, Response
 
 from packages.auth.service import AuthService, NoTenantError
 from packages.config.loader import settings
+from packages.shared.access import set_can_read_restricted
 from packages.infrastructure.container import ApplicationContainer
 
 
@@ -100,5 +101,13 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             request.state.current_user = current_user
             request.state.tenant_id = str(current_user.tenant_id)
             request.state.user_id = str(current_user.id)
+
+        # Restricted documents are readable by administrators only. Anonymous development mode
+        # (AUTH_REQUIRED off) keeps its legacy everything-open behaviour.
+        if current_user is not None:
+            clearance = bool(set(current_user.roles) & set(settings.api.admin_roles))
+        else:
+            clearance = not required
+        set_can_read_restricted(clearance)
 
         return await call_next(request)

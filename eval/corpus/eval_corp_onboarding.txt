@@ -1,0 +1,3 @@
+New Employee Onboarding
+
+On the first day new hires collect their laptop from the IT desk and complete the security training. Each newcomer is assigned an onboarding buddy who answers day-to-day questions for the first 90 days. By the end of week one the manager agrees a set of 30, 60 and 90 day goals with the new hire. Accounts for email, chat and the code repositories are created before the start date by IT.

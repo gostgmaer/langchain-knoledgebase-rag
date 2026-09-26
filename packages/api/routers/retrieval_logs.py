@@ -142,6 +142,8 @@ async def get_retrieval(
             chunking_strategy=((chunk.metadata_ or {}).get("chunking_strategy") if chunk else None),
             retrieval_rank=r.retrieval_rank,
             retrieval_score=r.retrieval_score,
+            vector_score=r.vector_score,
+            keyword_score=r.keyword_score,
             reranker_score=r.reranker_score,
             final_rank=r.final_rank,
             selected_for_context=r.selected_for_context,

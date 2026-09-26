@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from packages.domain.models.document_chunk import DocumentChunk
+from packages.shared.access import can_read_restricted
 
 
 @dataclass(slots=True)
@@ -16,6 +17,18 @@ class SearchFilter:
     document_id: UUID | None = None
 
     chunk_ids: list[UUID] | None = None
+
+    # Access: fail-closed. Defaults to the current request's clearance (False outside a request).
+    include_restricted: bool = field(default_factory=can_read_restricted)
+
+    # Metadata filters, applied inside the search query itself.
+    knowledge_base_id: UUID | None = None
+    document_ids: list[UUID] | None = None
+    document_types: list[str] | None = None
+    categories: list[str] | None = None
+    tags: list[str] | None = None
+    """Documents must carry ALL of these tags."""
+    language: str | None = None
 
     metadata: dict[str, object] = field(default_factory=dict)
 
@@ -40,3 +53,8 @@ class SearchResult:
     chunk: DocumentChunk
 
     score: float
+
+    # Components behind `score` when the hybrid retriever fused two rankings. None = not from
+    # that ranker (or not a hybrid result).
+    vector_score: float | None = None
+    keyword_score: float | None = None

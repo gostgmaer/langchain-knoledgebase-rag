@@ -194,6 +194,7 @@ class IngestionPipeline:
             document_id=document.id,
             chunk_count=len(chunked_documents),
             embedding_count=len(embeddings),
+            superseded_document_id=previous.id if previous is not None else None,
         )
 
     async def delete_document(
@@ -441,6 +442,10 @@ class IngestionPipeline:
             size_bytes=request.file.stat().st_size,
             checksum=checksum,
             status=DocumentStatus.PROCESSING,
+            visibility=request.visibility,
+            document_type=request.document_type,
+            category=request.category,
+            tags=request.tags,
             metadata_=request.metadata,
         )
 

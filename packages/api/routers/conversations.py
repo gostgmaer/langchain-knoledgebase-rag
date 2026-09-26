@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
+    conversation_visible_to,
     DEFAULT_USER_ID,
     get_scoped_container,
     require_uuid_header,
@@ -98,7 +99,9 @@ async def get_conversation(
 
     conversation = await conversations.get(conversation_id)
 
-    if conversation is None or conversation.tenant_id != tenant_id:
+    if conversation is None or not conversation_visible_to(
+        conversation, tenant_id, getattr(request.state, "current_user", None)
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found.",
@@ -175,7 +178,9 @@ async def get_conversation_history(
     # leak whether a given conversation_id is real to a caller who doesn't
     # own it, and auto-creating under an ID someone else already has isn't
     # possible anyway.
-    if conversation is not None and conversation.tenant_id != tenant_id:
+    if conversation is not None and not conversation_visible_to(
+        conversation, tenant_id, getattr(request.state, "current_user", None)
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found.",

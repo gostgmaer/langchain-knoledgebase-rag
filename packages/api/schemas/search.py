@@ -26,6 +26,12 @@ class SearchRequestSchema(BaseModel):
         description="Scope the search to one document instead of the whole knowledge base.",
     )
 
+    knowledge_base_id: UUID | None = None
+    document_types: list[str] | None = Field(default=None, max_length=20)
+    categories: list[str] | None = Field(default=None, max_length=20)
+    tags: list[str] | None = Field(default=None, max_length=20, description="Documents must carry all of these tags.")
+    language: str | None = Field(default=None, max_length=20)
+
 
 class SearchResultSchema(BaseModel):
     """A single reranked search result."""

@@ -55,6 +55,11 @@ async def search(
         tenant_id=tenant_id,
         model_profile_id=model_profile.id,
         document_id=payload.document_id,
+        knowledge_base_id=payload.knowledge_base_id,
+        document_types=payload.document_types,
+        categories=payload.categories,
+        tags=payload.tags,
+        language=payload.language,
     )
 
     candidates = await knowledge_manager.search(

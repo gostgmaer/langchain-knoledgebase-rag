@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
+    conversation_visible_to,
     DEFAULT_USER_ID,
     get_scoped_container,
     request_scoped_session,
@@ -71,6 +72,12 @@ async def chat(
         else None
     )
 
+    current_user = getattr(request.state, "current_user", None)
+    if conversation is not None and not conversation_visible_to(conversation, tenant_id, current_user):
+        # Same answer as "does not exist": someone else's conversation id must not be usable
+        # (or even confirmable) from another tenant or another member.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
+
     if conversation is None:
         model_profiles = container.repositories.model_profile()
         agents = container.repositories.agent()
@@ -111,6 +118,8 @@ async def chat(
                 conversation = await conversations.get(payload.conversation_id)
                 if conversation is None:
                     raise
+                if not conversation_visible_to(conversation, tenant_id, current_user):
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
         else:
             conversation = await ensure_default_conversation(
                 tenant_id,
@@ -199,7 +208,9 @@ async def resume(
     conversations = container.repositories.conversation()
     conversation = await conversations.get(conversation_id)
 
-    if conversation is None or conversation.tenant_id != tenant_id:
+    if conversation is None or not conversation_visible_to(
+        conversation, tenant_id, getattr(request.state, "current_user", None)
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found.",

@@ -22,7 +22,8 @@ import {
   usage,
 } from "@/lib/api/resources";
 import type {
-  ChunkingStrategy,
+  DocumentUpdate,
+  DocumentUploadOptions,
   CreateAgentRequest,
   CreateFeatureFlagRequest,
   CreateKnowledgeBaseRequest,
@@ -133,9 +134,22 @@ export function useUploadDocument() {
   const identity = useIdentity();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ file, chunkingStrategy }: { file: File; chunkingStrategy?: ChunkingStrategy }) =>
-      documents.upload(identity!, file, chunkingStrategy),
+    mutationFn: ({ file, options }: { file: File; options?: DocumentUploadOptions }) =>
+      documents.upload(identity!, file, options),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["documents", identity?.tenantId] }),
+  });
+}
+
+export function useUpdateDocument(id: string) {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: DocumentUpdate) => documents.update(identity!, id, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["documents", identity?.tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["document", identity?.tenantId, id] });
+      void queryClient.invalidateQueries({ queryKey: ["observability-audit", identity?.tenantId] });
+    },
   });
 }
 

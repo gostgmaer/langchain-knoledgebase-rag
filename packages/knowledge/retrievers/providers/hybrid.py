@@ -112,6 +112,8 @@ class HybridRetriever(BaseRetriever):
 
         fused_scores: dict[object, float] = {}
         chunks: dict[object, SearchResult] = {}
+        vector_scores = {r.chunk.id: r.score for r in vector_results}
+        keyword_scores = {r.chunk.id: r.score for r in keyword_results}
 
         for ranked_list in (vector_results, keyword_results):
             for rank, result in enumerate(ranked_list):
@@ -128,6 +130,11 @@ class HybridRetriever(BaseRetriever):
         )
 
         return [
-            SearchResult(chunk=chunks[chunk_id].chunk, score=fused_scores[chunk_id])
+            SearchResult(
+                chunk=chunks[chunk_id].chunk,
+                score=fused_scores[chunk_id],
+                vector_score=vector_scores.get(chunk_id),
+                keyword_score=keyword_scores.get(chunk_id),
+            )
             for chunk_id in ordered_ids[:limit]
         ]

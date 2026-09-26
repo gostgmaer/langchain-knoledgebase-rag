@@ -10,6 +10,7 @@ from uuid import UUID
 from dependency_injector import providers
 
 from packages.api.dependencies import request_scoped_session
+from packages.application.services.ingestion_audit import audit_ingestion
 from packages.config.loader import settings
 from packages.domain.enums.conversation_status import ConversationStatus
 from packages.infrastructure.container import ApplicationContainer
@@ -112,6 +113,8 @@ async def ingest_document_job(
             if upload_job is not None:
                 await upload_jobs.mark_succeeded(upload_job, response.document_id)
 
+            await audit_ingestion(container.audit(), ingestion_request, response)
+
             return {
                 "document_id": str(response.document_id),
                 "skipped": response.skipped,
@@ -124,6 +127,7 @@ async def ingest_document_job(
             document_name=ingestion_request.document_name,
             error=str(exc),
         )
+        await audit_ingestion(container.audit(), ingestion_request, error=exc)
 
         try:
             async with request_scoped_session(container):
@@ -179,6 +183,13 @@ async def reindex_stale_documents_job(ctx: dict[str, Any]) -> dict[str, int]:
         for document in stale:
             try:
                 await pipeline.reindex_document(document.id)
+                await container.audit().record(
+                    tenant_id=document.tenant_id,
+                    action="document.reindexed",
+                    resource_type="document",
+                    resource_id=document.id,
+                    detail={"file_name": document.file_name, "trigger": "scheduled"},
+                )
                 reindexed += 1
                 logger.info("Reindexed stale document", document_id=str(document.id))
             except Exception as exc:

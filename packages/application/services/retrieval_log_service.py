@@ -24,6 +24,8 @@ class CandidateRecord:
     chunk_index: int
     retrieval_rank: int
     retrieval_score: float
+    vector_score: float | None = None
+    keyword_score: float | None = None
     reranker_score: float | None = None
     final_rank: int | None = None
     selected: bool = False
@@ -110,6 +112,8 @@ class RetrievalLogService:
                             chunk_index=c.chunk_index,
                             retrieval_rank=c.retrieval_rank,
                             retrieval_score=c.retrieval_score,
+                            vector_score=c.vector_score,
+                            keyword_score=c.keyword_score,
                             reranker_score=c.reranker_score,
                             final_rank=c.final_rank,
                             selected_for_context=c.selected,

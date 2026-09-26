@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
+    conversation_visible_to,
     DEFAULT_USER_ID,
     get_scoped_container,
     require_uuid_header,
@@ -52,7 +53,11 @@ async def submit_feedback(
     message = await messages.get(payload.message_id)
     conversation = await conversations.get(message.conversation_id) if message else None
 
-    if message is None or conversation is None or conversation.tenant_id != tenant_id:
+    if (
+        message is None
+        or conversation is None
+        or not conversation_visible_to(conversation, tenant_id, getattr(request.state, "current_user", None))
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Message not found.",

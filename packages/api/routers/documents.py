@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 from io import BytesIO
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -24,10 +25,12 @@ from packages.api.schemas.document import (
     DocumentChunkResponseSchema,
     DocumentListResponseSchema,
     DocumentResponseSchema,
+    DocumentUpdateSchema,
     DocumentUploadResponseSchema,
     DocumentVersionListResponseSchema,
     DocumentVersionResponseSchema,
 )
+from packages.application.services.ingestion_audit import audit_ingestion
 from packages.config.loader import settings
 from packages.conversation.bootstrap import ensure_default_model_profile
 from packages.domain.enums.document_status import DocumentStatus
@@ -68,6 +71,13 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     chunking_strategy: ChunkingStrategy = "recursive",
+    document_type: str | None = Query(default=None, max_length=64),
+    category: str | None = Query(default=None, max_length=64),
+    tags: str | None = Query(default=None, description="Comma-separated tags."),
+    visibility: Literal["tenant", "restricted"] = Query(
+        default="tenant",
+        description="'restricted' documents are retrievable by administrators only.",
+    ),
     container: ApplicationContainer = Depends(get_scoped_container),
 ):
     tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
@@ -160,6 +170,10 @@ async def upload_document(
         document_name=file.filename,
         chunking_strategy=chunking_strategy,
         uploaded_by=user_id,
+        document_type=document_type,
+        category=category,
+        tags=_parse_tags(tags),
+        visibility=visibility,
     )
 
     upload_jobs = container.repositories.upload_job()
@@ -222,6 +236,14 @@ async def upload_document(
 
 # A scratch file is saved as "<uuid4>_<original name>".
 _SCRATCH_PREFIX = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_")
+
+
+def _parse_tags(raw: str | None) -> list[str] | None:
+    """"a, b,,a" -> ["a", "b"] (trimmed, de-duplicated, order kept); None when empty."""
+    if not raw:
+        return None
+    tags = list(dict.fromkeys(t.strip() for t in raw.split(",") if t.strip()))
+    return tags or None
 
 
 def _public_chunk_metadata(metadata: dict | None, document_name: str) -> dict:
@@ -288,6 +310,10 @@ async def _document_responses(container: ApplicationContainer, rows) -> list[Doc
                 processing_stage=d.processing_stage,
                 error_reason=d.error_reason,
                 processed_at=d.processed_at,
+                visibility=d.visibility or "tenant",
+                document_type=d.document_type,
+                category=d.category,
+                tags=d.tags,
                 embedding_is_stale=(
                     None if d.processing_version is None else d.processing_version != PIPELINE_VERSION
                 ),
@@ -395,6 +421,17 @@ async def list_document_chunks(
             detail="Document not found.",
         )
 
+    if offset == 0:
+        # Reading a document's full chunk text is an access event (one per viewing, not per page).
+        await container.audit().record(
+            tenant_id=tenant_id,
+            actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+            action="document.viewed",
+            resource_type="document",
+            resource_id=document_id,
+            detail={"file_name": document.file_name},
+        )
+
     chunks = container.repositories.document_chunk()
     total = await chunks.count_by_document(document_id)
     rows = await chunks.list_page_by_document(document_id, limit=limit, offset=offset)
@@ -494,6 +531,67 @@ async def list_document_versions(
     )
 
 
+@router.patch(
+    "/{document_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[DocumentResponseSchema],
+    summary="Change a document's access level or classification",
+    description=(
+        "Sets `visibility` ('tenant' = every member may retrieve it, 'restricted' = administrators "
+        "only), `document_type`, `category` and `tags`. Takes effect on the next retrieval: access is "
+        "enforced inside the search query, nothing is re-indexed. Every change is audited."
+    ),
+)
+async def update_document(
+    document_id: UUID,
+    payload: DocumentUpdateSchema,
+    request: Request,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+    user_id = require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID)
+
+    documents = container.repositories.document()
+    document = await documents.get(document_id)
+
+    if document is None or document.tenant_id != tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+
+    changes = payload.model_dump(exclude_unset=True)
+    if "tags" in changes and changes["tags"] is not None:
+        changes["tags"] = _parse_tags(",".join(changes["tags"]))
+
+    before = {field: getattr(document, field) for field in changes}
+    for field, value in changes.items():
+        setattr(document, field, value)
+    await documents.update(document)
+
+    audit = container.audit()
+    if "visibility" in changes and (before["visibility"] or "tenant") != (changes["visibility"] or "tenant"):
+        await audit.record(
+            tenant_id=tenant_id,
+            actor_id=user_id,
+            action="document.access_changed",
+            resource_type="document",
+            resource_id=document_id,
+            detail={"from": before["visibility"] or "tenant", "to": changes["visibility"] or "tenant"},
+        )
+    if set(changes) - {"visibility"}:
+        await audit.record(
+            tenant_id=tenant_id,
+            actor_id=user_id,
+            action="document.metadata_updated",
+            resource_type="document",
+            resource_id=document_id,
+            detail={"fields": sorted(set(changes) - {"visibility"})},
+        )
+
+    return ApiResponse(
+        message="Document updated.",
+        data=(await _document_responses(container, [document]))[0],
+    )
+
+
 @router.delete(
     "/{document_id}",
     status_code=status.HTTP_200_OK,
@@ -576,12 +674,15 @@ async def _ingest_in_background(
             if upload_job is not None:
                 await upload_jobs.mark_succeeded(upload_job, response.document_id)
 
+            await audit_ingestion(container.audit(), ingestion_request, response)
+
     except Exception as exc:
         logger.exception(
             "Background ingestion failed",
             document_name=ingestion_request.document_name,
             error=str(exc),
         )
+        await audit_ingestion(container.audit(), ingestion_request, error=exc)
 
         try:
             async with request_scoped_session(container):

@@ -134,6 +134,26 @@ export interface DocumentRecord {
   error_reason: string | null;
   processed_at: string | null;
   embedding_is_stale: boolean | null;
+  /** "tenant" = every member may retrieve it; "restricted" = administrators only. */
+  visibility: "tenant" | "restricted";
+  document_type: string | null;
+  category: string | null;
+  tags: string[] | null;
+}
+
+export interface DocumentUploadOptions {
+  chunkingStrategy?: ChunkingStrategy;
+  documentType?: string;
+  category?: string;
+  tags?: string;
+  visibility?: "tenant" | "restricted";
+}
+
+export interface DocumentUpdate {
+  visibility?: "tenant" | "restricted";
+  document_type?: string | null;
+  category?: string | null;
+  tags?: string[] | null;
 }
 
 export interface ChunkingInfo {
@@ -245,6 +265,9 @@ export interface SearchRequest {
   query: string;
   document_id?: string | null;
   limit?: number;
+  document_types?: string[];
+  categories?: string[];
+  tags?: string[];
 }
 
 export interface SearchResponse {
@@ -577,6 +600,8 @@ export interface RetrievalResult {
   chunking_strategy: string | null;
   retrieval_rank: number;
   retrieval_score: number;
+  vector_score: number | null;
+  keyword_score: number | null;
   reranker_score: number | null;
   final_rank: number | null;
   selected_for_context: boolean;

@@ -36,6 +36,14 @@ UPGRADES: tuple[str, ...] = (
     "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS embedding_dimensions integer",
     "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS pipeline_version varchar(64)",
     "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS indexed_at timestamptz",
+    "ALTER TABLE retrieval_result_logs ADD COLUMN IF NOT EXISTS vector_score double precision",
+    "ALTER TABLE retrieval_result_logs ADD COLUMN IF NOT EXISTS keyword_score double precision",
+    # --- documents: classification and access
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS visibility varchar(16)",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS document_type varchar(64)",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS category varchar(64)",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags jsonb",
+    "CREATE INDEX IF NOT EXISTS ix_document_type ON documents (tenant_id, document_type)",
     # --- messages: which retrieval supplied the answer's context
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS retrieval_id uuid",
     # citations store reranker logits, which can be negative
@@ -47,7 +55,38 @@ UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_message_retrieval ON messages (retrieval_id)",
 )
 
+# Row-level security: defence in depth behind the query-layer tenant filters. The policy applies
+# only once a transaction has said which tenant it serves (`app.tenant_id`, set by retrieval);
+# with it unset - ingestion, workers, migrations - behaviour is unchanged. FORCE makes it apply to
+# the table owner too. NOTE: a PostgreSQL SUPERUSER (and roles with BYPASSRLS) ignores every policy,
+# so enforcement needs the application to connect as an ordinary role (docs/PROVENANCE.md).
+RLS_TABLES = (
+    "documents",
+    "document_chunks",
+    "embeddings",
+    "retrieval_logs",
+    "retrieval_result_logs",
+    "audit_events",
+)
+
+_TENANT_MATCH = (
+    "NULLIF(current_setting('app.tenant_id', true), '') IS NULL "
+    "OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid"
+)
+
+
+def rls_statements() -> list[str]:
+    statements: list[str] = []
+    for table in RLS_TABLES:
+        statements += [
+            f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY",
+            f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY",
+            f"DROP POLICY IF EXISTS tenant_isolation ON {table}",
+            f"CREATE POLICY tenant_isolation ON {table} USING ({_TENANT_MATCH})",
+        ]
+    return statements
+
 
 async def apply_schema_upgrades(conn: AsyncConnection) -> None:
-    for statement in UPGRADES:
+    for statement in (*UPGRADES, *rls_statements()):
         await conn.execute(text(statement))

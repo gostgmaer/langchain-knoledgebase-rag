@@ -107,6 +107,10 @@ def _doc(**over):
         processing_stage=None,
         error_reason=None,
         processed_at=None,
+        visibility=None,
+        document_type=None,
+        category=None,
+        tags=None,
     )
     base.update(over)
     return SimpleNamespace(**base)

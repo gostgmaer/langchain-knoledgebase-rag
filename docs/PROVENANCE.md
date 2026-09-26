@@ -116,7 +116,7 @@ each answer).
 
 ## 8. Audit and retention
 
-Audit events are written for document upload accepted and document deleted, each in its own transaction so they
+Audit events (full list in section 11) are each written in their own transaction so they
 never join or break the request. Retention (`RETENTION_RETRIEVAL_LOG_DAYS`, default 90;
 `RETENTION_AUDIT_DAYS`, default 365; `0` = keep forever) is enforced by a daily worker job
 (`purge_expired_logs_job`, 05:00). Documents, versions and chunks are never purged by age.
@@ -127,15 +127,70 @@ never join or break the request. Retention (`RETENTION_RETRIEVAL_LOG_DAYS`, defa
 not accuracy. Recall@K / MRR / faithfulness need a labelled question set; `eval/` is the place for it and none
 exists yet, so no accuracy improvement is claimed.
 
-## 10. Known gaps (not done)
+## 10. Access control, filters and database-level isolation
 
-* Audit events cover upload and delete only - not version creation, reindex, access or permission changes.
-* No per-document ACLs; access control is tenant + role. Any member of a tenant can read that tenant's
-  conversations (`GET /conversations/{id}/messages` checks tenant, not owner).
-* The keyword-search score is not broken out from the fused score per candidate (one `retrieval_score` is
-  logged); Postgres row-level security is not enabled (isolation is enforced in the query layer and tested there).
-* Documents ingested before this change show "not recorded" for provenance; **re-index** them to fill it in.
-* No metadata filters (`documentType`, `department`, ...) on the query API yet; no `documentVersionId` column
-  (the version is the document row itself - `document_id` - plus `document_versions`).
-* Retrieval-log purge is platform-wide by design; the endpoint is super-admin only.
-* `alembic` migrations are still not a working history (see section 3).
+* **Per-document access**: `documents.visibility` is `tenant` (every member may retrieve it, the default) or
+  `restricted` (administrators only). Set on upload (`visibility=`) or changed with `PATCH /documents/{id}`
+  (audited as `document.access_changed`); it applies to the next question, nothing is re-indexed. Enforced **inside
+  the retrieval SQL**, so a restricted chunk never leaves the database for a member. The caller's clearance is a
+  request-scoped value set by the authentication middleware (`packages/shared/access.py`); it defaults to **no
+  clearance** anywhere outside an authenticated request (workers, scripts). Anonymous development mode
+  (`AUTH_REQUIRED=false`) keeps the old open behaviour.
+* **Metadata filters**: `document_type`, `category`, `tags` (all required), `language`, `knowledge_base_id`,
+  `document_ids`. Set on upload (`document_type`, `category`, `tags`) or by `PATCH`; used by `POST /search`
+  (`document_types`, `categories`, `tags`, `language`, `knowledge_base_id`) and applied in the search query, not after it.
+  Chat does not take filters yet.
+* **Conversation ownership**: a conversation is visible only in its own tenant and, within it, to its owner or an
+  administrator (`conversation_visible_to`). Everyone else gets 404 (the id's existence is not revealed). This also
+  closes a hole where `POST /chat` with another tenant's `conversation_id` was not tenant-checked.
+* **Row-level security**: policies on `documents`, `document_chunks`, `embeddings`, `retrieval_logs`,
+  `retrieval_result_logs`, `audit_events` restrict rows to `app.tenant_id`, which retrieval sets per transaction
+  (`set_config(..., true)`). With it unset (ingestion, workers, migrations) the policy is inactive, so nothing
+  else changes. **A PostgreSQL superuser and any `BYPASSRLS` role ignore policies**: in the local compose stack
+  the application connects as a superuser, so RLS is *not enforced there*. In production connect as an ordinary
+  role (own the tables with a migration role, run the app as a different one). Proven with an ordinary role in
+  `tests/integration/test_row_level_security.py`.
+* **Score breakdown**: each logged candidate stores its fused score plus the `vector_score` (cosine similarity)
+  and `keyword_score` (BM25) that produced it; a candidate found by only one ranker has the other empty.
+
+## 11. Audit events
+
+`document.uploaded`, `document.processed`, `document.version_created`, `document.duplicate_skipped`,
+`document.processing_failed` (with the failing stage), `document.reindexed`, `document.viewed` (chunk text
+opened), `document.access_changed`, `document.metadata_updated`, `document.deleted`. Retrievals are recorded by
+the retrieval log itself.
+
+## 12. Migrations
+
+`alembic upgrade head` now works from an **empty** database and on an existing one (verified on a scratch
+database): the baseline revision creates any missing tables, and `7c1d2e9a4b10` adds the columns, indexes and
+policies. Both are idempotent and match what the API applies at startup, so use either or both. On an existing
+database run `alembic upgrade head` once to record the version.
+
+## 13. Retrieval evaluation
+
+`scripts/evaluate_retrieval.py` scores hit@k, recall@k, precision@k, MRR and NDCG@k for **vector**, **hybrid**
+and **hybrid+rerank** on the same questions (`eval/retrieval_eval_set.json`, labelled against the bundled
+`eval/corpus`; `scripts/eval_corpus.sh up|down`). First measured run (8 documents, 16 paraphrased questions, k=3):
+
+| mode | hit@3 | recall@3 | MRR | NDCG@3 |
+|---|---|---|---|---|
+| vector | 1.0 | 1.0 | 1.0 | 1.0 |
+| hybrid | 1.0 | 1.0 | 0.9375 | 0.9539 |
+| hybrid+rerank | 1.0 | 1.0 | 0.9688 | 0.9769 |
+
+Read this carefully: on this small, easy set every mode finds the right document, and dense-only ranks it first
+slightly more often than hybrid. It shows **no benefit from hybrid retrieval or reranking at this scale**; it is
+not evidence they are worse in general. A meaningful comparison needs a larger set built from your own
+documents, with questions that share little vocabulary with the text and near-duplicate documents.
+
+## 14. Known gaps (not done)
+
+* Only two access levels (`tenant`, `restricted`); no per-user or per-group ACLs.
+* Chat has no metadata filters (the search API does).
+* Row-level security is not enforced while the application connects as a superuser (see section 10).
+* Documents ingested before provenance existed show "not recorded"; re-index them to fill it in. Documents
+  ingested before access control exist as `tenant` visibility.
+* No `documentVersionId` column: the version is the document row (`document_id`) plus `document_versions`.
+* Retrieval-log purge is platform-wide by design; its endpoint is super-admin only.
+* Accuracy is only measured on the tiny bundled set (section 13).

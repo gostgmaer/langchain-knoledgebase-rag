@@ -87,6 +87,8 @@ class RetrievalResultLog(BaseModel):
 
     retrieval_rank: Mapped[int] = mapped_column(Integer, nullable=False)
     retrieval_score: Mapped[float] = mapped_column(Float, nullable=False)
+    vector_score: Mapped[float | None] = mapped_column(Float)
+    keyword_score: Mapped[float | None] = mapped_column(Float)
     reranker_score: Mapped[float | None] = mapped_column(Float)
     final_rank: Mapped[int | None] = mapped_column(Integer)
     selected_for_context: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

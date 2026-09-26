@@ -4,7 +4,6 @@ import type {
   AgentListResponse,
   AnalyticsSummary,
   ChatResponseData,
-  ChunkingStrategy,
   Conversation,
   CreateAgentRequest,
   CreateFeatureFlagRequest,
@@ -19,6 +18,8 @@ import type {
   RetrievalLogList,
   TopDocument,
   DocumentListResponse,
+  DocumentUpdate,
+  DocumentUploadOptions,
   DocumentRecord,
   DocumentUploadResponse,
   DocumentVersionListResponse,
@@ -96,15 +97,23 @@ export const documents = {
     apiFetch<DocumentVersionListResponse>(`/documents/${id}/versions`, identity),
   delete: (identity: Identity, id: string) =>
     apiFetch<null>(`/documents/${id}`, identity, { method: "DELETE" }),
-  upload: (identity: Identity, file: File, chunkingStrategy?: ChunkingStrategy) => {
+  upload: (identity: Identity, file: File, options: DocumentUploadOptions = {}) => {
     const formData = new FormData();
     formData.append("file", file);
     return apiFetch<DocumentUploadResponse>("/documents", identity, {
       method: "POST",
       formData,
-      query: { chunking_strategy: chunkingStrategy },
+      query: {
+        chunking_strategy: options.chunkingStrategy,
+        document_type: options.documentType || undefined,
+        category: options.category || undefined,
+        tags: options.tags || undefined,
+        visibility: options.visibility,
+      },
     });
   },
+  update: (identity: Identity, id: string, body: DocumentUpdate) =>
+    apiFetch<DocumentRecord>(`/documents/${id}`, identity, { method: "PATCH", body }),
 };
 
 // ---------------------------------------------------------------

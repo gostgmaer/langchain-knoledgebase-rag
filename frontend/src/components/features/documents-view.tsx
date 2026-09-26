@@ -67,6 +67,14 @@ export function DocumentsView({ basePath }: { basePath: string }) {
                   <Link href={`${basePath}/${doc.id}`} className="font-medium hover:underline">
                     {doc.file_name}
                   </Link>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {doc.visibility === "restricted" && <Badge variant="outline">admins only</Badge>}
+                    {doc.document_type && <Badge variant="secondary">{doc.document_type}</Badge>}
+                    {doc.category && <Badge variant="secondary">{doc.category}</Badge>}
+                    {(doc.tags ?? []).map((tag) => (
+                      <Badge key={tag} variant="outline">#{tag}</Badge>
+                    ))}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <StatusBadge status={doc.status} />

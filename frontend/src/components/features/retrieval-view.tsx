@@ -129,7 +129,9 @@ function RetrievalDetail({ id }: { id: string }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Search #</TableHead>
-                  <TableHead>Search score</TableHead>
+                  <TableHead>Fused</TableHead>
+                  <TableHead>Vector</TableHead>
+                  <TableHead>Keyword</TableHead>
                   <TableHead>Reranker</TableHead>
                   <TableHead>Final #</TableHead>
                   <TableHead>Used</TableHead>
@@ -143,6 +145,8 @@ function RetrievalDetail({ id }: { id: string }) {
                   <TableRow key={res.chunk_id} className={res.selected_for_context ? "" : "opacity-60"}>
                     <TableCell>{res.retrieval_rank}</TableCell>
                     <TableCell>{score(res.retrieval_score)}</TableCell>
+                    <TableCell>{score(res.vector_score)}</TableCell>
+                    <TableCell>{score(res.keyword_score)}</TableCell>
                     <TableCell>{score(res.reranker_score)}</TableCell>
                     <TableCell>
                       {res.final_rank ?? "—"}

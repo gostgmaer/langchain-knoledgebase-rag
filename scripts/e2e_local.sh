@@ -132,6 +132,37 @@ if [ -n "${MA:-}" ]; then
   done
 fi
 
+echo; echo "== 5d. Access control: restricted documents, metadata filters, conversation ownership"
+RF="$TMPD/e2e_restricted_$TS.txt"
+printf 'Restricted memo %s. The board acquisition codename is PURPLE-OTTER-%s and must stay confidential.\n' "$TS" "$TS" > "$RF"
+RJ=$(curl -s -m 60 -X POST "$RAG/documents?visibility=restricted&document_type=memo&category=board&tags=confidential,q3" -H "Authorization: Bearer $ATOK" -F "file=@$RF;type=text/plain" | J "print((d.get('data') or {}).get('upload_job_id',''))")
+if [ -n "$RJ" ]; then
+  S=""; for i in $(seq 1 40); do S=$(curl -s $RAG/upload-jobs/$RJ -H "Authorization: Bearer $ATOK" | J "print((d.get('data') or {}).get('status',''))"); case "$S" in SUCCEEDED|FAILED) break;; esac; sleep 5; done
+  [ "$S" = SUCCEEDED ] && ok "restricted document ingested" || bad "restricted document ingestion ended as '$S'"
+fi
+RDID=$(curl -s "$RAG/documents?limit=200" -H "Authorization: Bearer $ATOK" | J "print(next((x['id'] for x in (d.get('data') or {}).get('documents',[]) if x['file_name']=='e2e_restricted_$TS.txt'),''))")
+Q="{\"query\":\"board acquisition codename PURPLE-OTTER-$TS\",\"limit\":10"
+found(){ curl -s -m 90 -X POST $RAG/search -H "$1" -H 'Content-Type: application/json' -d "$2" | J "print('yes' if any(r['document_id']=='$RDID' for r in (d.get('data') or {}).get('results',[])) else 'no')"; }
+chk "admin retrieves the restricted document" "$(found "Authorization: Bearer $ATOK" "$Q}")" yes
+if [ -n "${MA:-}" ]; then
+  chk "member does NOT retrieve the restricted document" "$(found "$MA" "$Q}")" no
+  chk "member cannot read its chunks" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/documents/$RDID/chunks -H "$MA")" 403
+fi
+chk "metadata filter: matching type finds it" "$(found "Authorization: Bearer $ATOK" "$Q,\"document_types\":[\"memo\"],\"tags\":[\"confidential\"]}")" yes
+chk "metadata filter: other type excludes it" "$(found "Authorization: Bearer $ATOK" "$Q,\"document_types\":[\"policy\"]}")" no
+chk "metadata filter: missing tag excludes it" "$(found "Authorization: Bearer $ATOK" "$Q,\"tags\":[\"confidential\",\"nope\"]}")" no
+chk "admin opens the document to all members" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $RAG/documents/$RDID -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"visibility":"tenant"}')" 200
+[ -n "${MA:-}" ] && chk "member now retrieves it" "$(found "$MA" "$Q}")" yes
+chk "access change is audited" "$(curl -s "$RAG/observability/audit?action=document.access_changed" -H "Authorization: Bearer $ATOK" | J "print('yes' if (d.get('data') or {}).get('events') else 'no')")" yes
+
+CID=$(python -c "import uuid;print(uuid.uuid4())")
+chk "admin starts a conversation" "$(curl -s -o /dev/null -m 120 -w '%{http_code}' -X POST $RAG/chat -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d "{\"message\":\"hello\",\"conversation_id\":\"$CID\",\"stream\":false}")" 200
+if [ -n "${MA:-}" ]; then
+  chk "member cannot read another user's conversation" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/conversations/$CID/messages -H "$MA")" 404
+  chk "member cannot post into another user's conversation" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/chat -H "$MA" -H 'Content-Type: application/json' -d "{\"message\":\"hi\",\"conversation_id\":\"$CID\",\"stream\":false}")" 404
+fi
+chk "owner still reads their conversation" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/conversations/$CID/messages -H "Authorization: Bearer $ATOK")" 200
+
 echo; echo "== 6. Connected accounts API"
 chk "list connected accounts" "$(curl -s -o /dev/null -w '%{http_code}' $GW/api/auth/social/accounts -H "Authorization: Bearer $ATOK" -H "$O")" 200
 chk "Google authorize redirect" "$(curl -s -o /dev/null -w '%{http_code}' $GW/api/auth/social/google/start -H "$O")" 302

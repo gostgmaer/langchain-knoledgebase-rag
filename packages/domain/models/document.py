@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -123,6 +124,13 @@ class Document(BaseModel):
     embedding_model: Mapped[str | None] = mapped_column(String(128))
     embedding_dimensions: Mapped[int | None] = mapped_column(Integer)
     processing_stage: Mapped[str | None] = mapped_column(String(32))
+
+    # --- Classification and access. `visibility`: NULL/"tenant" = every member of the tenant may
+    # retrieve it; "restricted" = administrators only. Enforced inside the retrieval SQL.
+    visibility: Mapped[str | None] = mapped_column(String(16))
+    document_type: Mapped[str | None] = mapped_column(String(64))
+    category: Mapped[str | None] = mapped_column(String(64))
+    tags: Mapped[list[str] | None] = mapped_column(JSONB)
     """Last pipeline stage reached: extracting, cleaning, chunking, embedding, indexing, completed."""
     error_reason: Mapped[str | None] = mapped_column(Text)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

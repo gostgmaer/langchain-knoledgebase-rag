@@ -26,7 +26,7 @@ class _CapturingSession:
     def __init__(self):
         self.statements = []
 
-    async def execute(self, stmt):
+    async def execute(self, stmt, params=None):
         self.statements.append(stmt)
         return SimpleNamespace(all=lambda: [], scalars=lambda: SimpleNamespace(all=lambda: []))
 
@@ -44,7 +44,9 @@ async def test_every_search_is_scoped_to_the_tenant_and_to_live_documents(method
     else:
         await store.list_chunks(filters=filters)
 
-    sql = _sql(session.statements[0])
+    # The transaction is first told which tenant it serves (row-level-security policies key on it).
+    assert "set_config" in str(session.statements[0])
+    sql = _sql(session.statements[-1])
     # Tenant scoping is part of the query itself: other tenants' rows are never read.
     assert "embeddings.tenant_id =" in sql
     # Superseded versions, unfinished/failed ingestion and deleted documents are excluded in SQL.
@@ -151,3 +153,57 @@ def test_retrieved_text_is_delivered_as_untrusted_delimited_data():
     assert system.count("<source id=") == 2  # the hostile chunk cannot forge extra source tags
     assert system.count("</source>") == 2  # ...or close its own wrapper early
     assert '<source id="1">' in system and '<source id="2">' in system
+
+
+# ---- ACLs and metadata filters ------------------------------------------------------------------
+async def _search_sql(**filter_args) -> str:
+    session = _CapturingSession()
+    filters = SearchFilter(tenant_id=uuid4(), model_profile_id=uuid4(), **filter_args)
+    await PostgresVectorStore(session).similarity_search([0.1], filters=filters)
+    return _sql(session.statements[-1])
+
+
+@pytest.mark.asyncio
+async def test_restricted_documents_are_excluded_unless_cleared():
+    assert "documents.visibility" in await _search_sql(include_restricted=False)
+    assert "documents.visibility" not in await _search_sql(include_restricted=True)
+
+
+def test_clearance_is_fail_closed_outside_a_request():
+    from packages.shared.access import can_read_restricted, set_can_read_restricted
+
+    assert can_read_restricted() is False
+    assert SearchFilter(tenant_id=uuid4(), model_profile_id=uuid4()).include_restricted is False
+    token = set_can_read_restricted(True)
+    try:
+        assert SearchFilter(tenant_id=uuid4(), model_profile_id=uuid4()).include_restricted is True
+    finally:
+        from packages.shared.access import _can_read_restricted
+
+        _can_read_restricted.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_metadata_filters_are_applied_in_sql():
+    sql = await _search_sql(
+        document_types=["policy"], categories=["hr"], tags=["2026"], language="en", knowledge_base_id=uuid4()
+    )
+    for fragment in ("documents.document_type IN", "documents.category IN", "documents.tags @>", "documents.language =", "documents.knowledge_base_id ="):
+        assert fragment in sql
+
+
+# ---- conversation ownership --------------------------------------------------------------------------
+def test_conversation_is_visible_to_owner_and_admin_but_not_other_members_or_tenants():
+    from packages.api.dependencies import conversation_visible_to
+
+    tenant, other_tenant, owner = uuid4(), uuid4(), uuid4()
+    conv = SimpleNamespace(tenant_id=tenant, user_id=owner)
+    member = SimpleNamespace(id=uuid4(), roles=["member"], tenant_id=tenant)
+    admin = SimpleNamespace(id=uuid4(), roles=["admin"], tenant_id=tenant)
+    owner_user = SimpleNamespace(id=owner, roles=["member"], tenant_id=tenant)
+
+    assert conversation_visible_to(conv, tenant, owner_user)
+    assert conversation_visible_to(conv, tenant, admin)
+    assert not conversation_visible_to(conv, tenant, member)  # another member of the same tenant
+    assert not conversation_visible_to(conv, other_tenant, admin)  # another tenant, even an admin
+    assert conversation_visible_to(conv, tenant, None)  # anonymous dev mode keeps tenant-only

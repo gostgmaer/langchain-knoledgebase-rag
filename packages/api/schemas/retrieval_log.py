@@ -42,6 +42,8 @@ class RetrievalResultSchema(BaseModel):
     chunking_strategy: str | None
     retrieval_rank: int
     retrieval_score: float
+    vector_score: float | None
+    keyword_score: float | None
     reranker_score: float | None
     final_rank: int | None
     selected_for_context: bool

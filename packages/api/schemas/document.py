@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DocumentUploadResponseSchema(BaseModel):
@@ -89,6 +89,10 @@ class DocumentResponseSchema(BaseModel):
     error_reason: str | None = None
     processed_at: datetime | None = None
     embedding_is_stale: bool | None = None
+    visibility: str = "tenant"
+    document_type: str | None = None
+    category: str | None = None
+    tags: list[str] | None = None
     """True when embedded by an older pipeline than the running one; None when never recorded."""
 
 
@@ -169,3 +173,14 @@ class DocumentVersionListResponseSchema(BaseModel):
 
     root_document_id: UUID
     versions: list[DocumentVersionResponseSchema]
+
+
+class DocumentUpdateSchema(BaseModel):
+    """Editable classification/access fields. Omitted fields are left unchanged."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    visibility: Literal["tenant", "restricted"] | None = None
+    document_type: str | None = Field(default=None, max_length=64)
+    category: str | None = Field(default=None, max_length=64)
+    tags: list[str] | None = None

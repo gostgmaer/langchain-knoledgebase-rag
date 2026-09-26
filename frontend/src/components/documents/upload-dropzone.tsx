@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Select } from "@/components/ui/select";
 import { useUploadDocument, useUploadJob } from "@/hooks/use-api";
 import type { ChunkingStrategy } from "@/lib/api/types";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 const CHUNKING_STRATEGIES: { value: ChunkingStrategy; label: string; description: string }[] = [
@@ -21,6 +22,10 @@ export function UploadDropzone() {
   const [dragOver, setDragOver] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [chunkingStrategy, setChunkingStrategy] = useState<ChunkingStrategy>("recursive");
+  const [documentType, setDocumentType] = useState("");
+  const [category, setCategory] = useState("");
+  const [tags, setTags] = useState("");
+  const [visibility, setVisibility] = useState<"tenant" | "restricted">("tenant");
   const upload = useUploadDocument();
   const { data: job } = useUploadJob(jobId, true);
   // Tracks which job we've already toasted for, so the one-shot success/
@@ -35,7 +40,10 @@ export function UploadDropzone() {
     const file = files?.[0];
     if (!file) return;
     try {
-      const result = await upload.mutateAsync({ file, chunkingStrategy });
+      const result = await upload.mutateAsync({
+        file,
+        options: { chunkingStrategy, documentType, category, tags, visibility },
+      });
       setJobId(result.upload_job_id);
       toast.info(`"${file.name}" accepted — ingestion running in the background.`);
     } catch (err) {
@@ -119,6 +127,25 @@ export function UploadDropzone() {
         <span className="text-xs text-neutral-400">
           {CHUNKING_STRATEGIES.find((s) => s.value === chunkingStrategy)?.description}
         </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+        <label htmlFor="doc-type">Type</label>
+        <Input id="doc-type" className="h-8 w-32 text-xs" placeholder="policy" value={documentType} onChange={(e) => setDocumentType(e.target.value)} />
+        <label htmlFor="doc-category">Category</label>
+        <Input id="doc-category" className="h-8 w-32 text-xs" placeholder="hr" value={category} onChange={(e) => setCategory(e.target.value)} />
+        <label htmlFor="doc-tags">Tags</label>
+        <Input id="doc-tags" className="h-8 w-40 text-xs" placeholder="2026, europe" value={tags} onChange={(e) => setTags(e.target.value)} />
+        <label htmlFor="doc-visibility">Access</label>
+        <Select
+          id="doc-visibility"
+          className="h-8 w-44 text-xs"
+          value={visibility}
+          onChange={(e) => setVisibility(e.target.value as "tenant" | "restricted")}
+        >
+          <option value="tenant">All members</option>
+          <option value="restricted">Administrators only</option>
+        </Select>
       </div>
     </div>
   );

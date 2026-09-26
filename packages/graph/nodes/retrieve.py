@@ -192,6 +192,8 @@ class RetrieveNode:
                     chunk_index=r.chunk.chunk_index,
                     retrieval_rank=position,
                     retrieval_score=float(r.score),
+                    vector_score=r.vector_score,
+                    keyword_score=r.keyword_score,
                     reranker_score=by_rerank[r.chunk.id][1] if r.chunk.id in by_rerank else None,
                     final_rank=by_rerank[r.chunk.id][0] if r.chunk.id in by_rerank else None,
                     selected=r.chunk.id in by_rerank,
