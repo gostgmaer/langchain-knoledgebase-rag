@@ -33,6 +33,7 @@ from packages.conversation.bootstrap import ensure_default_model_profile
 from packages.domain.enums.document_status import DocumentStatus
 from packages.domain.models.upload_job import UploadJob
 from packages.infrastructure.container import ApplicationContainer
+from packages.knowledge.pipelines.ingestion import PIPELINE_VERSION
 from packages.knowledge.bootstrap import ensure_default_knowledge_base
 from packages.knowledge.loaders.factory import LoaderFactory
 from packages.knowledge.schemas import ChunkingStrategy, IngestionRequest
@@ -158,6 +159,7 @@ async def upload_document(
         file_id=uploaded_file.id,
         document_name=file.filename,
         chunking_strategy=chunking_strategy,
+        uploaded_by=user_id,
     )
 
     upload_jobs = container.repositories.upload_job()
@@ -167,6 +169,19 @@ async def upload_document(
             user_id=user_id,
             file_name=file.filename,
         )
+    )
+
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=user_id,
+        action="document.uploaded",
+        resource_type="upload_job",
+        resource_id=upload_job.id,
+        detail={
+            "file_name": file.filename,
+            "size_bytes": len(content),
+            "chunking_requested": chunking_strategy,
+        },
     )
 
     pool = container.queue.pool()
@@ -261,6 +276,21 @@ async def _document_responses(container: ApplicationContainer, rows) -> list[Doc
                 representation_count=extra,
                 chunking=_chunking_info(d.metadata_),
                 document_metadata=d.metadata_ or {},
+                content_hash=d.checksum,
+                uploaded_by=d.uploaded_by,
+                source_type=d.source_type,
+                processing_version=d.processing_version,
+                parser_name=d.parser_name,
+                chunking_version=d.chunking_version,
+                embedding_provider=d.embedding_provider,
+                embedding_model=d.embedding_model,
+                embedding_dimensions=d.embedding_dimensions,
+                processing_stage=d.processing_stage,
+                error_reason=d.error_reason,
+                processed_at=d.processed_at,
+                embedding_is_stale=(
+                    None if d.processing_version is None else d.processing_version != PIPELINE_VERSION
+                ),
             )
         )
     return responses
@@ -390,6 +420,14 @@ async def list_document_chunks(
                     start_offset=c.start_offset,
                     end_offset=c.end_offset,
                     metadata=_public_chunk_metadata(c.metadata_, document.file_name),
+                    content_hash=c.content_hash,
+                    chunking_strategy=c.chunking_strategy,
+                    chunking_version=c.chunking_version,
+                    embedding_provider=c.embedding_provider,
+                    embedding_model=c.embedding_model,
+                    embedding_dimensions=c.embedding_dimensions,
+                    pipeline_version=c.pipeline_version,
+                    indexed_at=c.indexed_at,
                 )
                 for c in rows
             ],
@@ -488,6 +526,15 @@ async def delete_document(
     await knowledge_manager.delete_document(tenant_id=tenant_id, document_id=document_id)
     await documents.delete(document)
 
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="document.deleted",
+        resource_type="document",
+        resource_id=document_id,
+        detail={"file_name": document.file_name},
+    )
+
     return ApiResponse(message="Document deleted.")
 
 
@@ -541,7 +588,10 @@ async def _ingest_in_background(
                 upload_jobs = container.repositories.upload_job()
                 upload_job = await upload_jobs.get(upload_job_id)
                 if upload_job is not None:
-                    await upload_jobs.mark_failed(upload_job, str(exc))
+                    await upload_jobs.mark_failed(
+                    upload_job,
+                    f"[{getattr(exc, 'ingestion_stage', 'unknown')}] {exc}",
+                )
         except Exception:
             logger.exception("Could not record upload job failure")
 

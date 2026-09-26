@@ -95,6 +95,18 @@ def _doc(**over):
         created_at=now,
         updated_at=now,
         metadata_={"chunking": {"requested": "auto", "strategy": "markdown"}, "source": "upload"},
+        checksum="abc",
+        uploaded_by=None,
+        source_type=None,
+        processing_version=None,
+        parser_name=None,
+        chunking_version=None,
+        embedding_provider=None,
+        embedding_model=None,
+        embedding_dimensions=None,
+        processing_stage=None,
+        error_reason=None,
+        processed_at=None,
     )
     base.update(over)
     return SimpleNamespace(**base)

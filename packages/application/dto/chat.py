@@ -24,6 +24,10 @@ class CitationDTO(BaseModel):
     chunk_id: UUID
     chunk_index: int
     score: float
+    label: str | None = None
+    document_name: str | None = None
+    page_number: int | None = None
+    section: str | None = None
 
 
 class PendingToolCallDTO(BaseModel):

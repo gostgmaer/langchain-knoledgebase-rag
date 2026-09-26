@@ -24,6 +24,7 @@ from packages.application.services.message_service import (
 )
 from packages.conversation.context import ConversationContextBuilder
 from packages.domain.models.message import Message
+from packages.domain.models.message_citation import MessageCitation
 from packages.graph.manager import GraphManager
 from packages.infrastructure.repositories.unit_of_work import (
     UnitOfWork,
@@ -263,15 +264,13 @@ class ChatService:
                 ),
             )
 
-        citations = [
-            CitationDTO(
-                document_id=citation.document_id,
-                chunk_id=citation.chunk_id,
-                chunk_index=citation.chunk_index,
-                score=citation.score,
-            )
-            for citation in result.get("citations") or []
-        ]
+        retrieval_id = result.get("retrieval_id")
+        citations = await self._build_citations(
+            [
+                (citation.document_id, citation.chunk_id, citation.chunk_index, citation.score)
+                for citation in result.get("citations") or []
+            ]
+        )
 
         final_message = result["messages"][-1]
         raw_response = {
@@ -298,6 +297,8 @@ class ChatService:
             tool_calls=tool_calls,
             tool_results=tool_results,
         )
+
+        await self._persist_answer_sources(assistant_message, citations, retrieval_id)
 
         await self._update_conversation(conversation)
 
@@ -344,6 +345,7 @@ class ChatService:
             pending_approval: dict = {}
             usage: dict = {}
             citations: list[dict[str, Any]] = []
+            stream_meta: dict[str, Any] = {}
 
             # Same reasoning as chat()/resume()'s own committed mark —
             # durably persisted before the potentially-crashing
@@ -356,7 +358,7 @@ class ChatService:
             started = time.perf_counter()
 
             async for token in self._stream_runtime(
-                conversation, user_message, raw_response, pending_approval, usage, citations
+                conversation, user_message, raw_response, pending_approval, usage, citations, stream_meta
             ):
                 chunks.append(token)
                 yield {"type": "token", "content": token}
@@ -377,7 +379,7 @@ class ChatService:
 
             assistant_response = "".join(chunks)
 
-            await self._save_assistant_message(
+            assistant_message = await self._save_assistant_message(
                 conversation,
                 assistant_response,
                 raw_response,
@@ -385,11 +387,25 @@ class ChatService:
                 latency_ms=latency_ms,
             )
 
+            enriched = await self._build_citations(
+                [
+                    (UUID(c["document_id"]), UUID(c["chunk_id"]), c["chunk_index"], c["score"])
+                    for c in citations
+                ]
+            )
+            await self._persist_answer_sources(assistant_message, enriched, stream_meta.get("retrieval_id"))
+
             await self._update_conversation(conversation)
 
             await self._uow.commit()
 
-            yield {"type": "citations", "citations": citations}
+            yield {
+                "type": "citations",
+                "citations": [
+                    {**c.model_dump(mode="json")} for c in enriched
+                ],
+                "retrieval_id": stream_meta.get("retrieval_id"),
+            }
 
         except Exception:
             await self._uow.rollback()
@@ -466,6 +482,7 @@ class ChatService:
         pending_approval: dict,
         usage: dict,
         citations: list[dict[str, Any]],
+        stream_meta: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
         """
         Runs the real LangGraph pipeline (planner, retrieval, tools,
@@ -500,6 +517,8 @@ class ChatService:
             elif event.get("type") == "usage":
                 usage.update(event.get("usage") or {})
             elif event.get("type") == "citations":
+                if stream_meta is not None:
+                    stream_meta["retrieval_id"] = event.get("retrieval_id")
                 citations.extend(
                     {
                         "document_id": str(citation.document_id),
@@ -513,6 +532,62 @@ class ChatService:
                 pending_approval["tool_calls"] = event.get("value", {}).get(
                     "tool_calls", []
                 )
+
+    async def _build_citations(
+        self,
+        raw: list[tuple[UUID, UUID, int, float]],
+    ) -> list[CitationDTO]:
+        """
+        Turns retrieved (document, chunk, index, score) tuples into customer-facing citations:
+        a "[n]" label plus the document's name and where in it the chunk sits. Tenant scoping
+        is inherited from the chunks, which retrieval already filtered by tenant.
+        """
+        citations: list[CitationDTO] = []
+        seen: set[UUID] = set()
+        for document_id, chunk_id, chunk_index, score in raw:
+            if chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            document = await self._uow.documents.get(document_id)
+            chunk = await self._uow.document_chunks.get(chunk_id)
+            citations.append(
+                CitationDTO(
+                    document_id=document_id,
+                    chunk_id=chunk_id,
+                    chunk_index=chunk_index,
+                    score=score,
+                    label=f"[{len(citations) + 1}]",
+                    document_name=document.file_name if document else None,
+                    page_number=chunk.page_number if chunk else None,
+                    section=chunk.section if chunk else None,
+                )
+            )
+        return citations
+
+    async def _persist_answer_sources(
+        self,
+        message: Message,
+        citations: list[CitationDTO],
+        retrieval_id: Any,
+    ) -> None:
+        """
+        Links the saved answer to what produced it: the retrieval id on the message, and one
+        MessageCitation row per source chunk. This is what lets an administrator go from an
+        answer back to its retrieval, chunks, documents and versions.
+        """
+        if retrieval_id:
+            message.retrieval_id = UUID(str(retrieval_id))
+        for rank, citation in enumerate(citations, start=1):
+            self._uow.session.add(
+                MessageCitation(
+                    message_id=message.id,
+                    document_id=citation.document_id,
+                    chunk_id=citation.chunk_id,
+                    rank=rank,
+                    score=max(-99.0, min(99.0, float(citation.score))),
+                )
+            )
+        await self._uow.flush()
 
     async def _save_assistant_message(
         self,

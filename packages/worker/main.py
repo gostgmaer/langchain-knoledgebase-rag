@@ -14,6 +14,7 @@ from packages.worker.jobs import (
     cleanup_stale_upload_jobs_job,
     expire_stale_conversations_job,
     ingest_document_job,
+    purge_expired_logs_job,
     recover_stuck_conversations_job,
     reindex_stale_documents_job,
 )
@@ -71,6 +72,7 @@ class WorkerSettings:
         cleanup_stale_upload_jobs_job,
         reindex_stale_documents_job,
         recover_stuck_conversations_job,
+        purge_expired_logs_job,
     ]
 
     cron_jobs = [
@@ -86,6 +88,8 @@ class WorkerSettings:
         # Scheduled Re-indexing (docs/mvpRAG.md v1.1) — weekly, Sunday
         # (weekday=6) at 4am, well clear of the daily sweeps above.
         cron(reindex_stale_documents_job, weekday=6, hour=4, minute=0),
+        # Retention: drop retrieval logs / audit events past their configured window.
+        cron(purge_expired_logs_job, hour=5, minute=0),
         # Durable Execution (docs/mvpRAG.md v2.0) — every 5 minutes,
         # not daily like the sweeps above: this is about detecting a
         # crashed turn promptly, not a nightly cleanup. arq's cron has

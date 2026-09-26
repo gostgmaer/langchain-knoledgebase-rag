@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 import packages.domain.models  # noqa: F401 - Ensure models are loaded for Base.metadata
+from packages.infrastructure.database.upgrades import apply_schema_upgrades
 from packages.graph.visualizer import GraphVisualizer
 from packages.infrastructure.container import ApplicationContainer
 from packages.infrastructure.container.graph import create_postgres_checkpointer
@@ -63,6 +64,7 @@ async def lifespan(app: FastAPI):
         async with engine.begin() as conn:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
             await conn.run_sync(Base.metadata.create_all)
+            await apply_schema_upgrades(conn)
         logger.info("Database schema initialized successfully.")
     except Exception as exc:
         logger.error("Failed to initialize database schema: %s", exc)

@@ -75,6 +75,22 @@ class DocumentResponseSchema(BaseModel):
     document_metadata: dict[str, Any] = {}
     """Everything else stored on the document row (upload metadata, chunking record...)."""
 
+    # Provenance / processing record. None = not recorded (ingested before these existed).
+    content_hash: str | None = None
+    uploaded_by: UUID | None = None
+    source_type: str | None = None
+    processing_version: str | None = None
+    parser_name: str | None = None
+    chunking_version: str | None = None
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    embedding_dimensions: int | None = None
+    processing_stage: str | None = None
+    error_reason: str | None = None
+    processed_at: datetime | None = None
+    embedding_is_stale: bool | None = None
+    """True when embedded by an older pipeline than the running one; None when never recorded."""
+
 
 class DocumentChunkResponseSchema(BaseModel):
     """One stored chunk with everything the database keeps about it."""
@@ -93,6 +109,16 @@ class DocumentChunkResponseSchema(BaseModel):
     end_offset: int | None
     metadata: dict[str, Any]
     """The chunk's full metadata: source, page, headings, chunking strategy, ingested_at..."""
+
+    # Provenance columns. None = not recorded (chunk stored before these existed).
+    content_hash: str | None = None
+    chunking_strategy: str | None = None
+    chunking_version: str | None = None
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    embedding_dimensions: int | None = None
+    pipeline_version: str | None = None
+    indexed_at: datetime | None = None
 
 
 class DocumentChunkListResponseSchema(BaseModel):

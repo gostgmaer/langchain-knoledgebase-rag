@@ -19,6 +19,7 @@ from packages.api.routers.prompts import router as prompt_router
 from packages.api.routers.search import router as search_router
 from packages.api.routers.tools import router as tool_router
 from packages.api.routers.upload_jobs import router as upload_job_router
+from packages.api.routers.observability import router as observability_router
 from packages.api.routers.retrieval_logs import router as retrieval_logs_router
 from packages.api.routers.usage import router as usage_router
 from packages.api.security import get_bearer_token, get_tenant_id
@@ -49,6 +50,7 @@ api_router.include_router(upload_job_router)
 api_router.include_router(metrics_router)
 api_router.include_router(usage_router)
 api_router.include_router(retrieval_logs_router)
+api_router.include_router(observability_router)
 api_router.include_router(analytics_router)
 api_router.include_router(feature_flag_router)
 

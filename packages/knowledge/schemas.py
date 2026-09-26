@@ -23,6 +23,7 @@ class IngestionRequest:
 
     file_id: str | None = None
     chunking_strategy: ChunkingStrategy = "recursive"
+    uploaded_by: UUID | None = None
 
     metadata: dict[str, object] = field(default_factory=dict)
 

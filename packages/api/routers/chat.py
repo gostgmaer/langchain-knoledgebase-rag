@@ -243,6 +243,10 @@ def _to_response_schema(response: ChatResponse, model: str) -> ChatResponseSchem
                 chunk_id=citation.chunk_id,
                 chunk_index=citation.chunk_index,
                 score=citation.score,
+                label=citation.label,
+                document_name=citation.document_name,
+                page_number=citation.page_number,
+                section=citation.section,
             )
             for citation in response.citations
         ],

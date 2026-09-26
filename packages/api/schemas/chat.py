@@ -49,6 +49,15 @@ class CitationSchema(BaseModel):
 
     score: float
 
+    label: str | None = None
+    """Marker to cite in the answer text, e.g. \"[1]\"."""
+
+    document_name: str | None = None
+
+    page_number: int | None = None
+
+    section: str | None = None
+
 
 class PendingToolCallSchema(BaseModel):
     """

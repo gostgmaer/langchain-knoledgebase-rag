@@ -39,10 +39,6 @@ class MessageCitation(BaseModel):
             name="uq_message_chunk",
         ),
         CheckConstraint(
-            "score >= 0",
-            name="ck_citation_score",
-        ),
-        CheckConstraint(
             "rank >= 1",
             name="ck_citation_rank",
         ),

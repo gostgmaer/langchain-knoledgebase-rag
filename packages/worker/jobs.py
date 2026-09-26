@@ -130,7 +130,10 @@ async def ingest_document_job(
                 upload_jobs = container.repositories.upload_job()
                 upload_job = await upload_jobs.get(job_uuid)
                 if upload_job is not None:
-                    await upload_jobs.mark_failed(upload_job, str(exc))
+                    await upload_jobs.mark_failed(
+                    upload_job,
+                    f"[{getattr(exc, 'ingestion_stage', 'unknown')}] {exc}",
+                )
         except Exception:
             logger.exception("Could not record upload job failure")
 
@@ -138,6 +141,16 @@ async def ingest_document_job(
 
     finally:
         path.unlink(missing_ok=True)
+
+
+async def purge_expired_logs_job(ctx: dict[str, Any]) -> dict[str, int]:
+    """Daily retention sweep: deletes retrieval logs and audit events past their retention window."""
+    from packages.application.services.retention_service import purge_expired
+
+    container: ApplicationContainer = ctx["container"]
+    result = await purge_expired(container.database.session_factory())
+    logger.info("Retention purge finished", **result)
+    return result
 
 
 async def reindex_stale_documents_job(ctx: dict[str, Any]) -> dict[str, int]:

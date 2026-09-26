@@ -1,6 +1,7 @@
 # Document model
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -8,6 +9,8 @@ from sqlalchemy import (
     BIGINT,
     JSON,
     Boolean,
+    DateTime,
+    Integer,
     Enum,
     ForeignKey,
     Index,
@@ -106,6 +109,23 @@ class Document(BaseModel):
         default=True,
         nullable=False,
     )
+
+    # --- Provenance / processing record. Structured columns (not JSON) because they are
+    # filtered, joined and reported on. NULL means "not recorded" (documents ingested before
+    # these existed) - never a guess.
+    uploaded_by: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    source_type: Mapped[str | None] = mapped_column(String(32))
+    processing_version: Mapped[str | None] = mapped_column(String(64))
+    parser_name: Mapped[str | None] = mapped_column(String(64))
+    chunking_strategy: Mapped[str | None] = mapped_column(String(32))
+    chunking_version: Mapped[str | None] = mapped_column(String(32))
+    embedding_provider: Mapped[str | None] = mapped_column(String(64))
+    embedding_model: Mapped[str | None] = mapped_column(String(128))
+    embedding_dimensions: Mapped[int | None] = mapped_column(Integer)
+    processing_stage: Mapped[str | None] = mapped_column(String(32))
+    """Last pipeline stage reached: extracting, cleaning, chunking, embedding, indexing, completed."""
+    error_reason: Mapped[str | None] = mapped_column(Text)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",

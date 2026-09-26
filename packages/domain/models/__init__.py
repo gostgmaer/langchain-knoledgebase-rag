@@ -21,6 +21,7 @@ from .model_profile import ModelProfile
 from .prompt import Prompt
 from .prompt_version import PromptVersion
 from .relationship import Relationship
+from .audit_event import AuditEvent
 from .retrieval_log import RetrievalLog, RetrievalResultLog
 from .tool import Tool
 from .upload_job import UploadJob
@@ -49,6 +50,7 @@ __all__ = [
     "Prompt",
     "PromptVersion",
     "Relationship",
+    "AuditEvent",
     "RetrievalLog",
     "RetrievalResultLog",
     "Tool",

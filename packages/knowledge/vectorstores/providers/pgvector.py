@@ -6,6 +6,9 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from packages.domain.enums.document_status import DocumentStatus
+from packages.domain.models.document import Document
+from packages.domain.models.document_chunk import DocumentChunk
 from packages.domain.models.embedding import Embedding
 from packages.knowledge.vectorstores.base import BaseVectorStore
 from packages.knowledge.vectorstores.schema import (
@@ -13,6 +16,21 @@ from packages.knowledge.vectorstores.schema import (
     SearchOptions,
     SearchResult,
 )
+
+
+def _retrievable_chunk():
+    """
+    Only chunks of a live, fully ingested document may be returned by retrieval: not a superseded
+    version, not a document still processing or failed, not a deleted one. Applied inside the
+    search query itself so excluded content never leaves the database.
+    """
+    return Embedding.chunk.has(
+        DocumentChunk.document.has(
+            (Document.is_current.is_(True))
+            & (Document.status == DocumentStatus.READY)
+            & (Document.is_deleted.is_(False))
+        )
+    )
 
 
 class PostgresVectorStore(BaseVectorStore):
@@ -53,6 +71,7 @@ class PostgresVectorStore(BaseVectorStore):
             .where(
                 Embedding.tenant_id == filters.tenant_id,
                 Embedding.model_profile_id == filters.model_profile_id,
+                _retrievable_chunk(),
             )
         )
 
@@ -129,6 +148,7 @@ class PostgresVectorStore(BaseVectorStore):
             .where(
                 Embedding.tenant_id == filters.tenant_id,
                 Embedding.model_profile_id == filters.model_profile_id,
+                _retrievable_chunk(),
             )
         )
 

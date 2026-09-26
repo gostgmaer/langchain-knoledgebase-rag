@@ -182,6 +182,10 @@ class Message(BaseModel):
         String(100),
     )
 
+    # The retrieval that supplied this answer's context (see RetrievalLog); NULL when the answer
+    # used no retrieval.
+    retrieval_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSONB,

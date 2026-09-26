@@ -9,6 +9,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from packages.domain.enums.document_status import DocumentStatus
 from packages.domain.models.document import Document
 from packages.infrastructure.repositories.base import BaseRepository
 
@@ -46,6 +47,10 @@ class DocumentRepository(BaseRepository[Document]):
             .where(
                 Document.knowledge_base_id == knowledge_base_id,
                 Document.checksum == checksum,
+                # A failed attempt must not block a retry, and a superseded version must not
+                # swallow a re-upload of its old content (that is a new version, not a duplicate).
+                Document.is_current.is_(True),
+                Document.status != DocumentStatus.FAILED,
             )
         )
 

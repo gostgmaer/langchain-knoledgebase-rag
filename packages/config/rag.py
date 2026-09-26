@@ -66,3 +66,8 @@ class RAGSettings(BaseSettings):
     # not re-embedded in this many days becomes a candidate for the
     # weekly reindex_stale_documents_job.
     reindex_stale_after_days: int = Field(default=90, alias="REINDEX_STALE_AFTER_DAYS")
+
+    # Data retention. Retrieval logs and audit events are deleted once older than this;
+    # 0 disables the purge for that table (keep forever).
+    retention_retrieval_log_days: int = Field(default=90, alias="RETENTION_RETRIEVAL_LOG_DAYS")
+    retention_audit_days: int = Field(default=365, alias="RETENTION_AUDIT_DAYS")

@@ -1,14 +1,17 @@
 # Document chunk model
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
+    DateTime,
     Index,
     Integer,
+    String,
     Text,
     UniqueConstraint,
 )
@@ -99,6 +102,16 @@ class DocumentChunk(BaseModel):
     end_offset: Mapped[int | None] = mapped_column(
         Integer,
     )
+
+    # --- Provenance (NULL = not recorded, for chunks stored before these existed).
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    chunking_strategy: Mapped[str | None] = mapped_column(String(32))
+    chunking_version: Mapped[str | None] = mapped_column(String(32))
+    embedding_provider: Mapped[str | None] = mapped_column(String(64))
+    embedding_model: Mapped[str | None] = mapped_column(String(128))
+    embedding_dimensions: Mapped[int | None] = mapped_column(Integer)
+    pipeline_version: Mapped[str | None] = mapped_column(String(64))
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",

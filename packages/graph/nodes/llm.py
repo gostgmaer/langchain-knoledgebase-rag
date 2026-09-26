@@ -58,7 +58,9 @@ class LLMNode:
         )
 
         if state.get("stream"):
-            response = await self._stream(request, state.get("citations") or [])
+            response = await self._stream(
+                request, state.get("citations") or [], state.get("retrieval_id")
+            )
         else:
             response = await self._chat.chat(request)
 
@@ -70,7 +72,7 @@ class LLMNode:
 
         return state
 
-    async def _stream(self, request: ChatRequest, citations: list):
+    async def _stream(self, request: ChatRequest, citations: list, retrieval_id=None):
         """
         Streams the LLM response token-by-token, pushing each chunk to
         the graph's stream writer (surfaced over HTTP via
@@ -126,6 +128,7 @@ class LLMNode:
             {
                 "type": "citations",
                 "citations": citations,
+                "retrieval_id": str(retrieval_id) if retrieval_id else None,
             }
         )
 
