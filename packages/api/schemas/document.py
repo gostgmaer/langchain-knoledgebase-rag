@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -29,8 +30,23 @@ class DocumentUploadResponseSchema(BaseModel):
     """Poll GET /api/v1/upload-jobs/{id} for real pipeline progress."""
 
 
+class ChunkingInfoSchema(BaseModel):
+    """How a document was split, recorded at ingestion (Document.metadata_["chunking"])."""
+
+    requested: str | None = None
+    """What the uploader asked for: auto | recursive | markdown | semantic."""
+    strategy: str | None = None
+    """What actually ran. Differs from `requested` when it was "auto"."""
+    splitter: str | None = None
+    """The splitter class that produced the chunks."""
+    chunk_size: int | None = None
+    chunk_overlap: int | None = None
+    chunk_count: int | None = None
+    total_tokens: int | None = None
+
+
 class DocumentResponseSchema(BaseModel):
-    """A single document's metadata (not its chunk content — see docs/ARCHITECTURE_TUTORIAL.md §5.2)."""
+    """A single document's metadata (not its chunk content — see GET /documents/{id}/chunks)."""
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -49,6 +65,45 @@ class DocumentResponseSchema(BaseModel):
     is_current: bool
     created_at: datetime
     updated_at: datetime
+
+    chunk_count: int = 0
+    """Primary chunks stored for this document (counted from the database)."""
+    representation_count: int = 0
+    """Extra retrieval representations (document summary, graph) - not chunks of the text."""
+    chunking: ChunkingInfoSchema | None = None
+    """None for documents ingested before chunking was recorded."""
+    document_metadata: dict[str, Any] = {}
+    """Everything else stored on the document row (upload metadata, chunking record...)."""
+
+
+class DocumentChunkResponseSchema(BaseModel):
+    """One stored chunk with everything the database keeps about it."""
+
+    id: UUID
+    chunk_index: int
+    """0.. for the document's text chunks; negative for summary/graph representations."""
+    kind: str
+    """"chunk", or the representation type ("summary", "graph"...)."""
+    page_number: int | None
+    section: str | None
+    content: str
+    token_count: int
+    character_count: int
+    start_offset: int | None
+    end_offset: int | None
+    metadata: dict[str, Any]
+    """The chunk's full metadata: source, page, headings, chunking strategy, ingested_at..."""
+
+
+class DocumentChunkListResponseSchema(BaseModel):
+    """A page of one document's chunks."""
+
+    document_id: UUID
+    total: int
+    limit: int
+    offset: int
+    chunking: ChunkingInfoSchema | None
+    chunks: list[DocumentChunkResponseSchema]
 
 
 class DocumentListResponseSchema(BaseModel):

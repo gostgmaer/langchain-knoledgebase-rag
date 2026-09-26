@@ -1,6 +1,7 @@
 # Router documents
 from __future__ import annotations
 
+import re
 from io import BytesIO
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -18,6 +19,9 @@ from packages.api.dependencies import (
 )
 from packages.api.responses import ApiResponse
 from packages.api.schemas.document import (
+    ChunkingInfoSchema,
+    DocumentChunkListResponseSchema,
+    DocumentChunkResponseSchema,
     DocumentListResponseSchema,
     DocumentResponseSchema,
     DocumentUploadResponseSchema,
@@ -201,25 +205,95 @@ async def upload_document(
     )
 
 
+# A scratch file is saved as "<uuid4>_<original name>".
+_SCRATCH_PREFIX = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_")
+
+
+def _public_chunk_metadata(metadata: dict | None, document_name: str) -> dict:
+    """
+    Chunk metadata for display. Documents ingested before the loader stopped recording its scratch
+    path have `source`/`filename` like "storage/temp/<uuid>_name.pdf": show the document's name
+    instead of leaking the server's file layout.
+    """
+    cleaned = dict(metadata or {})
+    for key in ("source", "filename"):
+        value = cleaned.get(key)
+        if isinstance(value, str) and (
+            "storage/temp" in value
+            or "\\" in value
+            or value.startswith("/")
+            or _SCRATCH_PREFIX.match(value)
+        ):
+            cleaned[key] = document_name
+    return cleaned
+
+
+def _chunking_info(metadata: dict | None) -> ChunkingInfoSchema | None:
+    record = (metadata or {}).get("chunking")
+    return ChunkingInfoSchema.model_validate(record) if isinstance(record, dict) else None
+
+
+async def _document_responses(container: ApplicationContainer, rows) -> list[DocumentResponseSchema]:
+    """Document rows -> API objects, with real chunk counts from one grouped query."""
+    counts = await container.repositories.document_chunk().count_primary_by_documents(
+        [d.id for d in rows],
+    )
+
+    responses = []
+    for d in rows:
+        primary, extra = counts.get(d.id, (0, 0))
+        responses.append(
+            DocumentResponseSchema(
+                id=d.id,
+                knowledge_base_id=d.knowledge_base_id,
+                title=d.title,
+                description=d.description,
+                file_id=d.file_id,
+                file_name=d.file_name,
+                mime_type=d.mime_type,
+                extension=d.extension,
+                size_bytes=d.size_bytes,
+                status=d.status.value if hasattr(d.status, "value") else str(d.status),
+                is_current=d.is_current,
+                created_at=d.created_at,
+                updated_at=d.updated_at,
+                chunk_count=primary,
+                representation_count=extra,
+                chunking=_chunking_info(d.metadata_),
+                document_metadata=d.metadata_ or {},
+            )
+        )
+    return responses
+
+
 @router.get(
     "",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[DocumentListResponseSchema],
     summary="List documents",
-    description="Lists a tenant's documents, most recently ingested first, across every knowledge base it owns.",
+    description=(
+        "Lists a tenant's documents, most recently ingested first, across every knowledge base it owns "
+        "(or one, with `knowledge_base_id`). Each document includes how it was chunked and its chunk count."
+    ),
 )
 async def list_documents(
     request: Request,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    knowledge_base_id: UUID | None = Query(default=None),
     container: ApplicationContainer = Depends(get_scoped_container),
 ):
     tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
 
     documents = container.repositories.document()
 
-    total = await documents.count_by_tenant(tenant_id)
-    rows = await documents.list_by_tenant(tenant_id, limit=limit, offset=offset)
+    total = await documents.count_by_tenant(tenant_id, knowledge_base_id)
+    rows = await documents.list_by_tenant(
+        tenant_id,
+        limit=limit,
+        offset=offset,
+        knowledge_base_id=knowledge_base_id,
+    )
 
     return ApiResponse(
         message="Documents retrieved.",
@@ -227,7 +301,7 @@ async def list_documents(
             total=total,
             limit=limit,
             offset=offset,
-            documents=[DocumentResponseSchema.model_validate(d) for d in rows],
+            documents=await _document_responses(container, rows),
         ),
     )
 
@@ -257,7 +331,69 @@ async def get_document(
 
     return ApiResponse(
         message="Document retrieved.",
-        data=DocumentResponseSchema.model_validate(document),
+        data=(await _document_responses(container, [document]))[0],
+    )
+
+
+@router.get(
+    "/{document_id}/chunks",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[DocumentChunkListResponseSchema],
+    summary="List a document's chunks",
+    description=(
+        "Every stored chunk of one document, in reading order, with its full text and all "
+        "metadata (page, section, heading path, chunking strategy, offsets, token and character "
+        "counts, ingestion time...). The document's summary/graph representations, which have a "
+        "negative chunk_index, come first and are labelled by `kind`."
+    ),
+)
+async def list_document_chunks(
+    document_id: UUID,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    documents = container.repositories.document()
+    document = await documents.get(document_id)
+
+    if document is None or document.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    chunks = container.repositories.document_chunk()
+    total = await chunks.count_by_document(document_id)
+    rows = await chunks.list_page_by_document(document_id, limit=limit, offset=offset)
+
+    return ApiResponse(
+        message="Chunks retrieved.",
+        data=DocumentChunkListResponseSchema(
+            document_id=document_id,
+            total=total,
+            limit=limit,
+            offset=offset,
+            chunking=_chunking_info(document.metadata_),
+            chunks=[
+                DocumentChunkResponseSchema(
+                    id=c.id,
+                    chunk_index=c.chunk_index,
+                    kind=str((c.metadata_ or {}).get("representation_type") or "chunk"),
+                    page_number=c.page_number,
+                    section=c.section,
+                    content=c.content,
+                    token_count=c.token_count,
+                    character_count=c.character_count,
+                    start_offset=c.start_offset,
+                    end_offset=c.end_offset,
+                    metadata=_public_chunk_metadata(c.metadata_, document.file_name),
+                )
+                for c in rows
+            ],
+        ),
     )
 
 

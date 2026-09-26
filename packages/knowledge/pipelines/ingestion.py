@@ -147,6 +147,12 @@ class IngestionPipeline:
 
             await self.vector_store.store.add_many(embeddings)
 
+            # New dict (not an in-place edit) so SQLAlchemy sees the JSONB column change.
+            document.metadata_ = {
+                **(document.metadata_ or {}),
+                "chunking": self._chunking_summary(request, chunked_documents, embeddings),
+            }
+
             await self._store_summary_representation(
                 chunked_documents,
                 request,
@@ -230,6 +236,9 @@ class IngestionPipeline:
             )
             scratch_path.write_bytes(content)
 
+            # Re-chunk with the strategy the user originally asked for; without this a
+            # re-index silently fell back to "auto" and changed how the document was split.
+            previous_choice = ((document.metadata_ or {}).get("chunking") or {}).get("requested")
             request = IngestionRequest(
                 tenant_id=document.tenant_id,
                 model_profile_id=profile.id,
@@ -237,6 +246,7 @@ class IngestionPipeline:
                 file=scratch_path,
                 file_id=document.file_id,
                 document_name=document.file_name,
+                chunking_strategy=previous_choice if previous_choice in ("auto", "recursive", "markdown", "semantic") else "auto",
             )
 
             await self.vector_store.store.delete_document(
@@ -251,6 +261,10 @@ class IngestionPipeline:
 
             await self.vector_store.store.add_many(embeddings)
 
+            document.metadata_ = {
+                **(document.metadata_ or {}),
+                "chunking": self._chunking_summary(request, chunked_documents, embeddings),
+            }
             document.checksum = self._checksum(scratch_path)
             document.status = DocumentStatus.READY
             await self.document_repository.session.flush()
@@ -370,6 +384,10 @@ class IngestionPipeline:
 
         ingested_at = datetime.now(UTC).isoformat()
         for document in documents:
+            # The loader records the scratch file's path ("storage/temp/<uuid>_name.ext"), which is an
+            # internal detail that changes every run. Record the document's real name instead.
+            document.metadata["source"] = request.document_name
+            document.metadata["filename"] = request.document_name
             document.metadata.setdefault("ingested_at", ingested_at)
 
         return documents
@@ -389,7 +407,45 @@ class IngestionPipeline:
             strategy=request.chunking_strategy,
             file_extension=request.file.suffix.lower(),
         )
-        return await splitter.split(documents)
+        chunks = await splitter.split(documents)
+
+        # Stamp every chunk with how it was produced, so the metadata a user inspects in the
+        # UI says which method made it (not just what the splitter happened to leave behind).
+        effective = self.splitter_factory.resolve(
+            strategy=request.chunking_strategy,
+            file_extension=request.file.suffix.lower(),
+        )
+        for chunk in chunks:
+            chunk.metadata["chunking_strategy"] = effective
+            chunk.metadata["chunking_requested"] = request.chunking_strategy
+            chunk.metadata["chunk_total"] = len(chunks)
+
+        return chunks
+
+    def _chunking_summary(
+        self,
+        request: IngestionRequest,
+        chunks: list[LangChainDocument],
+        embeddings: list[Embedding],
+    ) -> dict[str, object]:
+        """Document-level record of how it was chunked (stored under metadata_["chunking"])."""
+        extension = request.file.suffix.lower()
+        splitter = self.splitter_factory.create(
+            strategy=request.chunking_strategy,
+            file_extension=extension,
+        )
+        return {
+            "requested": request.chunking_strategy,
+            "strategy": self.splitter_factory.resolve(
+                strategy=request.chunking_strategy,
+                file_extension=extension,
+            ),
+            "splitter": type(splitter).__name__,
+            "chunk_size": settings.rag.chunk_size,
+            "chunk_overlap": settings.rag.chunk_overlap,
+            "chunk_count": len(chunks),
+            "total_tokens": sum(e.chunk.token_count for e in embeddings),
+        }
 
     async def _embed(
         self,

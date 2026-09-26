@@ -101,6 +101,45 @@ export interface DocumentRecord {
   is_current: boolean;
   created_at: string;
   updated_at: string;
+  chunk_count: number;
+  /** Extra retrieval representations (summary/graph); not chunks of the text. */
+  representation_count: number;
+  /** null for documents ingested before chunking was recorded. */
+  chunking: ChunkingInfo | null;
+  document_metadata: Record<string, unknown>;
+}
+
+export interface ChunkingInfo {
+  requested: string | null;
+  strategy: string | null;
+  splitter: string | null;
+  chunk_size: number | null;
+  chunk_overlap: number | null;
+  chunk_count: number | null;
+  total_tokens: number | null;
+}
+
+export interface DocumentChunk {
+  id: string;
+  chunk_index: number;
+  kind: string;
+  page_number: number | null;
+  section: string | null;
+  content: string;
+  token_count: number;
+  character_count: number;
+  start_offset: number | null;
+  end_offset: number | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface DocumentChunkListResponse {
+  document_id: string;
+  total: number;
+  limit: number;
+  offset: number;
+  chunking: ChunkingInfo | null;
+  chunks: DocumentChunk[];
 }
 
 export interface DocumentListResponse extends Page<DocumentRecord> {

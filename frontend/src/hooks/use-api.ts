@@ -90,12 +90,22 @@ export function useSendChat() {
 // Documents
 // ---------------------------------------------------------------
 
-export function useDocuments() {
+export function useDocuments(knowledgeBaseId?: string) {
   const identity = useIdentity();
   return useQuery({
-    queryKey: ["documents", identity?.tenantId],
-    queryFn: () => documents.list(identity!),
+    queryKey: ["documents", identity?.tenantId, knowledgeBaseId ?? null],
+    queryFn: () => documents.list(identity!, knowledgeBaseId),
     enabled: !!identity,
+  });
+}
+
+export function useDocumentChunks(id: string | null, limit: number, offset: number) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["document-chunks", identity?.tenantId, id, limit, offset],
+    queryFn: () => documents.chunks(identity!, id!, limit, offset),
+    enabled: !!identity && !!id,
+    placeholderData: (previous) => previous,
   });
 }
 

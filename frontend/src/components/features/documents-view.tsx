@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 
 import { UploadDropzone } from "@/components/documents/upload-dropzone";
+import { ChunkingBadge } from "@/components/documents/chunking-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -51,6 +52,8 @@ export function DocumentsView({ basePath }: { basePath: string }) {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Chunking</TableHead>
+              <TableHead>Chunks</TableHead>
               <TableHead>Version</TableHead>
               <TableHead>Size</TableHead>
               <TableHead>Uploaded</TableHead>
@@ -68,6 +71,10 @@ export function DocumentsView({ basePath }: { basePath: string }) {
                 <TableCell>
                   <StatusBadge status={doc.status} />
                 </TableCell>
+                <TableCell>
+                  <ChunkingBadge chunking={doc.chunking} />
+                </TableCell>
+                <TableCell className="text-neutral-500">{doc.chunk_count}</TableCell>
                 <TableCell>
                   {doc.is_current ? (
                     <Badge variant="success">current</Badge>

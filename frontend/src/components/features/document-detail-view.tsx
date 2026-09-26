@@ -3,6 +3,9 @@
 import { QueryError } from "@/components/shared/query-error";
 import { useRouter } from "next/navigation";
 
+import { ChunkingCard } from "@/components/documents/chunking-card";
+import { ChunksPanel } from "@/components/documents/chunks-panel";
+import { JsonBlock } from "@/components/documents/json-block";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +56,8 @@ export function DocumentDetailView({ documentId, basePath }: { documentId: strin
           </CardContent>
         </Card>
 
+        <ChunkingCard doc={doc} />
+
         <Card>
           <CardHeader>
             <CardTitle>Version history</CardTitle>
@@ -82,6 +87,17 @@ export function DocumentDetailView({ documentId, basePath }: { documentId: strin
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>Document metadata</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <JsonBlock value={doc.document_metadata} />
+        </CardContent>
+      </Card>
+
+      <ChunksPanel documentId={documentId} />
     </div>
   );
 }

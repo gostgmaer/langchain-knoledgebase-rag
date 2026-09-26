@@ -12,6 +12,7 @@ import type {
   CreateModelProfileRequest,
   CreatePromptRequest,
   CreateToolRequest,
+  DocumentChunkListResponse,
   DocumentListResponse,
   DocumentRecord,
   DocumentUploadResponse,
@@ -76,8 +77,14 @@ export const conversations = {
 // ---------------------------------------------------------------
 
 export const documents = {
-  list: (identity: Identity) =>
-    apiFetch<DocumentListResponse>("/documents", identity, { query: PAGE }),
+  list: (identity: Identity, knowledgeBaseId?: string) =>
+    apiFetch<DocumentListResponse>("/documents", identity, {
+      query: { ...PAGE, limit: 200, knowledge_base_id: knowledgeBaseId },
+    }),
+  chunks: (identity: Identity, id: string, limit: number, offset: number) =>
+    apiFetch<DocumentChunkListResponse>(`/documents/${id}/chunks`, identity, {
+      query: { limit, offset },
+    }),
   get: (identity: Identity, id: string) =>
     apiFetch<DocumentRecord>(`/documents/${id}`, identity),
   versions: (identity: Identity, id: string) =>

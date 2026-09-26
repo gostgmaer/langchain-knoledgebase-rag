@@ -4,6 +4,7 @@ import { Library, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { KnowledgeBaseDocuments } from "@/components/documents/knowledge-base-documents";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -80,6 +81,9 @@ export function KnowledgeBasesView() {
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
+              </CardContent>
+              <CardContent>
+                <KnowledgeBaseDocuments knowledgeBaseId={kb.id} />
               </CardContent>
             </Card>
           ))}
