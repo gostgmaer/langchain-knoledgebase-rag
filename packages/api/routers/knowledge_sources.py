@@ -10,12 +10,14 @@ their status is readable.
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import case, func, select
 
 from packages.api.dependencies import (
@@ -63,9 +65,11 @@ from packages.connectors.credentials import CredentialConfigurationError, Creden
 from packages.connectors.http import AuthenticationFailed, ConnectorHttpError
 from packages.connectors.models import DiscoveryContext
 from packages.connectors.registry import default_registry
+from packages.connectors import webhooks
 from packages.connectors.scheduling import (
     SourceNotSyncable,
     SyncAlreadyRunning,
+    add_pending_targets,
     create_run,
     dispatch,
     request_cancel,
@@ -740,24 +744,40 @@ async def source_permissions(source_id: UUID, request: Request, container: Appli
 
 
 # ====================================================================== webhook
-@webhook_router.post("/sources/{source_id}", status_code=status.HTTP_202_ACCEPTED, summary="Change notification from the source: queues a sync")
+@webhook_router.post("/sources/{source_id}", status_code=status.HTTP_202_ACCEPTED, summary="Change notification from the source")
 async def source_webhook(source_id: UUID, request: Request, background_tasks: BackgroundTasks, container: ApplicationContainer = Depends(get_scoped_container)):
     """
-    Authenticated by the per-source secret (X-Webhook-Secret), not by a user token: the caller is the external
-    system. A notification queues a normal sync (deduplicated: nothing happens if one is already running), so a
-    burst of events becomes one sync rather than a storm.
+    Authenticated by the per-source secret (`X-Webhook-Secret`, or `clientState` for Microsoft Graph), not by a user
+    token: the caller is the external system. Body (all optional): `{"external_ids": [...]}` refreshes just those items
+    (Confluence's `{"page": {"id": ...}}` is understood too); anything else queues a normal incremental sync. A burst is
+    collapsed: while a sync runs, named items wait and are applied right after it. The same "404" answers "no such
+    source", "webhooks off", "paused" and "wrong secret".
     """
-    supplied = request.headers.get("x-webhook-secret", "")
+    raw = await request.body()
+    try:
+        body = json.loads(raw[:65536]) if raw else {}
+    except ValueError:
+        body = {}
     session = container.database.session()
     source = await session.get(KnowledgeSource, source_id)
-    expected = source.webhook_secret_hash if source is not None and not source.is_deleted else None
-    # Same answer for "no such source", "webhooks off" and "wrong secret": nothing to enumerate.
-    if not expected or not supplied or not secrets.compare_digest(_webhook_hash(supplied), expected) or source.status != "active":
+
+    # Microsoft Graph proves it owns the endpoint by sending a token to echo back when a subscription is created.
+    token = webhooks.safe_validation_token(request.query_params.get("validationToken"))
+    if token and source is not None and not source.is_deleted and source.webhook_secret_hash:
+        return PlainTextResponse(token, status_code=200)
+
+    if source is None or source.is_deleted or source.status != "active" or not webhooks.authenticated(source.webhook_secret_hash, request.headers.get("x-webhook-secret"), body):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found.")
+    tenant_id, source_type = source.tenant_id, source.type
     await session.commit()
+
+    ids = webhooks.extract_external_ids(source_type, body)
     try:
-        run_id = await create_run(container, source_id, source.tenant_id, trigger="webhook", actor_id=None)
+        run_id = await create_run(container, source_id, tenant_id, trigger="webhook", actor_id=None, targets=ids or None)
     except SyncAlreadyRunning:
+        if ids:
+            waiting = await add_pending_targets(container, source_id, tenant_id, ids)
+            return {"status": "queued_after_current_sync", "waiting": waiting}
         return {"status": "already_running"}
     await dispatch(container, background_tasks, source_id, run_id)
-    return {"status": "queued", "sync_id": str(run_id)}
+    return {"status": "queued", "sync_id": str(run_id), "items": len(ids) or None}

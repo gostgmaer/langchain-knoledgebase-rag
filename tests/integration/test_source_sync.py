@@ -60,6 +60,8 @@ class World:
         self.changes: list[ExternalChange] | None = None
         self.cancel_after: int | None = None
         self.state_out: dict = {}
+        self.no_single = False
+        self.on_discover = None
 
     def put(self, external_id: str, *, title: str | None = None, text: str = "body", version: str = "1", permissions=None, url: str | None = None):
         self.items[external_id] = {
@@ -89,6 +91,8 @@ class ScriptedConnector(BaseKnowledgeConnector):
     async def discover(self, context):
         if self.world.discovery_error is not None:
             raise self.world.discovery_error
+        if self.world.on_discover is not None:
+            await self.world.on_discover()
         for count, external_id in enumerate(list(self.world.items)):
             if self.world.cancel_after is not None and count == self.world.cancel_after:
                 async with request_scoped_session(self.container) as session:  # the admin presses "stop"
@@ -108,6 +112,11 @@ class ScriptedConnector(BaseKnowledgeConnector):
 
     async def get_permissions(self, document):
         return self.world.items[document.external_id]["permissions"]
+
+    async def get_external_document(self, external_id):
+        if self.world.no_single:
+            raise NotImplementedError
+        return self._doc(external_id) if external_id in self.world.items else None
 
 
 class FakePipeline:
@@ -155,9 +164,9 @@ async def env(container, world) -> AsyncIterator[dict]:
 
     engine = SyncEngine(container, registry=registry, credentials=SourceCredentialService(CredentialCipher(TEST_KEY)))
 
-    async def sync(**_) -> tuple[str, UUID]:
+    async def sync(targets=None, **_) -> tuple[str, UUID]:
         async with request_scoped_session(container) as session:
-            run = SourceSyncRun(tenant_id=tenant_id, source_id=source_id, trigger="manual", status="queued")
+            run = SourceSyncRun(tenant_id=tenant_id, source_id=source_id, trigger="webhook" if targets else "manual", status="queued", stats={"targets": targets} if targets else {})
             session.add(run)
             await session.flush()
             run_id = run.id
@@ -419,7 +428,7 @@ async def test_cancellation_stops_between_documents_and_skips_the_removal_sweep(
 async def test_incremental_changes_are_applied_and_the_cursor_only_advances_on_success(env, world):
     world.put("a"), world.put("b")
     await env["sync"]()
-    assert (await env["source"]()).sync_state == {"cursor": "after-full-listing"}
+    assert (await env["source"]()).sync_state["cursor"] == "after-full-listing"
 
     world.put("a", text="a changed", version="2")
     world.changes = [ExternalChange("updated", "a", world._doc_for("a") if hasattr(world, "_doc_for") else None), ExternalChange("deleted", "b")]
@@ -508,3 +517,100 @@ async def test_credentials_are_bound_to_their_own_source_and_tenant(env):
         await service.revoke(session, mine)
         assert await service.load(session, mine) is None
         assert stored.ciphertext is None
+
+
+# ------------------------------------------------------------------ targeted notifications
+@pytest.mark.asyncio
+async def test_a_notification_refreshes_only_the_named_items(env, world):
+    for name in ("a", "b", "c"):
+        world.put(name, text=f"{name} v1", version="1")
+    await env["sync"]()
+    (await env["source"]()).sync_state  # baseline cursor
+    world.fetches.clear()
+
+    world.put("b", text="b v2", version="2")
+    status, run_id = await env["sync"](targets=["b"])
+    run = await env["run"](run_id)
+
+    assert status == "succeeded" and counts(run) == (1, 0, 1, 0, 0, 0)
+    assert world.fetches == ["b"]  # nothing else was even looked at
+    assert (await env["source"]()).sync_state["cursor"] == "after-full-listing"  # a shortcut never moves the sync cursor
+
+
+@pytest.mark.asyncio
+async def test_a_notification_about_a_removed_item_archives_it(env, world):
+    world.put("a"), world.put("b")
+    await env["sync"]()
+    del world.items["b"]
+
+    _, run_id = await env["sync"](targets=["b", "never-existed"])
+
+    assert counts(await env["run"](run_id)) == (2, 0, 0, 1, 0, 0)
+    assert {d.external_id: d for d in await env["docs"]()}["b"].status == DocumentStatus.ARCHIVED
+    assert {d.external_id: d for d in await env["docs"]()}["a"].status == DocumentStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_a_connector_that_cannot_fetch_one_item_falls_back_to_a_full_sync(env, world):
+    world.put("a"), world.put("b")
+    await env["sync"]()
+    world.put("a", text="changed", version="2")
+    world.no_single = True
+
+    _, run_id = await env["sync"](targets=["a"])
+
+    assert counts(await env["run"](run_id)) == (2, 0, 1, 0, 1, 0)  # both items were considered: a full pass
+
+
+@pytest.mark.asyncio
+async def test_notifications_that_arrive_during_a_sync_are_applied_right_after_it(env, world):
+    from packages.connectors.scheduling import add_pending_targets
+
+    world.put("a", version="1"), world.put("b", text="b v1", version="1")
+    await env["sync"]()
+
+    async def notification_arrives_mid_sync():
+        world.put("b", text="b v2", version="2")  # b changes while the sync is already running...
+        await add_pending_targets(env["container"], env["source_id"], env["tenant_id"], ["b"])  # ...and the source tells us
+
+    world.on_discover = notification_arrives_mid_sync
+    _, first_run = await env["sync"]()
+    world.on_discover = None
+
+    async with request_scoped_session(env["container"]) as session:
+        runs = (await session.execute(select(SourceSyncRun).where(SourceSyncRun.source_id == env["source_id"]).order_by(SourceSyncRun.created_at))).scalars().all()
+    follow_up = runs[-1]
+    assert follow_up.id != first_run and follow_up.trigger == "webhook" and follow_up.stats["targets"] == ["b"]
+    assert follow_up.status == "succeeded"
+    versions = [d.external_version for d in await env["docs"]() if d.external_id == "b"]
+    assert versions == ["1", "2"]
+    assert (await env["source"]()).sync_state.get("pending_targets") == []  # nothing left waiting
+
+
+# ------------------------------------------------------------------ scale
+@pytest.mark.asyncio
+async def test_a_large_source_syncs_correctly_and_a_repeat_sync_is_cheap(env, world):
+    import os
+    import time
+
+    n = int(os.environ.get("LOAD_ITEMS", "300"))
+    for i in range(n):
+        world.put(f"item-{i:05d}", text=f"document {i} body", version="1")
+
+    started = time.monotonic()
+    status, run_id = await env["sync"]()
+    first = time.monotonic() - started
+    assert status == "succeeded" and counts(await env["run"](run_id)) == (n, n, 0, 0, 0, 0)
+
+    world.fetches.clear()
+    started = time.monotonic()
+    _, run_id = await env["sync"]()
+    repeat = time.monotonic() - started
+    assert counts(await env["run"](run_id)) == (n, 0, 0, 0, n, 0) and world.fetches == []  # nothing fetched or embedded again
+
+    world.put("item-00007", text="changed", version="2")
+    del world.items["item-00042"]
+    _, run_id = await env["sync"]()
+    assert counts(await env["run"](run_id)) == (n - 1, 0, 1, 1, n - 2, 0)
+
+    print(f"LOAD {n} items: first sync {first:.1f}s ({n / first:.0f}/s), unchanged repeat {repeat:.1f}s ({n / repeat:.0f}/s)")

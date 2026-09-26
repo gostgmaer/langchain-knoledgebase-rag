@@ -127,6 +127,7 @@ class SourceSnapshot:
     sync_mode: str
     sync_interval_minutes: int | None
     previous_status: str
+    targets: list[str] | None = None
 
 
 class SyncEngine:
@@ -142,7 +143,7 @@ class SyncEngine:
 
     # ================================================================== public
 
-    async def run(self, source_id: UUID, run_id: UUID) -> str:
+    async def run(self, source_id: UUID, run_id: UUID, *, _depth: int = 0) -> str:
         """Runs one queued sync to completion. Idempotent: a run that is not `queued` is left alone."""
         started = time.monotonic()
         snapshot = await self._begin(source_id, run_id)
@@ -189,7 +190,25 @@ class SyncEngine:
         elif status == "partial" and summary is None:
             summary = f"{counters.failed} document(s) failed."
         await self._finish(snapshot, run_id, status, summary, counters, new_state, health, time.monotonic() - started, auth_failed)
+        if status in ("succeeded", "partial") and _depth < 5:
+            await self._drain_pending(snapshot, _depth)
         return status
+
+    async def _drain_pending(self, snapshot: SourceSnapshot, depth: int) -> None:
+        """Change notifications that arrived during this sync are applied now, as one targeted run."""
+        from packages.connectors.scheduling import SyncAlreadyRunning, create_run, take_pending_targets
+
+        ids = await take_pending_targets(self._container, snapshot.id)
+        if not ids:
+            return
+        try:
+            run_id = await create_run(self._container, snapshot.id, snapshot.tenant_id, trigger="webhook", actor_id=None, targets=ids)
+        except SyncAlreadyRunning:
+            from packages.connectors.scheduling import add_pending_targets
+
+            await add_pending_targets(self._container, snapshot.id, snapshot.tenant_id, ids)  # someone else is running: try later
+            return
+        await self.run(snapshot.id, run_id, _depth=depth + 1)
 
     # ================================================================== phases
 
@@ -215,6 +234,7 @@ class SyncEngine:
                 knowledge_base_id=source.knowledge_base_id, common=common, specific=specific,
                 sync_state=dict(source.sync_state or {}), sync_mode=source.sync_mode,
                 sync_interval_minutes=source.sync_interval_minutes, previous_status=source.status,
+                targets=list((run.stats or {}).get("targets") or []) or None,
             )
 
     async def _build_connector(self, snapshot: SourceSnapshot) -> BaseKnowledgeConnector:
@@ -245,6 +265,12 @@ class SyncEngine:
 
         context = DiscoveryContext(source_id=snapshot.id, tenant_id=snapshot.tenant_id, sync_id=run_id, state=state, lookup=lookup, cancelled=cancelled)
 
+        if snapshot.targets:
+            handled = await self._sync_targets(snapshot, run_id, connector, counters)
+            if handled is not None:
+                return handled
+            snapshot.targets = None  # the connector cannot fetch single items: do a normal sync instead
+
         changes = await connector.get_changes(context) if connector.supports_changes and state else None
         semaphore = asyncio.Semaphore(settings.rag.connector_sync_concurrency)
         pending: set[asyncio.Task] = set()
@@ -272,6 +298,7 @@ class SyncEngine:
                     if await cancelled():
                         break
                     if change.kind == "deleted":
+                        counters.discovered += 1
                         await self._archive_by_external_id(snapshot, run_id, change.external_id, counters)
                     elif change.document is not None:
                         await submit(change.document)
@@ -294,6 +321,41 @@ class SyncEngine:
         # Delta tokens etc. advance only when everything succeeded, so a failed item is replayed next time.
         keep_new_state = discovery_complete and not counters.failed
         return (context.state if keep_new_state else dict(snapshot.sync_state)), held_back
+
+    async def _sync_targets(self, snapshot: SourceSnapshot, run_id: UUID, connector: BaseKnowledgeConnector, counters: Counters) -> tuple[dict[str, Any], str | None] | None:
+        """
+        Refreshes just the items a change notification named. Items the source no longer has are archived. Returns
+        None when the connector cannot fetch one item by id (the caller then runs a full sync). The sync cursor and
+        the removal sweep are untouched: this is a shortcut, not a replacement for full syncs.
+        """
+        semaphore = asyncio.Semaphore(settings.rag.connector_sync_concurrency)
+
+        async def one(external_id: str) -> None:
+            async with semaphore:
+                try:
+                    document = await connector.get_external_document(external_id)
+                except NotImplementedError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - one bad id must not stop the others
+                    counters.add_error(external_id, None, "lookup", f"{type(exc).__name__}: {exc}")
+                    return
+                counters.discovered += 1
+                if document is None:
+                    await self._archive_by_external_id(snapshot, run_id, external_id, counters)
+                else:
+                    await self._process_one(snapshot, run_id, connector, document, counters)
+
+        ids = list(snapshot.targets or [])
+        try:
+            await one(ids[0])
+        except NotImplementedError:
+            return None
+        remaining = ids[1:]
+        results = await asyncio.gather(*(one(i) for i in remaining), return_exceptions=True)
+        for result in results:
+            if isinstance(result, NotImplementedError):
+                return None
+        return dict(snapshot.sync_state), None
 
     # ------------------------------------------------------------------ one document
 
@@ -592,12 +654,13 @@ class SyncEngine:
             if run is not None:
                 self._copy_counters(run, c)
                 run.status, run.completed_at, run.error_summary = status, now, summary
-                run.stats = {"duration_seconds": round(seconds, 2), "renamed": c.renamed, "quarantined": c.quarantined, "unmapped_principals": c.unmapped_principals, **{k: v for k, v in health.items() if k in ("requests", "retries", "errors", "rate_limited", "crawl")}}
+                run.stats = {**(run.stats or {}), "duration_seconds": round(seconds, 2), "renamed": c.renamed, "quarantined": c.quarantined, "unmapped_principals": c.unmapped_principals, **{k: v for k, v in health.items() if k in ("requests", "retries", "errors", "rate_limited", "crawl")}}
             if source is not None:
                 source.last_sync_status = status
                 if status in ("succeeded", "partial"):
                     source.last_successful_sync_at = now
-                    source.sync_state = state
+                    # Keep notifications that arrived while this ran (they live in sync_state too).
+                    source.sync_state = {**state, "pending_targets": (source.sync_state or {}).get("pending_targets", [])}
                     if source.status in ("error", "disconnected"):
                         source.status = "active"
                 elif status == "failed":
@@ -610,7 +673,7 @@ class SyncEngine:
                     "last_sync_status": status,
                     "checked_at": now.isoformat(),
                 }
-                if source.sync_mode == "scheduled" and source.sync_interval_minutes and source.status == "active":
+                if source.sync_mode == "scheduled" and source.sync_interval_minutes and source.status == "active" and not snapshot.targets:
                     source.next_sync_at = now + timedelta(minutes=source.sync_interval_minutes)
 
         action = {"succeeded": "source.sync_completed", "partial": "source.sync_completed", "cancelled": "source.sync_stopped"}.get(status, "source.sync_failed")

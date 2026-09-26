@@ -140,11 +140,11 @@ class Document(BaseModel):
     visibility: Mapped[str | None] = mapped_column(String(16))
     # For "restricted" documents: besides administrators, members holding one of these role names,
     # or listed by user id, may retrieve it. Both NULL/empty = administrators only.
-    allowed_roles: Mapped[list[str] | None] = mapped_column(JSONB)
-    allowed_users: Mapped[list[str] | None] = mapped_column(JSONB)
+    allowed_roles: Mapped[list[str] | None] = mapped_column(JSONB(none_as_null=True))
+    allowed_users: Mapped[list[str] | None] = mapped_column(JSONB(none_as_null=True))
     document_type: Mapped[str | None] = mapped_column(String(64))
     category: Mapped[str | None] = mapped_column(String(64))
-    tags: Mapped[list[str] | None] = mapped_column(JSONB)
+    tags: Mapped[list[str] | None] = mapped_column(JSONB(none_as_null=True))
     """Last pipeline stage reached: extracting, cleaning, chunking, embedding, indexing, completed."""
     error_reason: Mapped[str | None] = mapped_column(Text)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

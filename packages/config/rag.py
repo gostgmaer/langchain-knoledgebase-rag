@@ -82,5 +82,9 @@ class RAGSettings(BaseSettings):
     # Let connectors call private-network addresses (self-hosted Confluence, an intranet site). OFF by default:
     # it is the switch that stops a source URL from reaching the platform's own network.
     connector_allow_private_hosts: bool = Field(default=False, alias="CONNECTOR_ALLOW_PRIVATE_HOSTS")
+    # Optional headless-browser service for JavaScript-rendered pages (Browserless-compatible: POST {url}/content).
+    # It must be network-isolated (pages it loads can request anything); unset = JavaScript rendering unavailable.
+    connector_render_url: str | None = Field(default=None, alias="CONNECTOR_RENDER_URL")
+    connector_render_token: str | None = Field(default=None, alias="CONNECTOR_RENDER_TOKEN")
     connector_sync_concurrency: int = Field(default=4, ge=1, le=16, alias="CONNECTOR_SYNC_CONCURRENCY")
     connector_max_error_details: int = Field(default=100, alias="CONNECTOR_MAX_ERROR_DETAILS")

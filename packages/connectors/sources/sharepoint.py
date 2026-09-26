@@ -200,6 +200,21 @@ class SharePointConnector(GraphConnector):
         data = await self.graph_bytes(f"/drives/{drive_id}/items/{item_id}/content")
         return ExternalDocumentContent(data=data, file_name=str(document.metadata.get("file_name") or document.title), mime_type=document.mime_type)
 
+    async def get_external_document(self, external_id: str) -> ExternalDocument | None:
+        drive_id, _, item_id = external_id.partition(":")
+        try:
+            item = await self.graph_get(f"/drives/{drive_id}/items/{item_id}")
+        except ConnectorHttpError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        if "deleted" in item or not self._wanted_item(item):
+            return None  # gone, or moved/renamed out of the selection
+        drives = {d["id"]: d.get("name") for d in await self._drives()}
+        if drive_id not in drives:
+            return None
+        return self._to_document(drive_id, drives[drive_id], item)
+
     async def get_document(self, external_id: str) -> ExternalDocumentContent:
         drive_id, _, item_id = external_id.partition(":")
         item = await self.graph_get(f"/drives/{drive_id}/items/{item_id}")

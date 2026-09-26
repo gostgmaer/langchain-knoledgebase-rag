@@ -38,7 +38,7 @@ def _stale_cutoff() -> datetime:
     return datetime.now(UTC) - timedelta(minutes=STALE_RUN_MINUTES)
 
 
-async def create_run(container: ApplicationContainer, source_id: UUID, tenant_id: UUID, *, trigger: str, actor_id: UUID | None) -> UUID:
+async def create_run(container: ApplicationContainer, source_id: UUID, tenant_id: UUID, *, trigger: str, actor_id: UUID | None, targets: list[str] | None = None) -> UUID:
     """Creates a queued run, or raises SyncAlreadyRunning / SourceNotSyncable / LookupError."""
     async with request_scoped_session(container) as session:
         source = await session.get(KnowledgeSource, source_id)
@@ -63,6 +63,7 @@ async def create_run(container: ApplicationContainer, source_id: UUID, tenant_id
         run = SourceSyncRun(
             tenant_id=tenant_id, source_id=source_id, trigger=trigger, status="queued",
             triggered_by=actor_id, trace_id=context.get("trace_id"), request_id=context.get("request_id"),
+            stats={"targets": targets} if targets else {},
         )
         session.add(run)
         await session.flush()
@@ -81,6 +82,40 @@ async def dispatch(container: ApplicationContainer, background_tasks: Any, sourc
         await SyncEngine(container).run(source_id, run_id)
 
     background_tasks.add_task(_inline)
+
+
+MAX_PENDING_TARGETS = 1000
+
+
+async def add_pending_targets(container: ApplicationContainer, source_id: UUID, tenant_id: UUID, ids: list[str]) -> int:
+    """
+    A change notification arrived while a sync is running: remember the item ids so they are refreshed right after,
+    instead of being lost. Returns how many ids are now waiting.
+    """
+    async with request_scoped_session(container) as session:
+        source = (
+            await session.execute(select(KnowledgeSource).where(KnowledgeSource.id == source_id, KnowledgeSource.tenant_id == tenant_id).with_for_update())
+        ).scalar_one_or_none()
+        if source is None:
+            return 0
+        state = dict(source.sync_state or {})
+        pending = list(dict.fromkeys([*state.get("pending_targets", []), *ids]))[:MAX_PENDING_TARGETS]
+        source.sync_state = {**state, "pending_targets": pending}
+        return len(pending)
+
+
+async def take_pending_targets(container: ApplicationContainer, source_id: UUID, limit: int = 200) -> list[str]:
+    """Removes and returns up to `limit` waiting item ids."""
+    async with request_scoped_session(container) as session:
+        source = (await session.execute(select(KnowledgeSource).where(KnowledgeSource.id == source_id).with_for_update())).scalar_one_or_none()
+        if source is None or source.status != "active":
+            return []
+        state = dict(source.sync_state or {})
+        pending = list(state.get("pending_targets", []))
+        if not pending:
+            return []
+        source.sync_state = {**state, "pending_targets": pending[limit:]}
+        return pending[:limit]
 
 
 async def request_cancel(container: ApplicationContainer, source_id: UUID, tenant_id: UUID) -> bool:

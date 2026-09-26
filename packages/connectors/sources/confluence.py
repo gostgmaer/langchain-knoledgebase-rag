@@ -267,6 +267,33 @@ class ConfluenceConnector(BaseKnowledgeConnector):
         text = page.markdown or ""
         return ExternalDocumentContent(text=f"# {document.title}\n\n{text}".strip() + "\n", mime_type="text/markdown")
 
+    def _selected(self, document: ExternalDocument) -> bool:
+        """The space/label selection, for an item that arrived by id instead of through the CQL query."""
+        c = self.configuration
+        key = document.metadata.get("space_key")
+        if c.get("spaces") and key not in c["spaces"]:
+            return False
+        if key in (c.get("exclude_spaces") or []):
+            return False
+        labels = set(document.metadata.get("labels") or [])
+        if c.get("labels") and not labels & set(c["labels"]):
+            return False
+        return not labels & set(c.get("exclude_labels") or [])
+
+    async def get_external_document(self, external_id: str) -> ExternalDocument | None:
+        if external_id.startswith("att:"):
+            raise NotImplementedError("Attachments are refreshed with their page.")
+        try:
+            data = await self._get(f"/content/{external_id}", expand="version,space,ancestors,metadata.labels,history")
+        except ConnectorHttpError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        if data.get("status") not in (None, "current") and not self.configuration.get("include_archived"):
+            return None  # trashed or archived
+        document = self._to_document(data)
+        return document if document is not None and self._selected(document) else None
+
     async def get_document(self, external_id: str) -> ExternalDocumentContent:
         return await self.fetch(ExternalDocument(external_id=external_id, title=external_id, canonical_url=self._root))
 

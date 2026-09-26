@@ -237,6 +237,14 @@ class BaseKnowledgeConnector(ABC):
         """Changes since the previous sync, or None when the source cannot say (a full discovery is used)."""
         return None
 
+    async def get_external_document(self, external_id: str) -> ExternalDocument | None:
+        """
+        One item by external id, with its metadata (and content when cheap), or None when it no longer exists.
+        Used to apply a change notification for a single item without a full sync. Connectors that cannot do
+        this raise NotImplementedError and the platform runs a normal sync instead.
+        """
+        raise NotImplementedError(f"{self.display_name} cannot fetch a single item by id.")
+
     async def get_document(self, external_id: str) -> ExternalDocumentContent:
         """Fetch one item by its external id (webhook events, single-document resync)."""
         raise NotImplementedError(f"{self.display_name} cannot fetch a single document by id.")

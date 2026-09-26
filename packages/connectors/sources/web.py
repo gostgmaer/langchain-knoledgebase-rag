@@ -22,6 +22,7 @@ from urllib.robotparser import RobotFileParser
 
 from lxml import etree
 
+from packages.config.loader import settings
 from packages.connectors.base import BaseKnowledgeConnector, ConfigField, ValidationResult
 from packages.connectors.html_extract import html_to_markdown
 from packages.connectors.http import ConnectorHttpError, ResilientHttpClient, assert_public_url
@@ -56,6 +57,11 @@ def normalize_url(url: str) -> str:
     return urlunsplit((parts.scheme.lower(), host, path, query, ""))
 
 
+def _safe_path(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.netloc}{parts.path}"
+
+
 def _pattern_target(url: str) -> str:
     parts = urlsplit(url)
     return f"{parts.netloc}{parts.path}"
@@ -68,8 +74,8 @@ class WebConnector(BaseKnowledgeConnector):
     icon = "globe"
     credential_kind = "none"
     notes = (
-        "Respects robots.txt and throttles requests. JavaScript-rendered content needs a headless browser, "
-        "which this deployment does not include."
+        "Respects robots.txt and throttles requests. JavaScript-rendered pages need the optional rendering "
+        "service (CONNECTOR_RENDER_URL)."
     )
     config_schema = (
         ConfigField("seed_urls", "Start URLs", "string_list", required=True, group="content",
@@ -89,7 +95,7 @@ class WebConnector(BaseKnowledgeConnector):
         ConfigField("robots", "robots.txt", "select", default="respect", options=("respect", "ignore"), group="advanced",
                     help="Only choose 'ignore' for sites you own."),
         ConfigField("javascript_rendering", "Render JavaScript", "boolean", default=False, group="advanced",
-                    help="Not available in this deployment."),
+                    help="For pages that build their content in the browser. Needs the rendering service (CONNECTOR_RENDER_URL); slower."),
         ConfigField("request_interval_seconds", "Delay between requests (s)", "number", default=1.0, minimum=0.1,
                     maximum=60, group="advanced"),
         ConfigField("user_agent", "User agent", "string", default=DEFAULT_USER_AGENT, group="advanced"),
@@ -102,6 +108,8 @@ class WebConnector(BaseKnowledgeConnector):
         self._robots_sitemaps: dict[str, list[str]] = {}
         self.stats: dict[str, int] = {"skipped_out_of_scope": 0, "skipped_robots": 0, "skipped_type": 0, "skipped_duplicate": 0, "errors": 0}
         self.warnings: list[str] = []
+        self.render_url: str | None = settings.rag.connector_render_url
+        self._render_http: ResilientHttpClient | None = None
 
     # ------------------------------------------------------------------ setup
 
@@ -116,8 +124,11 @@ class WebConnector(BaseKnowledgeConnector):
 
     async def validate_settings(self) -> ValidationResult:
         result = await super().validate_settings()
-        if self.configuration.get("javascript_rendering"):
-            result.errors.append("JavaScript rendering is not available in this deployment.")
+        if self.configuration.get("javascript_rendering") and not self.render_url:
+            result.errors.append(
+                "JavaScript rendering needs a rendering service: set CONNECTOR_RENDER_URL "
+                "(see docs/KNOWLEDGE_SOURCES.md, 'JavaScript-rendered pages')."
+            )
         for url in self.configuration.get("seed_urls") or []:
             parts = urlsplit(url)
             if parts.scheme not in ("http", "https") or not parts.netloc:
@@ -323,6 +334,30 @@ class WebConnector(BaseKnowledgeConnector):
             headers["If-Modified-Since"] = known.metadata["last_modified"]
 
         response = await self.http.get(url, headers=headers)
+        return await self._document_from_response(url, depth, response, known)
+
+    async def _render(self, url: str) -> str:
+        """The page's HTML after its JavaScript ran, from the rendering service."""
+        if self._render_http is None:
+            # The rendering service is internal (private address allowed); the page URL itself was already
+            # checked by the normal request that preceded this call.
+            self._render_http = ResilientHttpClient(timeout=60.0, max_retries=1, allow_private=True, raise_auth_errors=False)
+        params = {"token": settings.rag.connector_render_token} if settings.rag.connector_render_token else None
+        response = await self._render_http.request(
+            "POST",
+            f"{str(self.render_url).rstrip('/')}/content",
+            params=params,
+            json={
+                "url": url,
+                "gotoOptions": {"waitUntil": "networkidle2", "timeout": 45000},
+                "rejectResourceTypes": ["image", "media", "font"],
+            },
+        )
+        if response.status_code >= 400:
+            raise ConnectorHttpError(f"The rendering service returned HTTP {response.status_code} for {_safe_path(url)}.", status=response.status_code)
+        return response.text
+
+    async def _document_from_response(self, url: str, depth: int, response: Any, known: Any) -> ExternalDocument | None:
         if response.status_code == 304 and known is not None:
             return ExternalDocument(
                 external_id=url,
@@ -362,7 +397,10 @@ class WebConnector(BaseKnowledgeConnector):
         }
 
         if content_type in ("text/html", "application/xhtml+xml", ""):
-            page = html_to_markdown(response.text, final_url)
+            html = response.text
+            if self.configuration.get("javascript_rendering") and self.render_url:
+                html = await self._render(final_url)
+            page = html_to_markdown(html, final_url)
             if not page.markdown.strip():
                 self.stats["skipped_type"] += 1
                 return None
@@ -412,8 +450,22 @@ class WebConnector(BaseKnowledgeConnector):
             raise ConnectorHttpError(f"{document.external_id} could not be fetched.")
         return rediscovered.prefetched
 
+    async def get_external_document(self, external_id: str) -> ExternalDocument | None:
+        url = normalize_url(external_id)
+        if not self.in_scope(url) or not await self._allowed_by_robots(url):
+            return None  # no longer something this source is allowed to hold
+        response = await self.http.get(url)
+        if response.status_code in (404, 410):
+            return None
+        return await self._document_from_response(url, 0, response, None)
+
     async def get_document(self, external_id: str) -> ExternalDocumentContent:
         return await self.fetch(ExternalDocument(external_id=external_id, title=external_id))
+
+    async def aclose(self) -> None:
+        await super().aclose()
+        if self._render_http is not None:
+            await self._render_http.aclose()
 
     def health_stats(self) -> dict[str, Any]:
         return {**super().health_stats(), "crawl": dict(self.stats), "warnings": self.warnings[:20]}

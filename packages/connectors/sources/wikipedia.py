@@ -207,5 +207,25 @@ class WikipediaConnector(BaseKnowledgeConnector):
             out.append(f"{'#' * len(match.group(1))} {match.group(2)}" if match else line)
         return "\n".join(out).strip() + "\n"
 
+    async def get_external_document(self, external_id: str) -> ExternalDocument | None:
+        lang, _, page_id = external_id.partition(":")
+        data = await self._query(lang, prop="info|revisions|categories", inprop="url", rvprop="ids|timestamp", cllimit="max", clshow="!hidden", pageids=page_id)
+        for page in data.get("query", {}).get("pages", []):
+            if page.get("missing") or page.get("invalid") or "pageid" not in page:
+                return None
+            revision = (page.get("revisions") or [{}])[0]
+            canonical = page.get("canonicalurl") or f"https://{lang}.wikipedia.org/wiki/{quote(page['title'].replace(' ', '_'))}"
+            return ExternalDocument(
+                external_id=f"{lang}:{page['pageid']}", title=page["title"], canonical_url=canonical,
+                external_version=str(revision.get("revid") or page.get("lastrevid")), updated_at=_parse_time(revision.get("timestamp")),
+                mime_type="text/markdown",
+                metadata={
+                    "article_title": page["title"], "article_id": page["pageid"], "revision_id": revision.get("revid") or page.get("lastrevid"),
+                    "language": lang, "canonical_url": canonical, "revision_date": revision.get("timestamp"),
+                    "categories": [c["title"].split(":", 1)[-1] for c in page.get("categories", [])][:50], "license": "CC BY-SA 4.0",
+                },
+            )
+        return None
+
     async def get_document(self, external_id: str) -> ExternalDocumentContent:
         return await self.fetch(ExternalDocument(external_id=external_id, title=external_id))
