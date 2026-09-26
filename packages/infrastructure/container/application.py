@@ -136,6 +136,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     graph = providers.Container(
         GraphContainer,
         settings=settings,
+        database=database,
         ai=ai,
         rag=rag,
         tools=tools,
