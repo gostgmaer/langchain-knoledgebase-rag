@@ -42,9 +42,18 @@ export function MessageBubble({ message, pending }: { message: Message; pending?
           <ul className="flex flex-col gap-0.5 text-xs text-neutral-500" aria-label="Sources">
             {message.sources.map((s) => (
               <li key={s.label}>
-                <span className="font-medium">{s.label}</span> {s.document_name ?? "Unknown document"}
+                <span className="font-medium">{s.label}</span>{" "}
+                {s.url ? (
+                  <a href={s.url} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2">
+                    {s.document_name ?? s.url}
+                  </a>
+                ) : (
+                  (s.document_name ?? "Unknown document")
+                )}
+                {s.source_type && s.source_type !== "upload" && ` · ${s.source_name ?? s.source_type}`}
                 {s.page_number !== null && ` · page ${s.page_number}`}
                 {s.section && ` · ${s.section}`}
+                {s.updated_at && ` · updated ${new Date(s.updated_at).toLocaleDateString()}`}
               </li>
             ))}
           </ul>

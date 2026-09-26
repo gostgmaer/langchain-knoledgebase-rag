@@ -22,6 +22,7 @@ from packages.api.schemas.retrieval_log import (
 from packages.domain.models.document import Document
 from packages.domain.models.document_chunk import DocumentChunk
 from packages.domain.models.document_version import DocumentVersion
+from packages.domain.models.knowledge_source import KnowledgeSource
 from packages.domain.models.retrieval_log import RetrievalLog, RetrievalResultLog
 from packages.infrastructure.container import ApplicationContainer
 
@@ -120,10 +121,11 @@ async def get_retrieval(
 
     rows = (
         await session.execute(
-            select(RetrievalResultLog, DocumentChunk, Document, DocumentVersion.version_number)
+            select(RetrievalResultLog, DocumentChunk, Document, DocumentVersion.version_number, KnowledgeSource.name)
             .join(DocumentChunk, DocumentChunk.id == RetrievalResultLog.chunk_id, isouter=True)
             .join(Document, Document.id == RetrievalResultLog.document_id, isouter=True)
             .join(DocumentVersion, DocumentVersion.document_id == RetrievalResultLog.document_id, isouter=True)
+            .join(KnowledgeSource, KnowledgeSource.id == Document.source_id, isouter=True)
             .where(RetrievalResultLog.retrieval_id == retrieval_id, RetrievalResultLog.tenant_id == tenant_id)
             .order_by(RetrievalResultLog.retrieval_rank)
         )
@@ -140,6 +142,12 @@ async def get_retrieval(
             page_number=chunk.page_number if chunk else None,
             section=chunk.section if chunk else None,
             chunking_strategy=((chunk.metadata_ or {}).get("chunking_strategy") if chunk else None),
+            source_type=(doc.source_type or "upload") if doc else None,
+            source_id=doc.source_id if doc else None,
+            source_name=source_name,
+            canonical_url=doc.canonical_url if doc else None,
+            external_version=doc.external_version if doc else None,
+            sync_id=doc.sync_id if doc else None,
             retrieval_rank=r.retrieval_rank,
             retrieval_score=r.retrieval_score,
             vector_score=r.vector_score,
@@ -149,7 +157,7 @@ async def get_retrieval(
             selected_for_context=r.selected_for_context,
             reranking_changed_rank=(r.final_rank != r.retrieval_rank) if r.final_rank is not None else None,
         )
-        for r, chunk, doc, version in rows
+        for r, chunk, doc, version, source_name in rows
     ]
 
     return ApiResponse(

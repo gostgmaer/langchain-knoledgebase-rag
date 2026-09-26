@@ -157,6 +157,28 @@ async def reindex_document_job(ctx: dict[str, Any], document_id: str, actor_id: 
     return await run_reindex(container, UUID(document_id), UUID(actor_id) if actor_id else None)
 
 
+async def source_sync_job(ctx: dict[str, Any], source_id: str, run_id: str) -> str:
+    """Runs one queued knowledge-source sync. The engine records its own failures; this only raises on infrastructure errors."""
+    from uuid import UUID
+
+    from packages.connectors.sync import SyncEngine
+
+    container: ApplicationContainer = ctx["container"]
+    return await SyncEngine(container).run(UUID(source_id), UUID(run_id))
+
+
+async def schedule_source_syncs_job(ctx: dict[str, Any]) -> int:
+    """Every minute: queue a sync for each scheduled source that is due, and fail runs of crashed workers."""
+    from packages.connectors.scheduling import schedule_due
+
+    container: ApplicationContainer = ctx["container"]
+
+    async def enqueue(source_id, run_id) -> None:
+        await ctx["redis"].enqueue_job("source_sync_job", str(source_id), str(run_id))
+
+    return await schedule_due(container, enqueue)
+
+
 async def purge_expired_logs_job(ctx: dict[str, Any]) -> dict[str, int]:
     """Daily retention sweep: deletes retrieval logs and audit events past their retention window."""
     from packages.application.services.retention_service import purge_expired

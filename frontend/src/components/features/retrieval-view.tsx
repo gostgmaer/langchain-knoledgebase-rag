@@ -160,6 +160,7 @@ function RetrievalDetail({ id }: { id: string }) {
                         {res.document_name ?? res.document_id.slice(0, 8)}
                       </Link>
                       {res.document_version !== null && <span className="ml-1 text-xs text-neutral-400">v{res.document_version}</span>}
+                      {res.source_type && res.source_type !== "upload" && <Badge variant="outline" className="ml-1">{res.source_name ?? res.source_type}</Badge>}
                       {res.document_is_current === false && <Badge variant="outline" className="ml-1">superseded</Badge>}
                     </TableCell>
                     <TableCell className="text-xs text-neutral-500">

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -12,6 +13,8 @@ class ChatFiltersSchema(BaseModel):
     categories: list[str] | None = Field(default=None, max_length=20)
     tags: list[str] | None = Field(default=None, max_length=20)
     language: str | None = Field(default=None, max_length=20)
+    sources: list[str] | None = Field(default=None, max_length=20, description="Only these source types.")
+    source_ids: list[UUID] | None = Field(default=None, max_length=50, description="Only these knowledge sources.")
 
 
 class ChatRequestSchema(BaseModel):
@@ -71,6 +74,17 @@ class CitationSchema(BaseModel):
     page_number: int | None = None
 
     section: str | None = None
+
+    source_type: str | None = None
+    """Where the document came from: upload, web, confluence, ..."""
+
+    source_name: str | None = None
+
+    url: str | None = None
+    """The original page/file URL for external sources (never an internal API URL)."""
+
+    updated_at: datetime | None = None
+    """When the source last changed the document."""
 
 
 class PendingToolCallSchema(BaseModel):

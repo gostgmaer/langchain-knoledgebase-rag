@@ -90,6 +90,16 @@ class DocumentResponseSchema(BaseModel):
     processed_at: datetime | None = None
     embedding_is_stale: bool | None = None
     visibility: str = "tenant"
+    source_id: UUID | None = None
+    source_name: str | None = None
+    external_id: str | None = None
+    canonical_url: str | None = None
+    external_version: str | None = None
+    external_updated_at: datetime | None = None
+    last_synced_at: datetime | None = None
+    sync_id: UUID | None = None
+    freshness_seconds: int | None = None
+    """Seconds between the source's last change and our last indexing."""
     allowed_roles: list[str] | None = None
     allowed_users: list[str] | None = None
     document_type: str | None = None

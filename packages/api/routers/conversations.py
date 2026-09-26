@@ -127,6 +127,10 @@ async def _with_sources(container: ApplicationContainer, history) -> list[Messag
                     func.coalesce(MessageCitation.document_name, Document.file_name),
                     func.coalesce(MessageCitation.page_number, DocumentChunk.page_number),
                     func.coalesce(MessageCitation.section, DocumentChunk.section),
+                    MessageCitation.source_type,
+                    MessageCitation.source_name,
+                    MessageCitation.canonical_url,
+                    MessageCitation.external_updated_at,
                 )
                 .join(Document, Document.id == MessageCitation.document_id, isouter=True)
                 .join(DocumentChunk, DocumentChunk.id == MessageCitation.chunk_id, isouter=True)
@@ -134,9 +138,12 @@ async def _with_sources(container: ApplicationContainer, history) -> list[Messag
                 .order_by(MessageCitation.rank)
             )
         ).all()
-        for message_id, rank, name, page, section in rows:
+        for message_id, rank, name, page, section, source_type, source_name, url, updated in rows:
             by_message.setdefault(message_id, []).append(
-                MessageSourceSchema(label=f"[{rank}]", document_name=name, page_number=page, section=section)
+                MessageSourceSchema(
+                    label=f"[{rank}]", document_name=name, page_number=page, section=section,
+                    source_type=source_type, source_name=source_name, url=url, updated_at=updated,
+                )
             )
 
     out = []

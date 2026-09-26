@@ -75,3 +75,12 @@ class RAGSettings(BaseSettings):
     # 0 disables the purge for that table (keep forever).
     retention_retrieval_log_days: int = Field(default=90, alias="RETENTION_RETRIEVAL_LOG_DAYS")
     retention_audit_days: int = Field(default=365, alias="RETENTION_AUDIT_DAYS")
+
+    # External knowledge sources (connectors).
+    # Fernet key(s), comma separated. The first encrypts, all decrypt (rotation). No key = credentials cannot be stored.
+    connector_credential_keys: str | None = Field(default=None, alias="CONNECTOR_CREDENTIAL_KEYS")
+    # Let connectors call private-network addresses (self-hosted Confluence, an intranet site). OFF by default:
+    # it is the switch that stops a source URL from reaching the platform's own network.
+    connector_allow_private_hosts: bool = Field(default=False, alias="CONNECTOR_ALLOW_PRIVATE_HOSTS")
+    connector_sync_concurrency: int = Field(default=4, ge=1, le=16, alias="CONNECTOR_SYNC_CONCURRENCY")
+    connector_max_error_details: int = Field(default=100, alias="CONNECTOR_MAX_ERROR_DETAILS")

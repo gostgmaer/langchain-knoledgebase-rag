@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 import httpx
 from pydantic import BaseModel
+from sqlalchemy import select
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
 
 from packages.api.dependencies import (
@@ -36,6 +37,7 @@ from packages.application.services.reindex import run_reindex
 from packages.config.loader import settings
 from packages.conversation.bootstrap import ensure_default_model_profile
 from packages.domain.enums.document_status import DocumentStatus
+from packages.domain.models.knowledge_source import KnowledgeSource
 from packages.domain.models.upload_job import UploadJob
 from packages.infrastructure.container import ApplicationContainer
 from packages.knowledge.pipelines.ingestion import PIPELINE_VERSION
@@ -278,6 +280,12 @@ async def _document_responses(container: ApplicationContainer, rows) -> list[Doc
         [d.id for d in rows],
     )
 
+    source_ids = {d.source_id for d in rows if d.source_id}
+    source_names: dict = {}
+    if source_ids:
+        found = await container.database.session().execute(select(KnowledgeSource.id, KnowledgeSource.name).where(KnowledgeSource.id.in_(source_ids)))
+        source_names = {sid: name for sid, name in found.all()}
+
     responses = []
     for d in rows:
         primary, extra = counts.get(d.id, (0, 0))
@@ -302,7 +310,6 @@ async def _document_responses(container: ApplicationContainer, rows) -> list[Doc
                 document_metadata=d.metadata_ or {},
                 content_hash=d.checksum,
                 uploaded_by=d.uploaded_by,
-                source_type=d.source_type,
                 processing_version=d.processing_version,
                 parser_name=d.parser_name,
                 chunking_version=d.chunking_version,
@@ -313,6 +320,20 @@ async def _document_responses(container: ApplicationContainer, rows) -> list[Doc
                 error_reason=d.error_reason,
                 processed_at=d.processed_at,
                 visibility=d.visibility or "tenant",
+                source_type=d.source_type or "upload",
+                source_id=d.source_id,
+                source_name=source_names.get(d.source_id),
+                external_id=d.external_id,
+                canonical_url=d.canonical_url,
+                external_version=d.external_version,
+                external_updated_at=d.external_updated_at,
+                last_synced_at=d.last_synced_at,
+                sync_id=d.sync_id,
+                freshness_seconds=(
+                    max(0, int((d.processed_at - d.external_updated_at).total_seconds()))
+                    if d.external_updated_at and d.processed_at
+                    else None
+                ),
                 allowed_roles=d.allowed_roles,
                 allowed_users=d.allowed_users,
                 document_type=d.document_type,
@@ -341,18 +362,20 @@ async def list_documents(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     knowledge_base_id: UUID | None = Query(default=None),
+    source_id: UUID | None = Query(default=None, description="Only documents from this knowledge source."),
     container: ApplicationContainer = Depends(get_scoped_container),
 ):
     tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
 
     documents = container.repositories.document()
 
-    total = await documents.count_by_tenant(tenant_id, knowledge_base_id)
+    total = await documents.count_by_tenant(tenant_id, knowledge_base_id, source_id)
     rows = await documents.list_by_tenant(
         tenant_id,
         limit=limit,
         offset=offset,
         knowledge_base_id=knowledge_base_id,
+        source_id=source_id,
     )
 
     return ApiResponse(

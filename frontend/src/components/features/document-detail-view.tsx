@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ChunkingCard } from "@/components/documents/chunking-card";
 import { AccessCard } from "@/components/documents/access-card";
 import { ProvenanceCard } from "@/components/documents/provenance-card";
+import { SourceCard } from "@/components/documents/source-card";
 import { ChunksPanel } from "@/components/documents/chunks-panel";
 import { JsonBlock } from "@/components/documents/json-block";
 import { PageHeader } from "@/components/shared/page-header";
@@ -81,6 +82,7 @@ export function DocumentDetailView({ documentId, basePath }: { documentId: strin
 
         <ChunkingCard doc={doc} />
         <ProvenanceCard doc={doc} />
+        {doc.source_id && <SourceCard doc={doc} />}
         <AccessCard doc={doc} />
 
         <Card>

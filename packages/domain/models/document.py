@@ -125,6 +125,16 @@ class Document(BaseModel):
     embedding_dimensions: Mapped[int | None] = mapped_column(Integer)
     processing_stage: Mapped[str | None] = mapped_column(String(32))
 
+    # --- External source provenance (NULL for uploaded documents). `source_type` above holds the
+    # connector type ("upload", "web", "confluence", ...); these identify the exact external item.
+    source_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    external_id: Mapped[str | None] = mapped_column(String(1024))
+    canonical_url: Mapped[str | None] = mapped_column(Text)
+    external_version: Mapped[str | None] = mapped_column(String(256))
+    external_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sync_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+
     # --- Classification and access. `visibility`: NULL/"tenant" = every member of the tenant may
     # retrieve it; "restricted" = administrators only. Enforced inside the retrieval SQL.
     visibility: Mapped[str | None] = mapped_column(String(16))

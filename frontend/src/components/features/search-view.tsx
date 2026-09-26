@@ -17,6 +17,7 @@ export function SearchView() {
   const [documentType, setDocumentType] = useState("");
   const [category, setCategory] = useState("");
   const [tags, setTags] = useState("");
+  const [sources, setSources] = useState("");
   const runSearch = useSearch();
 
   function request() {
@@ -27,6 +28,7 @@ export function SearchView() {
       document_types: list(documentType),
       categories: list(category),
       tags: list(tags),
+      sources: list(sources),
     };
   }
 
@@ -60,6 +62,7 @@ export function SearchView() {
         <Input className="h-8 w-36 text-xs" placeholder="type, e.g. policy" value={documentType} onChange={(e) => setDocumentType(e.target.value)} />
         <Input className="h-8 w-36 text-xs" placeholder="category, e.g. hr" value={category} onChange={(e) => setCategory(e.target.value)} />
         <Input className="h-8 w-40 text-xs" placeholder="tags (all required)" value={tags} onChange={(e) => setTags(e.target.value)} />
+        <Input className="h-8 w-48 text-xs" placeholder="sources: confluence, web, upload" value={sources} onChange={(e) => setSources(e.target.value)} />
         <span className="text-neutral-400">Comma-separated. Applied inside the search, not afterwards.</span>
       </div>
 

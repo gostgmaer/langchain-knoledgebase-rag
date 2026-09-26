@@ -104,10 +104,17 @@ class IngestionPipeline:
 
         checksum = self._checksum(request.file)
 
-        existing = await self.document_repository.get_by_checksum(
-            request.knowledge_base_id,
-            checksum,
-        )
+        if request.external_id is not None:
+            # An external item's identity is (source, external id), never its file name or (across
+            # items) its content: two different pages may legitimately have identical text.
+            existing = await self.document_repository.get_by_source_external_checksum(
+                request.tenant_id, request.source_id, request.external_id, checksum
+            )
+        else:
+            existing = await self.document_repository.get_by_checksum(
+                request.knowledge_base_id,
+                checksum,
+            )
         if existing is not None:
             return IngestionResponse(
                 document_id=existing.id,
@@ -120,11 +127,16 @@ class IngestionPipeline:
         # Document exists it also defaults `is_current=True` and
         # shares the same file_name, so this lookup has to happen
         # first or it can no longer tell old from new.
-        previous = await self.document_repository.get_current_by_tenant_kb_and_filename(
-            request.tenant_id,
-            request.knowledge_base_id,
-            request.document_name,
-        )
+        if request.external_id is not None:
+            previous = await self.document_repository.get_current_by_source_external(
+                request.tenant_id, request.source_id, request.external_id
+            )
+        else:
+            previous = await self.document_repository.get_current_by_tenant_kb_and_filename(
+                request.tenant_id,
+                request.knowledge_base_id,
+                request.document_name,
+            )
 
         document = await self._create_document_row(
             request,
@@ -437,6 +449,16 @@ class IngestionPipeline:
             title=request.document_name,
             file_id=request.file_id or str(uuid4()),
             file_name=request.document_name,
+            source_id=request.source_id,
+            source_type=request.source_type or "upload",
+            external_id=request.external_id,
+            canonical_url=request.canonical_url,
+            external_version=request.external_version,
+            external_updated_at=request.external_updated_at,
+            last_synced_at=datetime.now(UTC) if request.source_id is not None else None,
+            sync_id=request.sync_id,
+            allowed_roles=request.allowed_roles,
+            allowed_users=request.allowed_users,
             mime_type=mime_type or "application/octet-stream",
             extension=request.file.suffix.lower(),
             size_bytes=request.file.stat().st_size,
@@ -464,6 +486,19 @@ class IngestionPipeline:
             document.metadata["source"] = request.document_name
             document.metadata["filename"] = request.document_name
             document.metadata.setdefault("ingested_at", ingested_at)
+            if request.source_id is not None:
+                # Provenance on every chunk: which source, which external item and version, which sync.
+                document.metadata.update(
+                    {
+                        "source_id": str(request.source_id),
+                        "source_type": request.source_type,
+                        "external_id": request.external_id,
+                        "canonical_url": request.canonical_url,
+                        "external_version": request.external_version,
+                        "sync_id": str(request.sync_id) if request.sync_id else None,
+                        **request.source_metadata,
+                    }
+                )
 
         return documents
 

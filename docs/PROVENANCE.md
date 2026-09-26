@@ -227,3 +227,9 @@ direction, not proof. Re-measure on your own documents (`scripts/evaluate_retrie
 * No `documentVersionId` column: the version is the document row (`document_id`) plus `document_versions`.
 * Retrieval-log purge is platform-wide by design; its endpoint is super-admin only.
 * Accuracy is only measured on the small bundled set (sections 13 and 16).
+
+## 18. External knowledge sources
+
+Documents can also come from connected systems (websites, Wikipedia, Confluence, SharePoint, OneDrive, Teams). Their
+provenance (source, external id, original URL, external version, sync id) extends the chain above; see
+`docs/KNOWLEDGE_SOURCES.md`.

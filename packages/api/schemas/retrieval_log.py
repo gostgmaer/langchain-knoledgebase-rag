@@ -40,6 +40,12 @@ class RetrievalResultSchema(BaseModel):
     page_number: int | None
     section: str | None
     chunking_strategy: str | None
+    source_type: str | None = None
+    source_id: UUID | None = None
+    source_name: str | None = None
+    canonical_url: str | None = None
+    external_version: str | None = None
+    sync_id: UUID | None = None
     retrieval_rank: int
     retrieval_score: float
     vector_score: float | None

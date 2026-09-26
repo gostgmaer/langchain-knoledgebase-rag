@@ -38,6 +38,21 @@ UPGRADES: tuple[str, ...] = (
     "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS indexed_at timestamptz",
     "ALTER TABLE retrieval_result_logs ADD COLUMN IF NOT EXISTS vector_score double precision",
     "ALTER TABLE retrieval_result_logs ADD COLUMN IF NOT EXISTS keyword_score double precision",
+    # --- documents: external source provenance and freshness
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_id uuid",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS external_id varchar(1024)",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS canonical_url text",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS external_version varchar(256)",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS external_updated_at timestamptz",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS last_synced_at timestamptz",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS sync_id uuid",
+    "CREATE INDEX IF NOT EXISTS ix_document_source ON documents (tenant_id, source_id)",
+    "CREATE INDEX IF NOT EXISTS ix_document_external ON documents (source_id, external_id)",
+    # citations snapshot where an answer's source lives, so history survives a source change
+    "ALTER TABLE message_citations ADD COLUMN IF NOT EXISTS source_type varchar(32)",
+    "ALTER TABLE message_citations ADD COLUMN IF NOT EXISTS source_name varchar(200)",
+    "ALTER TABLE message_citations ADD COLUMN IF NOT EXISTS canonical_url text",
+    "ALTER TABLE message_citations ADD COLUMN IF NOT EXISTS external_updated_at timestamptz",
     # --- documents: classification and access
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS visibility varchar(16)",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS document_type varchar(64)",
@@ -85,6 +100,12 @@ RLS_TABLES = (
     "retrieval_logs",
     "retrieval_result_logs",
     "audit_events",
+    "knowledge_sources",
+    "source_credentials",
+    "source_sync_runs",
+    "external_documents",
+    "document_access_rules",
+    "identity_mappings",
 )
 
 _TENANT_MATCH = (

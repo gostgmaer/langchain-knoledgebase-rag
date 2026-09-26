@@ -60,6 +60,8 @@ async def search(
         categories=payload.categories,
         tags=payload.tags,
         language=payload.language,
+        source_types=payload.sources,
+        source_ids=payload.source_ids,
     )
 
     candidates = await knowledge_manager.search(

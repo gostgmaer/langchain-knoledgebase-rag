@@ -81,7 +81,7 @@ if [ -n "$UTOK" ]; then
   MA="Authorization: Bearer $UTOK"
   chk "member cannot create a feature flag" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/feature-flags -H "$MA" -H 'Content-Type: application/json' -d '{"key":"e2e_probe","enabled":false}')" 403
   chk "member cannot create a knowledge base" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/knowledge-bases -H "$MA" -H 'Content-Type: application/json' -d '{"name":"e2e-probe"}')" 403
-  for ep in feature-flags analytics/summary usage feedback model-profiles documents agents; do
+  for ep in feature-flags analytics/summary usage feedback model-profiles documents agents knowledge-sources knowledge-sources/types knowledge-sources/summary retrieval-settings; do
     chk "member cannot read /$ep" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/$ep -H "$MA")" 403
   done
   T=$(tenant_of_conversation "$UTOK" "$SPOOF")

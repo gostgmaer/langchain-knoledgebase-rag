@@ -14,6 +14,14 @@ from .entity_mention import EntityMention
 from .feature_flag import FeatureFlag
 from .feedback import Feedback
 from .knowledge_base import KnowledgeBase
+from .knowledge_source import (
+    DocumentAccessRule,
+    ExternalDocumentRecord,
+    IdentityMapping,
+    KnowledgeSource,
+    SourceCredential,
+    SourceSyncRun,
+)
 from .memory import Memory
 from .message import Message
 from .message_citation import MessageCitation
@@ -44,6 +52,12 @@ __all__ = [
     "FeatureFlag",
     "Feedback",
     "KnowledgeBase",
+    "KnowledgeSource",
+    "SourceCredential",
+    "SourceSyncRun",
+    "ExternalDocumentRecord",
+    "DocumentAccessRule",
+    "IdentityMapping",
     "Memory",
     "Message",
     "MessageCitation",

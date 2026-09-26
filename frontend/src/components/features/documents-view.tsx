@@ -68,6 +68,11 @@ export function DocumentsView({ basePath }: { basePath: string }) {
                     {doc.file_name}
                   </Link>
                   <div className="mt-1 flex flex-wrap gap-1">
+                    {doc.source_id && doc.source_type !== "upload" && (
+                      <Link href={`/${basePath.split("/")[1]}/knowledge-sources/${doc.source_id}`}>
+                        <Badge variant="outline">{doc.source_name ?? doc.source_type}</Badge>
+                      </Link>
+                    )}
                     {doc.visibility === "restricted" && <Badge variant="outline">admins only</Badge>}
                     {doc.document_type && <Badge variant="secondary">{doc.document_type}</Badge>}
                     {doc.category && <Badge variant="secondary">{doc.category}</Badge>}

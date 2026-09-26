@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -69,6 +72,10 @@ class MessageCitation(BaseModel):
     )
 
     document_name: Mapped[str | None] = mapped_column(String(512))
+    source_type: Mapped[str | None] = mapped_column(String(32))
+    source_name: Mapped[str | None] = mapped_column(String(200))
+    canonical_url: Mapped[str | None] = mapped_column(Text)
+    external_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     page_number: Mapped[int | None] = mapped_column(Integer)
     section: Mapped[str | None] = mapped_column(String(512))
 

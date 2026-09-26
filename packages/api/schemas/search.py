@@ -31,6 +31,8 @@ class SearchRequestSchema(BaseModel):
     categories: list[str] | None = Field(default=None, max_length=20)
     tags: list[str] | None = Field(default=None, max_length=20, description="Documents must carry all of these tags.")
     language: str | None = Field(default=None, max_length=20)
+    sources: list[str] | None = Field(default=None, max_length=20, description="Only these source types, e.g. ['confluence', 'web', 'upload'].")
+    source_ids: list[UUID] | None = Field(default=None, max_length=50, description="Only these configured knowledge sources.")
 
 
 class SearchResultSchema(BaseModel):

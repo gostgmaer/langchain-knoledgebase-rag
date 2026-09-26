@@ -76,6 +76,11 @@ export interface MessageSource {
   document_name: string | null;
   page_number: number | null;
   section: string | null;
+  source_type?: string | null;
+  source_name?: string | null;
+  /** Original page/file URL for external sources. */
+  url?: string | null;
+  updated_at?: string | null;
 }
 
 export interface ChatResponseData {
@@ -123,7 +128,6 @@ export interface DocumentRecord {
   // Provenance / processing record. null = not recorded (ingested before these existed).
   content_hash: string | null;
   uploaded_by: string | null;
-  source_type: string | null;
   processing_version: string | null;
   parser_name: string | null;
   chunking_version: string | null;
@@ -136,6 +140,16 @@ export interface DocumentRecord {
   embedding_is_stale: boolean | null;
   /** "tenant" = every member may retrieve it; "restricted" = administrators only. */
   visibility: "tenant" | "restricted";
+  source_type: string | null;
+  source_id: string | null;
+  source_name: string | null;
+  external_id: string | null;
+  canonical_url: string | null;
+  external_version: string | null;
+  external_updated_at: string | null;
+  last_synced_at: string | null;
+  sync_id: string | null;
+  freshness_seconds: number | null;
   /** For restricted documents: members with one of these roles, or listed by user id, may also retrieve it. */
   allowed_roles: string[] | null;
   allowed_users: string[] | null;
@@ -603,6 +617,9 @@ export interface RetrievalResult {
   page_number: number | null;
   section: string | null;
   chunking_strategy: string | null;
+  source_type?: string | null;
+  source_name?: string | null;
+  canonical_url?: string | null;
   retrieval_rank: number;
   retrieval_score: number;
   vector_score: number | null;
@@ -718,4 +735,229 @@ export interface ChatFilters {
   document_types?: string[];
   categories?: string[];
   tags?: string[];
+  sources?: string[];
+}
+
+// ---------------------------------------------------------------
+// Knowledge sources (external connectors)
+// ---------------------------------------------------------------
+
+export type SourceStatus = "active" | "paused" | "error" | "disconnected";
+export type SyncMode = "manual" | "scheduled" | "webhook" | "realtime";
+
+export interface ConfigField {
+  key: string;
+  label: string;
+  type: "string" | "text" | "url" | "number" | "boolean" | "select" | "string_list" | "secret";
+  required: boolean;
+  default: unknown;
+  help: string | null;
+  placeholder: string | null;
+  options: string[];
+  minimum: number | null;
+  maximum: number | null;
+  group: "connection" | "content" | "filters" | "permissions" | "advanced";
+}
+
+export interface ConnectorType {
+  type: string;
+  display_name: string;
+  description: string;
+  icon: string;
+  available: boolean;
+  credential_kind: string;
+  credential_fields: ConfigField[];
+  config_schema: ConfigField[];
+  supports_permissions: boolean;
+  supports_changes: boolean;
+  notes: string | null;
+}
+
+export interface ConnectorTypes {
+  types: ConnectorType[];
+  common_fields: ConfigField[];
+  sync_intervals: { minutes: number; label: string }[];
+}
+
+export interface CredentialStatus {
+  configured: boolean;
+  kind: string | null;
+  revoked: boolean;
+  updated_at: string | null;
+}
+
+export interface KnowledgeSource {
+  id: string;
+  name: string;
+  type: string;
+  type_label: string;
+  description: string | null;
+  status: SourceStatus;
+  sync_mode: SyncMode;
+  sync_interval_minutes: number | null;
+  last_sync_at: string | null;
+  next_sync_at: string | null;
+  last_successful_sync_at: string | null;
+  last_sync_status: string | null;
+  configuration: Record<string, unknown>;
+  knowledge_base_id: string | null;
+  credential: CredentialStatus;
+  document_count: number;
+  failed_count: number;
+  health: Record<string, unknown>;
+  webhook_enabled: boolean;
+  /** Shown once, when created or rotated. */
+  webhook_secret: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeSourceList {
+  total: number;
+  sources: KnowledgeSource[];
+}
+
+export interface CreateSourceRequest {
+  name: string;
+  type: string;
+  description?: string | null;
+  configuration: Record<string, unknown>;
+  credentials?: Record<string, unknown> | null;
+  sync_mode: SyncMode;
+  sync_interval_minutes?: number | null;
+}
+
+export interface UpdateSourceRequest {
+  name?: string;
+  description?: string | null;
+  configuration?: Record<string, unknown>;
+  sync_mode?: SyncMode;
+  sync_interval_minutes?: number | null;
+}
+
+export interface ConnectionTest {
+  ok: boolean;
+  message: string;
+  authenticated: boolean | null;
+  details: Record<string, unknown>;
+  validation: { ok: boolean; errors: string[]; warnings: string[] } | null;
+}
+
+export interface SourcePreview {
+  items: {
+    external_id: string;
+    title: string;
+    url: string | null;
+    version: string | null;
+    updated_at: string | null;
+    metadata: Record<string, unknown>;
+  }[];
+  truncated: boolean;
+  warnings: string[];
+}
+
+export interface SyncRun {
+  id: string;
+  source_id: string;
+  trigger: string;
+  status: "queued" | "running" | "succeeded" | "partial" | "failed" | "cancelled";
+  started_at: string | null;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  documents_discovered: number;
+  documents_created: number;
+  documents_updated: number;
+  documents_deleted: number;
+  documents_skipped: number;
+  documents_failed: number;
+  permissions_updated: number;
+  error_count: number;
+  error_summary: string | null;
+  trace_id: string | null;
+  request_id: string | null;
+  stats: Record<string, unknown>;
+}
+
+export interface SyncRunDetail extends SyncRun {
+  errors: { external_id: string; title: string; stage: string; message: string }[];
+}
+
+export interface SyncRunList {
+  total: number;
+  limit: number;
+  offset: number;
+  runs: SyncRun[];
+}
+
+export interface ExternalDocument {
+  id: string;
+  external_id: string;
+  title: string | null;
+  canonical_url: string | null;
+  status: "discovered" | "pending" | "fetching" | "processing" | "indexed" | "updated" | "deleted" | "failed";
+  document_id: string | null;
+  external_version: string | null;
+  external_updated_at: string | null;
+  last_synced_at: string | null;
+  last_indexed_at: string | null;
+  freshness_seconds: number | null;
+  failure_count: number;
+  last_error: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface ExternalDocumentList {
+  total: number;
+  limit: number;
+  offset: number;
+  documents: ExternalDocument[];
+}
+
+export interface SourceHealth {
+  connection: string;
+  authentication: string;
+  last_successful_sync_at: string | null;
+  last_failed_sync_at: string | null;
+  last_failure: string | null;
+  avg_sync_seconds: number | null;
+  documents_discovered: number;
+  documents_indexed: number;
+  documents_failed: number;
+  api: Record<string, number | null>;
+  rate_limit_used_percent: number | null;
+  warnings: string[];
+}
+
+export interface SourcesSummary {
+  total_sources: number;
+  connected_sources: number;
+  disconnected_sources: number;
+  sources_with_errors: number;
+  paused_sources: number;
+  total_documents: number;
+  total_chunks: number;
+  documents_added_today: number;
+  documents_updated_today: number;
+  documents_deleted_today: number;
+  failed_documents: number;
+  last_sync_duration_seconds: number | null;
+  stale_documents: number;
+}
+
+export interface IdentityMapping {
+  id?: string | null;
+  provider: string;
+  principal_type: "user" | "group";
+  external_id: string;
+  internal_type: "user" | "role";
+  internal_id: string;
+}
+
+export interface SourcePermissions {
+  permission_mode: string;
+  default_visibility: string;
+  default_allowed_roles: string[];
+  supports_external_permissions: boolean;
+  restricted_documents: number;
+  unmapped_principals: { principal_type: string; external_id: string; documents: number }[];
 }

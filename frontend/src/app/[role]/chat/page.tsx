@@ -17,12 +17,13 @@ import { conversations } from "@/lib/api/resources";
 import type { ChatFilters, Message } from "@/lib/api/types";
 import { useSession } from "@/lib/session";
 
-function chatFilters(type: string, category: string, tags: string): { filters?: ChatFilters } {
+function chatFilters(type: string, category: string, tags: string, sources: string): { filters?: ChatFilters } {
   const list = (value: string) => value.split(",").map((s) => s.trim()).filter(Boolean);
   const filters: ChatFilters = {
     ...(list(type).length && { document_types: list(type) }),
     ...(list(category).length && { categories: list(category) }),
     ...(list(tags).length && { tags: list(tags) }),
+    ...(list(sources).length && { sources: list(sources) }),
   };
   return Object.keys(filters).length ? { filters } : {};
 }
@@ -43,6 +44,7 @@ export default function ChatPage() {
   const [filterType, setFilterType] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterTags, setFilterTags] = useState("");
+  const [filterSources, setFilterSources] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data } = useConversationMessages(conversationId);
@@ -72,7 +74,7 @@ export default function ChatPage() {
         {
           message: text,
           conversation_id: conversationId,
-          ...chatFilters(filterType, filterCategory, filterTags),
+          ...chatFilters(filterType, filterCategory, filterTags, filterSources),
         },
         { tenantId: session.tenantId, userId: session.userId },
         (event) => {
@@ -176,12 +178,13 @@ export default function ChatPage() {
         <details className="mt-3 text-xs text-neutral-500">
           <summary className="cursor-pointer select-none">
             Limit answers to documents…
-            {(filterType || filterCategory || filterTags) && <span className="ml-1 text-neutral-900 dark:text-neutral-100">(filters on)</span>}
+            {(filterType || filterCategory || filterTags || filterSources) && <span className="ml-1 text-neutral-900 dark:text-neutral-100">(filters on)</span>}
           </summary>
           <div className="mt-2 flex flex-wrap gap-2">
             <Input className="h-8 w-36 text-xs" placeholder="type, e.g. policy" value={filterType} onChange={(e) => setFilterType(e.target.value)} aria-label="Document type filter" />
             <Input className="h-8 w-36 text-xs" placeholder="category, e.g. hr" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} aria-label="Category filter" />
             <Input className="h-8 w-40 text-xs" placeholder="tags (all required)" value={filterTags} onChange={(e) => setFilterTags(e.target.value)} aria-label="Tags filter" />
+            <Input className="h-8 w-44 text-xs" placeholder="sources: confluence, web, upload" value={filterSources} onChange={(e) => setFilterSources(e.target.value)} aria-label="Sources filter" />
           </div>
         </details>
 

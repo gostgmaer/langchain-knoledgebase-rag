@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Cable,
   Activity,
   ListTree,
   SlidersHorizontal,
@@ -47,6 +48,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/tenant-admin/chat", label: "Chat", icon: MessageSquare },
     { href: "/tenant-admin/agents", label: "Agents", icon: Bot },
     { href: "/tenant-admin/knowledge-bases", label: "Knowledge Bases", icon: Library },
+    { href: "/tenant-admin/knowledge-sources", label: "Knowledge Sources", icon: Cable },
     { href: "/tenant-admin/documents", label: "Documents", icon: FileText },
     { href: "/tenant-admin/search", label: "Search", icon: Search },
     { href: "/tenant-admin/prompts", label: "Prompts", icon: ScrollText },
@@ -70,6 +72,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/admin/chat", label: "Chat", icon: MessageSquare },
     { href: "/admin/agents", label: "Agents", icon: Bot },
     { href: "/admin/knowledge-bases", label: "Knowledge Bases", icon: Library },
+    { href: "/admin/knowledge-sources", label: "Knowledge Sources", icon: Cable },
     { href: "/admin/documents", label: "Documents", icon: FileText },
     { href: "/admin/search", label: "Search", icon: Search },
     { href: "/admin/prompts", label: "Prompts", icon: ScrollText },

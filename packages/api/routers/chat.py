@@ -64,7 +64,12 @@ async def chat(
 
     tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
     user_id = require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID)
-    set_retrieval_filters(payload.filters.model_dump() if payload.filters else None)
+    if payload.filters:
+        chosen = payload.filters.model_dump()
+        chosen["source_types"] = chosen.pop("sources")  # the API says "sources", retrieval says "source_types"
+        set_retrieval_filters(chosen)
+    else:
+        set_retrieval_filters(None)
 
     conversations = container.repositories.conversation()
 
@@ -260,6 +265,10 @@ def _to_response_schema(response: ChatResponse, model: str) -> ChatResponseSchem
                 document_name=citation.document_name,
                 page_number=citation.page_number,
                 section=citation.section,
+                source_type=citation.source_type,
+                source_name=citation.source_name,
+                url=citation.url,
+                updated_at=citation.updated_at,
             )
             for citation in response.citations
         ],

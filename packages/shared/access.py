@@ -25,7 +25,7 @@ _user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 _user_roles: ContextVar[tuple[str, ...]] = ContextVar("current_user_roles", default=())
 _retrieval_filters: ContextVar[dict] = ContextVar("retrieval_filters", default={})
 
-FILTER_KEYS = ("document_types", "categories", "tags", "language")
+FILTER_KEYS = ("document_types", "categories", "tags", "language", "source_types", "source_ids")
 
 
 def current_user_id() -> str | None:

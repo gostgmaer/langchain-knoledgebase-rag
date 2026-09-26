@@ -54,6 +54,11 @@ def _retrievable_chunk(filters: SearchFilter):
         conditions.append(Document.language == filters.language)
     if filters.tags:
         conditions.append(Document.tags.contains(filters.tags))
+    if filters.source_types:
+        # Documents ingested before sources existed are uploads.
+        conditions.append(func.coalesce(Document.source_type, "upload").in_(filters.source_types))
+    if filters.source_ids:
+        conditions.append(Document.source_id.in_(filters.source_ids))
 
     return Embedding.chunk.has(DocumentChunk.document.has(and_(*conditions)))
 

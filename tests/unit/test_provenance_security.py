@@ -119,7 +119,7 @@ def test_chunks_are_stamped_with_provenance():
 async def test_citations_are_labelled_deduplicated_and_named():
     doc_id, chunk_a, chunk_b = uuid4(), uuid4(), uuid4()
     uow = SimpleNamespace(
-        documents=SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(file_name="Handbook.pdf"))),
+        documents=SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(file_name="Handbook.pdf", source_id=None, source_type=None, canonical_url=None, external_updated_at=None))),
         document_chunks=SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(page_number=12, section="Leave"))),
     )
     service = ChatService.__new__(ChatService)

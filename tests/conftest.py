@@ -16,8 +16,8 @@ os.environ["AUTH_REQUIRED"] = "false"
 #    use the ports docker-compose.yml publishes instead.
 if not Path("/.dockerenv").exists():
     for _var, _host, _published in (
-        ("DATABASE_URL", "@postgres:5432", "@localhost:5442"),
-        ("REDIS_URL", "//redis:6379", "//localhost:6389"),
+        ("DATABASE_URL", "@postgres:5432", "@127.0.0.1:5442"),
+        ("REDIS_URL", "//redis:6379", "//127.0.0.1:6389"),
     ):
         _value = os.environ.get(_var)
         if _value is None:

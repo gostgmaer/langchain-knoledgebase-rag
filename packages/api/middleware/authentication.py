@@ -32,7 +32,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
     AUTH_SCHEME = "Bearer "
 
     # Reachable without a token even when AUTH_REQUIRED is on.
-    PUBLIC_PREFIXES = ("/api/v1/health", "/api/v1/auth/refresh")
+    PUBLIC_PREFIXES = ("/api/v1/health", "/api/v1/auth/refresh", "/api/v1/webhooks/")
     PUBLIC_PATHS = ("/docs", "/redoc", "/openapi.json")
 
     @classmethod

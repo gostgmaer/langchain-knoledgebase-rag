@@ -31,6 +31,10 @@ class SearchFilter:
     tags: list[str] | None = None
     """Documents must carry ALL of these tags."""
     language: str | None = None
+    source_types: list[str] | None = None
+    """Only documents from these source types ("confluence", "web", "upload" ...)."""
+    source_ids: list[UUID] | None = None
+    """Only documents from these configured knowledge sources."""
 
     metadata: dict[str, object] = field(default_factory=dict)
 

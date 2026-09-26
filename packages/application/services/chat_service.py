@@ -23,6 +23,7 @@ from packages.application.services.message_service import (
     MessageService,
 )
 from packages.conversation.context import ConversationContextBuilder
+from packages.domain.models.knowledge_source import KnowledgeSource
 from packages.domain.models.message import Message
 from packages.domain.models.message_citation import MessageCitation
 from packages.graph.manager import GraphManager
@@ -550,6 +551,8 @@ class ChatService:
             seen.add(chunk_id)
             document = await self._uow.documents.get(document_id)
             chunk = await self._uow.document_chunks.get(chunk_id)
+            external = document is not None and document.source_id is not None
+            source = await self._uow.session.get(KnowledgeSource, document.source_id) if external else None
             citations.append(
                 CitationDTO(
                     document_id=document_id,
@@ -560,6 +563,10 @@ class ChatService:
                     document_name=document.file_name if document else None,
                     page_number=chunk.page_number if chunk else None,
                     section=chunk.section if chunk else None,
+                    source_type=(document.source_type or "upload") if document else None,
+                    source_name=source.name if source else None,
+                    url=document.canonical_url if external else None,
+                    updated_at=document.external_updated_at if external else None,
                 )
             )
         return citations
@@ -586,6 +593,10 @@ class ChatService:
                     document_name=citation.document_name,
                     page_number=citation.page_number,
                     section=citation.section,
+                    source_type=citation.source_type,
+                    source_name=citation.source_name,
+                    canonical_url=citation.url,
+                    external_updated_at=citation.updated_at,
                     rank=rank,
                     score=max(-99.0, min(99.0, float(citation.score))),
                 )
