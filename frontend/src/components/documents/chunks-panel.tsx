@@ -74,6 +74,14 @@ export function ChunksPanel({ documentId }: { documentId: string }) {
                               <JsonBlock
                                 value={{
                                   ...c.metadata,
+                                  content_hash: c.content_hash,
+                                  chunking_strategy: c.chunking_strategy ?? c.metadata.chunking_strategy,
+                                  chunking_version: c.chunking_version,
+                                  embedding_provider: c.embedding_provider,
+                                  embedding_model: c.embedding_model,
+                                  embedding_dimensions: c.embedding_dimensions,
+                                  pipeline_version: c.pipeline_version,
+                                  indexed_at: c.indexed_at,
                                   ...(c.start_offset !== null && { start_offset: c.start_offset }),
                                   ...(c.end_offset !== null && { end_offset: c.end_offset }),
                                 }}

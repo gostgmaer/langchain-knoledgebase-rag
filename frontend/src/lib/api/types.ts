@@ -51,6 +51,7 @@ export interface Conversation {
 }
 
 export interface Message {
+  sources?: MessageSource[];
   id: string;
   conversation_id: string;
   role: MessageRole;
@@ -63,6 +64,18 @@ export interface Citation {
   chunk_id: string;
   chunk_index: number;
   score: number;
+  label?: string | null;
+  document_name?: string | null;
+  page_number?: number | null;
+  section?: string | null;
+}
+
+/** Customer-visible source of an answer: which document, and where in it. */
+export interface MessageSource {
+  label: string;
+  document_name: string | null;
+  page_number: number | null;
+  section: string | null;
 }
 
 export interface ChatResponseData {
@@ -107,6 +120,20 @@ export interface DocumentRecord {
   /** null for documents ingested before chunking was recorded. */
   chunking: ChunkingInfo | null;
   document_metadata: Record<string, unknown>;
+  // Provenance / processing record. null = not recorded (ingested before these existed).
+  content_hash: string | null;
+  uploaded_by: string | null;
+  source_type: string | null;
+  processing_version: string | null;
+  parser_name: string | null;
+  chunking_version: string | null;
+  embedding_provider: string | null;
+  embedding_model: string | null;
+  embedding_dimensions: number | null;
+  processing_stage: string | null;
+  error_reason: string | null;
+  processed_at: string | null;
+  embedding_is_stale: boolean | null;
 }
 
 export interface ChunkingInfo {
@@ -131,6 +158,14 @@ export interface DocumentChunk {
   start_offset: number | null;
   end_offset: number | null;
   metadata: Record<string, unknown>;
+  content_hash: string | null;
+  chunking_strategy: string | null;
+  chunking_version: string | null;
+  embedding_provider: string | null;
+  embedding_model: string | null;
+  embedding_dimensions: number | null;
+  pipeline_version: string | null;
+  indexed_at: string | null;
 }
 
 export interface DocumentChunkListResponse {
@@ -504,4 +539,114 @@ export interface HealthResponse {
   status: string;
   database: string;
   redis: string;
+}
+
+// ---------------------------------------------------------------
+// Retrieval logs & observability (admin)
+// ---------------------------------------------------------------
+
+export interface RetrievalLogSummary {
+  retrieval_id: string;
+  trace_id: string | null;
+  request_id: string | null;
+  user_id: string | null;
+  conversation_id: string | null;
+  query_hash: string;
+  query_length: number;
+  strategy: string;
+  top_k: number;
+  reranking_enabled: boolean;
+  reranker_model: string | null;
+  candidate_count: number;
+  selected_count: number;
+  search_latency_ms: number | null;
+  rerank_latency_ms: number | null;
+  latency_ms: number | null;
+  created_at: string;
+}
+
+export interface RetrievalResult {
+  chunk_id: string;
+  chunk_index: number;
+  document_id: string;
+  document_name: string | null;
+  document_version: number | null;
+  document_is_current: boolean | null;
+  page_number: number | null;
+  section: string | null;
+  chunking_strategy: string | null;
+  retrieval_rank: number;
+  retrieval_score: number;
+  reranker_score: number | null;
+  final_rank: number | null;
+  selected_for_context: boolean;
+  reranking_changed_rank: boolean | null;
+}
+
+export interface RetrievalLogDetail extends RetrievalLogSummary {
+  model_profile_id: string | null;
+  min_relevance_score: number | null;
+  sub_query_count: number;
+  filters: Record<string, unknown>;
+  results: RetrievalResult[];
+}
+
+export interface RetrievalLogList {
+  total: number;
+  limit: number;
+  offset: number;
+  retrievals: RetrievalLogSummary[];
+}
+
+export interface RetrievalSummary {
+  days: number;
+  retrievals: number;
+  avg_latency_ms: number | null;
+  p95_latency_ms: number | null;
+  avg_candidates: number | null;
+  avg_selected: number | null;
+  empty_rate: number | null;
+  low_confidence_rate: number | null;
+  answers_with_sources: number;
+  answers_total: number;
+  citation_coverage: number | null;
+}
+
+export interface DocumentHealth {
+  total: number;
+  by_status: Record<string, number>;
+  stale_embeddings: number;
+  never_retrieved: number;
+  current_pipeline_version: string;
+}
+
+export interface ObservabilitySummary {
+  retrieval: RetrievalSummary;
+  documents: DocumentHealth;
+}
+
+export interface TopDocument {
+  document_id: string;
+  document_name: string | null;
+  times_retrieved: number;
+  times_selected: number;
+  avg_reranker_score: number | null;
+}
+
+export interface AuditEvent {
+  id: string;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  actor_id: string | null;
+  request_id: string | null;
+  detail: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AuditList {
+  total: number;
+  limit: number;
+  offset: number;
+  events: AuditEvent[];
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  Activity,
+  ListTree,
   BarChart3,
   Bot,
   Cpu,
@@ -53,6 +55,8 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/tenant-admin/feedback", label: "Feedback", icon: MessagesSquare },
     { href: "/tenant-admin/upload-jobs", label: "Upload Jobs", icon: UploadCloud },
     { href: "/tenant-admin/analytics", label: "Analytics", icon: BarChart3 },
+    { href: "/tenant-admin/retrieval", label: "Retrieval Log", icon: ListTree },
+    { href: "/tenant-admin/observability", label: "Observability", icon: Activity },
     { href: "/tenant-admin/usage", label: "Usage", icon: Gauge },
     { href: "/tenant-admin/settings", label: "Settings", icon: Settings },
   ],
@@ -71,6 +75,8 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/admin/feedback", label: "Feedback", icon: MessagesSquare },
     { href: "/admin/upload-jobs", label: "Upload Jobs", icon: UploadCloud },
     { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
+    { href: "/admin/retrieval", label: "Retrieval Log", icon: ListTree },
+    { href: "/admin/observability", label: "Observability", icon: Activity },
     { href: "/admin/usage", label: "Usage", icon: Gauge },
     { href: "/admin/feature-flags", label: "Feature Flags", icon: Flag },
     { href: "/admin/settings", label: "Settings", icon: Settings },

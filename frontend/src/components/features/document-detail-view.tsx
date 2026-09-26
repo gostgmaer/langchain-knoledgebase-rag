@@ -4,6 +4,7 @@ import { QueryError } from "@/components/shared/query-error";
 import { useRouter } from "next/navigation";
 
 import { ChunkingCard } from "@/components/documents/chunking-card";
+import { ProvenanceCard } from "@/components/documents/provenance-card";
 import { ChunksPanel } from "@/components/documents/chunks-panel";
 import { JsonBlock } from "@/components/documents/json-block";
 import { PageHeader } from "@/components/shared/page-header";
@@ -57,6 +58,7 @@ export function DocumentDetailView({ documentId, basePath }: { documentId: strin
         </Card>
 
         <ChunkingCard doc={doc} />
+        <ProvenanceCard doc={doc} />
 
         <Card>
           <CardHeader>

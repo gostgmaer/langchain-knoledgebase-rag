@@ -13,7 +13,9 @@ import {
   health,
   knowledgeBases,
   modelProfiles,
+  observability,
   prompts,
+  retrievalLogs,
   search,
   tools,
   uploadJobs,
@@ -403,5 +405,56 @@ export function useToggleFeatureFlag() {
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
       featureFlags.toggle(identity!, id, enabled),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["feature-flags", identity?.tenantId] }),
+  });
+}
+
+// ---------------------------------------------------------------
+// Retrieval logs & observability
+// ---------------------------------------------------------------
+
+export function useRetrievalLogs(limit: number, offset: number) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["retrieval-logs", identity?.tenantId, limit, offset],
+    queryFn: () => retrievalLogs.list(identity!, limit, offset),
+    enabled: !!identity,
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useRetrievalLog(id: string | null) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["retrieval-log", identity?.tenantId, id],
+    queryFn: () => retrievalLogs.get(identity!, id!),
+    enabled: !!identity && !!id,
+  });
+}
+
+export function useObservabilitySummary(days: number) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["observability-summary", identity?.tenantId, days],
+    queryFn: () => observability.summary(identity!, days),
+    enabled: !!identity,
+  });
+}
+
+export function useTopDocuments(days: number) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["observability-top-documents", identity?.tenantId, days],
+    queryFn: () => observability.topDocuments(identity!, days),
+    enabled: !!identity,
+  });
+}
+
+export function useAuditEvents(limit: number, offset: number) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["observability-audit", identity?.tenantId, limit, offset],
+    queryFn: () => observability.audit(identity!, limit, offset),
+    enabled: !!identity,
+    placeholderData: (previous) => previous,
   });
 }

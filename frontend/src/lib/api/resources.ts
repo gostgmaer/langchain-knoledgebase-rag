@@ -12,7 +12,12 @@ import type {
   CreateModelProfileRequest,
   CreatePromptRequest,
   CreateToolRequest,
+  AuditList,
   DocumentChunkListResponse,
+  ObservabilitySummary,
+  RetrievalLogDetail,
+  RetrievalLogList,
+  TopDocument,
   DocumentListResponse,
   DocumentRecord,
   DocumentUploadResponse,
@@ -235,4 +240,24 @@ export const featureFlags = {
     }),
   delete: (identity: Identity, id: string) =>
     apiFetch<null>(`/feature-flags/${id}`, identity, { method: "DELETE" }),
+};
+
+// ---------------------------------------------------------------
+// Retrieval logs & observability — admin-only
+// ---------------------------------------------------------------
+
+export const retrievalLogs = {
+  list: (identity: Identity, limit: number, offset: number) =>
+    apiFetch<RetrievalLogList>("/retrieval-logs", identity, { query: { limit, offset } }),
+  get: (identity: Identity, id: string) =>
+    apiFetch<RetrievalLogDetail>(`/retrieval-logs/${id}`, identity),
+};
+
+export const observability = {
+  summary: (identity: Identity, days: number) =>
+    apiFetch<ObservabilitySummary>("/observability/summary", identity, { query: { days } }),
+  topDocuments: (identity: Identity, days: number) =>
+    apiFetch<TopDocument[]>("/observability/top-documents", identity, { query: { days, limit: 10 } }),
+  audit: (identity: Identity, limit: number, offset: number) =>
+    apiFetch<AuditList>("/observability/audit", identity, { query: { limit, offset } }),
 };

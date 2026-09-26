@@ -38,6 +38,19 @@ class ConversationResponseSchema(BaseModel):
     status: str
 
 
+class MessageSourceSchema(BaseModel):
+    """
+    Customer-visible citation: which document (and where in it) backed an answer. Deliberately
+    carries no internal ids, scores or retrieval details - those are admin-only
+    (see /retrieval-logs).
+    """
+
+    label: str
+    document_name: str | None = None
+    page_number: int | None = None
+    section: str | None = None
+
+
 class MessageResponseSchema(BaseModel):
     """
     A single message within a conversation's history.
@@ -52,6 +65,7 @@ class MessageResponseSchema(BaseModel):
     content: str
     status: str
     created_at: datetime
+    sources: list[MessageSourceSchema] = []
 
 
 class ConversationHistoryResponseSchema(BaseModel):

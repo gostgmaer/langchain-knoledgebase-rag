@@ -112,6 +112,26 @@ CR=$(curl -s -m 170 -X POST $RAG/chat -H "Authorization: Bearer $ATOK" -H 'Conte
 echo "$CR" | grep -q "BLUE-HERON-$TS" && ok "answer contains the code from the document" || bad "answer did not contain BLUE-HERON-$TS (LLM overloaded? $(echo "$CR" | head -c 120))"
 NC=$(echo "$CR" | J "x=d.get('data') or d; print(len(x.get('citations') or x.get('sources') or []))"); [ "${NC:-0}" -ge 1 ] && ok "answer has $NC citation(s)" || bad "no citations"
 
+echo; echo "== 5c. Provenance, retrieval log and observability"
+DOCID=$(curl -s "$RAG/documents?limit=200" -H "Authorization: Bearer $ATOK" | J "print(next((x['id'] for x in (d.get('data') or {}).get('documents',[]) if x['file_name']=='e2e_doc_$TS.txt'),''))")
+if [ -n "$DOCID" ]; then
+  CH=$(curl -s "$RAG/documents/$DOCID/chunks?limit=5" -H "Authorization: Bearer $ATOK")
+  echo "$CH" | J "c=[x for x in (d.get('data') or {}).get('chunks',[]) if x['kind']=='chunk']; print('yes' if c and c[0]['content_hash'] and c[0]['embedding_model'] and c[0]['pipeline_version'] and c[0]['indexed_at'] else 'no')" | grep -q yes && ok "chunks carry hash, embedding model, pipeline version and index time" || bad "chunk provenance missing"
+  curl -s "$RAG/documents/$DOCID" -H "Authorization: Bearer $ATOK" | J "x=d.get('data') or {}; print('yes' if x.get('processing_stage')=='completed' and x.get('uploaded_by') and x.get('chunking') else 'no')" | grep -q yes && ok "document records uploader, stage and chunking" || bad "document provenance missing"
+else bad "could not find the uploaded document"; fi
+RID=$(curl -s "$RAG/retrieval-logs?limit=1" -H "Authorization: Bearer $ATOK" | J "r=(d.get('data') or {}).get('retrievals',[]); print(r[0]['retrieval_id'] if r else '')")
+if [ -n "$RID" ]; then
+  ok "retrieval was logged ($RID)"
+  curl -s "$RAG/retrieval-logs/$RID" -H "Authorization: Bearer $ATOK" | J "x=d.get('data') or {}; r=x.get('results',[]); print('yes' if r and any(i['selected_for_context'] for i in r) and x.get('query_hash') and 'query' not in x else 'no')" | grep -q yes && ok "retrieval log explains candidates and stores a query hash, not the query" || bad "retrieval log incomplete"
+else bad "no retrieval was logged"; fi
+chk "observability summary" "$(curl -s -o /dev/null -w '%{http_code}' "$RAG/observability/summary" -H "Authorization: Bearer $ATOK")" 200
+chk "audit trail" "$(curl -s -o /dev/null -w '%{http_code}' "$RAG/observability/audit" -H "Authorization: Bearer $ATOK")" 200
+if [ -n "${MA:-}" ]; then
+  for ep in retrieval-logs observability/summary observability/audit; do
+    chk "member cannot read /$ep" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/$ep -H "$MA")" 403
+  done
+fi
+
 echo; echo "== 6. Connected accounts API"
 chk "list connected accounts" "$(curl -s -o /dev/null -w '%{http_code}' $GW/api/auth/social/accounts -H "Authorization: Bearer $ATOK" -H "$O")" 200
 chk "Google authorize redirect" "$(curl -s -o /dev/null -w '%{http_code}' $GW/api/auth/social/google/start -H "$O")" 302

@@ -38,6 +38,17 @@ export function MessageBubble({ message, pending }: { message: Message; pending?
         >
           {message.content || (pending ? "…" : "")}
         </div>
+        {message.sources && message.sources.length > 0 && (
+          <ul className="flex flex-col gap-0.5 text-xs text-neutral-500" aria-label="Sources">
+            {message.sources.map((s) => (
+              <li key={s.label}>
+                <span className="font-medium">{s.label}</span> {s.document_name ?? "Unknown document"}
+                {s.page_number !== null && ` · page ${s.page_number}`}
+                {s.section && ` · ${s.section}`}
+              </li>
+            ))}
+          </ul>
+        )}
         {message.role === "ASSISTANT" && !pending && (
           <div className="flex items-center gap-1">
             <Button

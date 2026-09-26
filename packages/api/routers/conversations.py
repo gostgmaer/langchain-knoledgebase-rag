@@ -4,6 +4,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import select
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
@@ -13,6 +14,7 @@ from packages.api.dependencies import (
 )
 from packages.api.responses import ApiResponse
 from packages.api.schemas.conversation import (
+    MessageSourceSchema,
     ConversationCreateSchema,
     ConversationHistoryResponseSchema,
     ConversationResponseSchema,
@@ -24,6 +26,9 @@ from packages.conversation.bootstrap import (
 )
 from packages.domain.enums.conversation_status import ConversationStatus
 from packages.domain.models.conversation import Conversation
+from packages.domain.models.document import Document
+from packages.domain.models.document_chunk import DocumentChunk
+from packages.domain.models.message_citation import MessageCitation
 from packages.infrastructure.container import ApplicationContainer
 
 router = APIRouter(
@@ -105,6 +110,34 @@ async def get_conversation(
     )
 
 
+async def _with_sources(container: ApplicationContainer, history) -> list[MessageResponseSchema]:
+    """Messages plus the customer-visible sources (label, document, page, section) of each answer."""
+    ids = [m.id for m in history]
+    by_message: dict[UUID, list[MessageSourceSchema]] = {}
+
+    if ids:
+        rows = (
+            await container.database.session().execute(
+                select(MessageCitation.message_id, MessageCitation.rank, Document.file_name, DocumentChunk.page_number, DocumentChunk.section)
+                .join(Document, Document.id == MessageCitation.document_id, isouter=True)
+                .join(DocumentChunk, DocumentChunk.id == MessageCitation.chunk_id, isouter=True)
+                .where(MessageCitation.message_id.in_(ids))
+                .order_by(MessageCitation.rank)
+            )
+        ).all()
+        for message_id, rank, name, page, section in rows:
+            by_message.setdefault(message_id, []).append(
+                MessageSourceSchema(label=f"[{rank}]", document_name=name, page_number=page, section=section)
+            )
+
+    out = []
+    for message in history:
+        schema = MessageResponseSchema.model_validate(message)
+        schema.sources = by_message.get(message.id, [])
+        out.append(schema)
+    return out
+
+
 @router.get(
     "/{conversation_id}/messages",
     status_code=status.HTTP_200_OK,
@@ -182,9 +215,6 @@ async def get_conversation_history(
             total=total,
             limit=limit,
             offset=offset,
-            messages=[
-                MessageResponseSchema.model_validate(message)
-                for message in history
-            ],
+            messages=await _with_sources(container, history),
         ),
     )
