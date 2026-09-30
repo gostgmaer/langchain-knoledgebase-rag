@@ -271,6 +271,7 @@ export interface CreateKnowledgeBaseRequest {
 
 export interface SearchResult {
   document_id: string;
+  document_name: string;
   chunk_id: string;
   chunk_index: number;
   content: string;

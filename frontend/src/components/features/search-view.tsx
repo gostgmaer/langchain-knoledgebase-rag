@@ -83,8 +83,11 @@ export function SearchView() {
           <Card key={`${result.chunk_id}-${i}`}>
             <CardContent className="pt-5">
               <div className="mb-2 flex items-center justify-between">
-                <Badge variant="secondary">score {result.score.toFixed(3)}</Badge>
-                <span className="text-xs text-neutral-400">chunk #{result.chunk_index}</span>
+                <span className="text-sm font-medium">{result.document_name}</span>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">score {result.score.toFixed(3)}</Badge>
+                  <span className="text-xs text-neutral-400">chunk #{result.chunk_index}</span>
+                </div>
               </div>
               <p className="text-sm text-neutral-700 dark:text-neutral-300">{result.content}</p>
             </CardContent>

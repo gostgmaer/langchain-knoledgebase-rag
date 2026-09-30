@@ -43,6 +43,7 @@ class SearchResultSchema(BaseModel):
     )
 
     document_id: UUID
+    document_name: str
     chunk_id: UUID
     chunk_index: int
     content: str
