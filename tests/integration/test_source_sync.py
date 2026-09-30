@@ -436,7 +436,7 @@ async def test_incremental_changes_are_applied_and_the_cursor_only_advances_on_s
     _, run_id = await env["sync"]()
 
     run = await env["run"](run_id)
-    assert counts(run) == (1, 0, 1, 1, 0, 0)  # only the change set was looked at
+    assert counts(run) == (2, 0, 1, 1, 0, 0)  # only the change set was looked at (both events count as discovered)
     by_id = {d.external_id: d for d in await env["docs"]() if d.is_current}
     assert by_id["b"].status == DocumentStatus.ARCHIVED and by_id["a"].external_version == "2"
 

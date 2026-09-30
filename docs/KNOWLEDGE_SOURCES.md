@@ -197,28 +197,42 @@ tables and columns at startup (or `alembic upgrade head`). Running the API as a 
 
 ## 12. Verification: what is and is not proven
 
-* `tests/unit/connectors` (79 tests): HTTP client (retry, backoff, 429/Retry-After, breaker, throttle, SSRF, redirect
+* `tests/unit/connectors` (94 tests): HTTP client (retry, backoff, 429/Retry-After, breaker, throttle, SSRF, redirect
   credential stripping), HTML extraction, the web crawler (scope, patterns, depth, robots, sitemap, canonical/duplicate,
-  conditional GET, content types, failures, cancel), Wikipedia, Confluence, SharePoint/OneDrive/Teams, credential
-  encryption and rotation, the registry.
-* `tests/integration/test_source_sync.py` (19 tests, real Postgres, scripted connector): create/skip/update/version/rename/
+  conditional GET, content types, JavaScript rendering, failures, cancel), Wikipedia, Confluence, SharePoint/OneDrive/Teams
+  (including Teams attachments and shared-file resolution), credential encryption and rotation, the registry.
+* `tests/integration/test_source_sync.py` (24 tests, real Postgres, scripted connector): create/skip/update/version/rename/
   remove/restore, failure isolation and quarantine, empty-listing and bulk-removal guards, cancellation, incremental
-  changes, permission derivation, fail-closed ACLs, identity mappings, credential scope.
-* `scripts/e2e_sources.sh` (64 checks, real API + worker): a documentation website served in a container, crawled,
-  answered from with citations, changed/removed/restored, scheduled, webhooked, credentials never leaking, tenant
-  isolation.
+  changes, permission derivation, fail-closed ACLs, identity mappings, credential scope, and a scale run (see Scale below).
+* `scripts/e2e_local.sh` (80 checks) and `scripts/e2e_sources.sh` (64 checks), both against the real API + worker: a
+  documentation website served in a container, crawled, answered from with citations, changed/removed/restored,
+  scheduled, webhooked, credentials never leaking, tenant isolation.
 * **Live against the real service:** the web crawler (own test site) and Wikipedia (the real MediaWiki API).
-* **Against a stand-in server, not the real service:** Confluence (a mock of its REST API, including authentication,
-  restrictions, versions), and SharePoint, OneDrive and Teams (unit tests with recorded-shape Graph responses). Their
-  request and response shapes follow the official documentation but have **not** been exercised against a real Confluence
-  or Microsoft 365 tenant; expect to adjust field names or permissions on first contact, and verify with the Test
-  connection button and a Preview before the first sync.
-* Not built: JavaScript-rendered pages, the planned connectors, per-item webhook events (a webhook triggers a sync), and
-  attachments/shared files for Teams.
+* **Live end-to-end against purpose-built stand-in servers** (real API + worker + Postgres, not mocked at the connector
+  layer): Confluence, SharePoint, OneDrive and Teams. Each was driven through its full lifecycle — authentication
+  (including a wrong-secret rejection and survival of an injected 429 + Retry-After), first sync with pagination,
+  incremental/delta sync, fail-closed permissions and identity-mapping-derived access, cross-host download redirects with
+  credential stripping, a permission-only change causing no re-embedding, a content-version change producing a new
+  retrievable version with full chunk provenance, per-item webhook-triggered targeted refresh, out-of-scope-item
+  archival on notification, credential revocation, and citation in a real chat answer. Teams additionally covered shared
+  file resolution via the `/shares/` API and channel-membership-derived access. These stand-ins follow the vendors'
+  documented request/response shapes but are **not** the real services; they have **not** been exercised against a real
+  Confluence or Microsoft 365 tenant, expect to adjust field names or permissions on first contact, and verify with the
+  Test connection button and a Preview before the first real sync. Teams also needs Microsoft's approval to read channel
+  messages in production.
+* **JavaScript-rendered pages:** live-proven against a purpose-built mock renderer — rendering off indexes only the
+  static shell, rendering on indexes the rendered content (and answers cite it), and a renderer failure is reported as a
+  per-page warning (surfaced on the source's health endpoint) without failing the whole sync.
+* **Per-item webhook events:** built and live-proven for both the generic `external_ids` shape and Confluence's native
+  page-id notification shape — a single named item is refreshed through `SyncEngine._sync_targets()` without touching the
+  full delta/discovery cursor, and a notification that arrives mid-sync is queued and drained automatically afterward.
 * Lifecycle: an external item is recorded as `indexed`, `updated`, `deleted` or `failed`. `discovered`, `pending`,
   `fetching` and `processing` exist as values but are not written mid-flight, because each document is processed in one
   transaction (progress is visible through the run's counters instead).
 * Scale: designed for many sources and large ones (metadata-only discovery, version comparison before any fetch, bounded
-  parallelism, per-document transactions, indexes on tenant/source/status), but **not load-tested** beyond a few hundred
-  documents. Concurrency limits are per sync (`CONNECTOR_SYNC_CONCURRENCY`) and per worker (arq `max_jobs`); there is no
-  global per-tenant cap across sources, and the per-document record lookup is one query each.
+  parallelism, per-document transactions, indexes on tenant/source/status). Proven at 5,000 documents via
+  `tests/integration/test_source_sync.py` (`LOAD_ITEMS=5000`) against a real Postgres: ~105 docs/sec on the first sync,
+  ~342 docs/sec on an unchanged repeat sync (sync-engine bookkeeping and change-detection only — this does not exercise
+  real embedding generation, which is architecturally independent of connector/sync logic and has its own throughput
+  characteristics). Concurrency limits are per sync (`CONNECTOR_SYNC_CONCURRENCY`) and per worker (arq `max_jobs`); there
+  is no global per-tenant cap across sources, and the per-document record lookup is one query each.

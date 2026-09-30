@@ -699,7 +699,9 @@ async def source_health(source_id: UUID, request: Request, container: Applicatio
     health = source.health or {}
     latest = (await session.execute(select(SourceSyncRun).where(SourceSyncRun.source_id == source_id).order_by(SourceSyncRun.created_at.desc()).limit(1))).scalars().first()
     stats = (latest.stats if latest else None) or {}
-    warnings = list((stats.get("crawl") or {}).get("warnings", []))[:10] if isinstance(stats.get("crawl"), dict) else []
+    # Connector-level warnings (a page's robots/HTTP/render error, ...) live on source.health, not on the run: a
+    # connector reports them per-instance (one per sync), and `health` above already carries the latest snapshot.
+    warnings = list(health.get("warnings") or [])[:10]
     return ApiResponse(
         message="Health retrieved.",
         data=SourceHealthSchema(

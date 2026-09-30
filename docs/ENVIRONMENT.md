@@ -152,6 +152,8 @@ The API verifies each request by sending the caller's bearer token to IAM (`GET 
 | `CONNECTOR_ALLOW_PRIVATE_HOSTS` | `false` | Lets connectors call private-network addresses (an intranet Confluence, a docs site on your network). **Off by default: it is the guard against a source URL reaching the platform's own network or cloud metadata (SSRF).** Turn on only if your sources genuinely live on a private network. |
 | `CONNECTOR_SYNC_CONCURRENCY` | `4` | Documents processed in parallel within one sync (1-16). Each runs in its own transaction. |
 | `CONNECTOR_MAX_ERROR_DETAILS` | `100` | Failed documents listed in a sync run's error detail (counts are always exact). |
+| `CONNECTOR_RENDER_URL` | unset | Base URL of a headless-rendering service (Browserless-compatible `/content` endpoint) used when a web source has "Render JavaScript" turned on. Unset means that option is rejected at save time. See `docs/KNOWLEDGE_SOURCES.md`, "JavaScript-rendered pages". |
+| `CONNECTOR_RENDER_TOKEN` | unset | Bearer token sent to `CONNECTOR_RENDER_URL`, if the rendering service requires one. |
 
 ### 3.5 LLM and embeddings
 
