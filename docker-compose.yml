@@ -110,6 +110,41 @@ services:
     networks:
       - ai-platform
 
+  # Dedicated Chroma server (packages/config/rag.py's chroma_server_host/
+  # port docstring; docs/BUILD_STATUS.md "next priorities" #19) — only
+  # actually used when VECTOR_STORE_BACKEND=chroma (this dev .env
+  # currently runs pgvector instead, which needs no separate server).
+  # Image pinned to match the installed `chromadb` Python client
+  # (1.5.9) rather than `latest`, since the client/server wire protocol
+  # isn't guaranteed stable across major versions. Previously nothing
+  # started this automatically despite CHROMA_SERVER_HOST/PORT already
+  # expecting one at chroma:8000 — the real cause of a full outage after
+  # a multi-day gap between sessions purely because it wasn't restarted.
+  chroma:
+    image: chromadb/chroma:1.5.9
+
+    ports:
+      # Host-side only — api/worker reach it internally as chroma:8000.
+      - "8010:8000"
+
+    volumes:
+      - chroma-data:/data
+
+    healthcheck:
+      # No curl/wget/python in this image (confirmed live) — bash's own
+      # /dev/tcp is the only dependency-free way to check the port here.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8000' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    profiles: [full]
+
+    restart: unless-stopped
+
+    networks:
+      - ai-platform
+
   # OpenTelemetry (docs/mvpRAG.md v1.1) — a local OTLP collector +
   # trace UI so OTEL_ENABLED=true has somewhere real to send spans to.
   # No env_file/healthcheck needed (nothing else depends on it being
@@ -133,6 +168,7 @@ volumes:
   postgres-data:
   redis-data:
   hf-cache:
+  chroma-data:
 networks:
   ai-platform:
     driver: bridge
