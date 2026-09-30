@@ -358,11 +358,11 @@ service.
 
 ### 23. ✅ Misleading stale TODO-stub comment headers on fully-implemented files — see "Fixed this pass" (0d) above.
 
-### 24. 🔴 Dead code: `packages/sdk/notification/`
-5 real-looking modules (client/email/endpoints/exceptions/models.py); confirmed via
-`grep -rl "sdk.notification"` that nothing in `packages/` imports it. Matches
-`docs/UNUSED_FILES.md`'s long-standing "safe to remove" recommendation — not removed here since
-deletion wasn't explicitly requested.
+### 24. ✅ Dead code: `packages/sdk/notification/`
+Deleted (5 files: client/email/endpoints/exceptions/models.py) — re-confirmed zero references
+anywhere (`grep -rl "sdk.notification"` across `packages/`/`tests/`) before removing.
+`docs/UNUSED_FILES.md` corrected alongside it (four other listed files turned out to already be
+gone too, from an earlier pass — that table just never got updated).
 
 ---
 
