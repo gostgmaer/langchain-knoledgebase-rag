@@ -16,7 +16,11 @@ class RAGSettings(BaseSettings):
     embedding_model: str = Field(
         default="models/embedding-001", alias="EMBEDDING_MODEL"
     )
-    vector_store_backend: str = Field(default="chroma", alias="VECTOR_STORE_BACKEND")
+    # pgvector is the real default (reuses the Postgres this app already runs; no separate server
+    # needed) -- testing and production always use it. Chroma is available for local development
+    # only (opt in via .env), and its own embedded-client concurrency caveat below is exactly why
+    # it isn't the default anywhere it matters.
+    vector_store_backend: str = Field(default="pgvector", alias="VECTOR_STORE_BACKEND")
     vector_collection_name: str = Field(
         default="langchain", alias="VECTOR_COLLECTION_NAME"
     )
