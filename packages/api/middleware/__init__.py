@@ -11,6 +11,7 @@ from .logging import LoggingMiddleware
 from .metrics import MetricsMiddleware
 from .rate_limit import RateLimitMiddleware
 from .request_id import RequestIdMiddleware
+from .security_headers import SecurityHeadersMiddleware
 from .tenant import TenantMiddleware
 
 
@@ -73,6 +74,15 @@ def register_middlewares(app: FastAPI) -> None:
     #
     app.add_middleware(
         MetricsMiddleware,
+    )
+
+    #
+    # Security headers (docs/BUILD_STATUS.md gap #2). Registered just
+    # inside CORS so it still stamps headers on responses CORS itself
+    # short-circuits (a preflight OPTIONS), and on every real response.
+    #
+    app.add_middleware(
+        SecurityHeadersMiddleware,
     )
 
     #
