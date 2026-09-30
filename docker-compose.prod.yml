@@ -124,6 +124,12 @@ services:
     volumes:
       - redis-data:/data
 
+    healthcheck:
+      # api/worker both declare `redis: condition: service_healthy` above —
+      # without this, that dependency condition could never be reported and
+      # `docker compose -f docker-compose.prod.yml up` would fail outright.
+      test: ["CMD", "redis-cli", "ping"]
+
     deploy:
       resources:
         limits:

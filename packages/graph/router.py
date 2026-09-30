@@ -4,6 +4,9 @@ from langgraph.graph import END
 
 from packages.graph.state import GraphState
 from packages.planner.models import Capability
+from packages.shared.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class GraphRouter:
@@ -23,10 +26,10 @@ class GraphRouter:
             # needed, deciding whether this turn's question is
             # genuinely multi-part before either path actually
             # retrieves anything (Multi-Agent, docs/mvpRAG.md v2.0).
-            print("[Router] Next node: supervisor")
+            logger.debug("Routing decision", next_node="supervisor")
             return "supervisor"
 
-        print("[Router] Next node: llm")
+        logger.debug("Routing decision", next_node="llm")
         return "llm"
 
     def route_after_supervisor(
@@ -35,10 +38,10 @@ class GraphRouter:
     ) -> str:
 
         if state.get("is_multi_part"):
-            print("[Router] Next node: researcher")
+            logger.debug("Routing decision", next_node="researcher")
             return "researcher"
 
-        print("[Router] Next node: retrieve")
+        logger.debug("Routing decision", next_node="retrieve")
         return "retrieve"
 
     def after_llm(
@@ -49,10 +52,10 @@ class GraphRouter:
         message = state["messages"][-1]
 
         if getattr(message, "tool_calls", None):
-            print("[Router] Tool calls detected")
+            logger.debug("Routing decision", next_node="tool", tool_calls=True)
             return "tool"
 
-        print("[Router] Conversation finished")
+        logger.debug("Routing decision", next_node="END")
 
         # Memory extraction/summarization used to run here as a graph
         # node, blocking the HTTP response on two more sequential LLM

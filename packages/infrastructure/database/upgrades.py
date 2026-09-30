@@ -63,8 +63,14 @@ UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_document_type ON documents (tenant_id, document_type)",
     # --- messages: which retrieval supplied the answer's context
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS retrieval_id uuid",
-    # citations store reranker logits, which can be negative
-    "ALTER TABLE message_citations DROP CONSTRAINT IF EXISTS ck_citation_score",
+    # citations store reranker logits, which can be negative. The declared CheckConstraint name was
+    # "ck_citation_score", but packages/infrastructure/database/metadata.py's naming_convention
+    # ("ck": "ck_%(table_name)s_%(constraint_name)s") means create_all() actually created it in
+    # Postgres as ck_message_citations_ck_citation_score - dropping the bare name was a silent
+    # no-op (IF EXISTS never raised) on every startup since this line was added, so the stale
+    # constraint kept rejecting every citation with a negative rerank score. Confirmed live via
+    # pg_get_constraintdef before fixing this.
+    "ALTER TABLE message_citations DROP CONSTRAINT IF EXISTS ck_message_citations_ck_citation_score",
     # citations survive a re-index: chunk link becomes SET NULL, and the reader-facing facts are snapshotted
     "ALTER TABLE message_citations ADD COLUMN IF NOT EXISTS document_name varchar(512)",
     "ALTER TABLE message_citations ADD COLUMN IF NOT EXISTS page_number integer",

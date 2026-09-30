@@ -17,9 +17,12 @@ from packages.conversation.service import (
 from packages.domain.enums.message_role import MessageRole
 from packages.domain.models.message import Message
 from packages.graph.state import GraphState
+from packages.shared.logging import get_logger
 
 if TYPE_CHECKING:
     from packages.graph.manager import GraphManager
+
+logger = get_logger(__name__)
 
 
 class ConversationManager:
@@ -69,7 +72,11 @@ class ConversationManager:
         # Save user message
         #
 
-        print(f"\n[ConversationManager] RECEIVED USER MESSAGE: {request.message}\n")
+        logger.debug(
+            "Received user message",
+            conversation_id=str(request.conversation_id),
+            message_length=len(request.message),
+        )
 
         await self.service.add_message(
             Message(
