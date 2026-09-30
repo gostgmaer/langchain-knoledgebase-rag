@@ -149,6 +149,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         tools=tools,
         memory=memory,
         services=services,
+        repositories=repositories,
     )
 
     #

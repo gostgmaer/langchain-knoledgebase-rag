@@ -220,6 +220,7 @@ class GraphContainer(containers.DeclarativeContainer):
     tools = providers.DependenciesContainer()
     memory = providers.DependenciesContainer()
     services = providers.DependenciesContainer()
+    repositories = providers.DependenciesContainer()
     prompt_builder = providers.Singleton(PromptBuilder)
 
     # NOTE: this whole chain is Factory, not Singleton, on purpose.
@@ -277,6 +278,7 @@ class GraphContainer(containers.DeclarativeContainer):
         chat_service=services.chat,
         prompt_builder=prompt_builder,
         tool_manager=tools.manager,
+        model_profile_repository=repositories.model_profile,
     )
 
     # Multi-Agent (docs/mvpRAG.md v2.0) — all Factory, matching this

@@ -9,7 +9,10 @@ from langgraph.config import get_stream_writer
 from packages.chat.chat_service import ChatService
 from packages.chat.request import ChatRequest
 from packages.chat.response import ChatResponse
+from packages.domain.enums.model_status import ModelStatus
 from packages.graph.state import GraphState
+from packages.infrastructure.ai.config import build_llm_config_from_profile
+from packages.infrastructure.repositories.model_profile import ModelProfileRepository
 from packages.prompts.builder import PromptBuilder
 from packages.shared.messages import normalize_message_content, sanitize_tool_call_args
 from packages.tools.manager import ToolManager
@@ -33,11 +36,13 @@ class LLMNode:
         chat_service: ChatService,
         prompt_builder: PromptBuilder,
         tool_manager: ToolManager,
+        model_profile_repository: ModelProfileRepository,
     ) -> None:
 
         self._chat = chat_service
         self._builder = prompt_builder
         self._tools = tool_manager
+        self._model_profiles = model_profile_repository
 
     async def __call__(
         self,
@@ -55,6 +60,7 @@ class LLMNode:
             conversation_id=state["conversation_id"],
             messages=prompt,
             tools=self._tools.list() if state.get("tools_enabled", True) else [],
+            llm_config=await self._resolve_llm_config(state.get("model_profile_id")),
         )
 
         if state.get("stream"):
@@ -71,6 +77,25 @@ class LLMNode:
         state["usage"] = response.usage or {}
 
         return state
+
+    async def _resolve_llm_config(self, model_profile_id):
+        """
+        None means "use ChatService's default LLMManager", same as before
+        this existed — a missing id, a deleted profile, a DISABLED/
+        DEPRECATED one, or a provider LLMFactory doesn't implement yet
+        (build_llm_config_from_profile's own fallback) are all treated the
+        same way: fail soft to the global default rather than ever failing
+        a chat turn over a model-profile lookup.
+        """
+
+        if model_profile_id is None:
+            return None
+
+        profile = await self._model_profiles.get(model_profile_id)
+        if profile is None or profile.status != ModelStatus.ACTIVE:
+            return None
+
+        return build_llm_config_from_profile(profile)
 
     async def _stream(self, request: ChatRequest, citations: list, retrieval_id=None):
         """

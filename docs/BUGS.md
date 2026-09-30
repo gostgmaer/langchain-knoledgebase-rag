@@ -194,11 +194,36 @@ were already live-verified working; the headers were only ever misleading.
 
 ### 14. ✅ Debug `print()` statements in production code — see "Fixed this pass" (0c) above.
 
-### 15. 🔴 `ModelProfile.provider`/`.model` are stored but never actually read
-- `LLMFactory.create()` only ever uses the global `settings.ai.default_provider`
-  (`docs/CHANGELOG.md:847`, re-confirmed live this pass). An admin can configure a model profile that
-  claims "uses OpenAI" and the app silently keeps using the global default instead — a genuine,
-  user-facing correctness gap for any multi-model-profile setup.
+### 15. ✅ `ModelProfile.provider`/`.model` are stored but never actually read
+- Was: `LLMFactory.create()` only ever used the global `settings.ai.default_provider`
+  (`docs/CHANGELOG.md:847`). An admin could configure a model profile that claims "uses OpenAI" and
+  the app silently kept using the global default instead — a genuine, user-facing correctness gap.
+- **Root cause traced further than the original note:** `model_profile_id` was already threaded all
+  the way into `GraphState` and even *used* — but only for retrieval settings (`retrieve.py`), never
+  for actually selecting which LLM answers. `LLMManager.configure()` (the mechanism that could have
+  fixed this) existed but was never called anywhere in the app — confirmed via a full `grep` sweep.
+- **Fixed:** `packages/infrastructure/ai/config.py` gained `build_llm_config_from_profile()`, which
+  maps a `ModelProfile` row (provider/model/temperature/top_p/top_k/max_tokens) to a real `LLMConfig`
+  — falling back to the global default (with a logged warning, not a crash) when the profile names a
+  provider `LLMFactory` doesn't implement yet (`ModelProvider` has several values — MISTRAL, OLLAMA,
+  OPENROUTER, FIREWORKS, TOGETHER, COHERE, CUSTOM — with no real provider class behind them; building
+  those integrations is a separate, much larger gap, not something to paper over here). `LLMNode`
+  (`packages/graph/nodes/llm.py`) now resolves `state["model_profile_id"]` through a newly-wired
+  `ModelProfileRepository` and passes the result on a new `ChatRequest.llm_config` field.
+  `ChatService` (`packages/chat/chat_service.py`) uses it to build a fresh, per-call `LLMManager`
+  when set, **never mutating the shared default Singleton** other requests still use — the response's
+  own `provider`/`model` fields were also fixed to report the config actually used, not always the
+  shared default's (a second, smaller instance of the same "stored but not reflected" bug).
+- Required a new `repositories` `DependenciesContainer` on `GraphContainer` (previously not wired in
+  at all) — additive DI change, nothing existing repointed.
+- **Verified live, both branches:** the default path (unchanged): a real chat call correctly reported
+  `model: "gemini-3.1-flash-lite"`, matching the default profile's own stored values (confirmed
+  identical to `.env`'s settings first, so this path's output doesn't silently shift). The fallback
+  path: created a real model profile via `POST /model-profiles` naming `MISTRAL` (unimplemented),
+  pointed a real agent/conversation at it, sent a real message — `200`, correct answer, response
+  still reported the working `google`/`gemini-3.1-flash-lite` default, and the exact expected warning
+  (`"Model profile references a provider LLMFactory doesn't implement yet"`) appeared in the API
+  container's logs. All test data cleaned up afterward.
 
 ### 16. 🔴 Most API routers have no router-level HTTP contract test
 - `tests/api/` has only 2 files (`test_feature_flags_api.py`, `test_health.py`). 12+ routers —
