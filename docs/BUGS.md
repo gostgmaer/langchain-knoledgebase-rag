@@ -152,15 +152,29 @@ were already live-verified working; the headers were only ever misleading.
 
 ## HIGH
 
-### 7. 🔴 `docker-compose.prod.yml` requires a pre-built image nothing in the repo builds
-- Requires `easydev/ai-platform:${VERSION}` via Compose's `:?` required-var syntax, but nothing
-  builds/tags/pushes that image. `docker compose -f docker-compose.prod.yml up` cannot work standalone.
+### 7. 🟡 `docker-compose.prod.yml` requires a pre-built image nothing in the repo builds
+- Was: requires `easydev/ai-platform:${VERSION}` via Compose's `:?` required-var syntax, but nothing
+  in the repo built/tagged/pushed that image.
+- **Fixed:** `scripts/build_prod_image.sh <version>` builds `docker/Dockerfile` once and tags it as
+  `easydev/ai-platform:<version>`, matching what the compose file expects (`api`/`worker` already
+  share one image); `PUSH=1` also pushes it. Documented in `docs/DEPLOYMENT.md` §6.
+- 🟡 rather than ✅: the script's logic was reviewed and matches the already-working `docker/Dockerfile`
+  exactly (same command `docker/DEPLOYMENT.md`'s own manual instructions used), but a live end-to-end
+  run of the script itself hit the same persistent build-network issue as items 13/21 (the large
+  `torch` download) before completing — pending a clean run once that clears.
 
 ### 8. ✅ `docker-compose.prod.yml`'s `redis` service was a real Compose config error — see "Fixed this pass" (0b) above.
 
-### 9. 🔴 No zero-downtime deploy story
+### 9. 📝 No zero-downtime deploy story — documented honestly, not force-fixed
 - `restart: always` + a straight redeploy drops in-flight requests. No reverse-proxy health-gated
   cutover, no rolling-update config.
+- **Deliberately not "fixed" with a script.** This genuinely needs a reverse proxy/load balancer
+  added to the stack (the current compose files bind `api` directly to one host port — nothing to
+  route across two temporarily-coexisting versions during a cutover), which is a real infrastructure
+  decision — new services, new things to keep healthy — not something to bolt on silently as a side
+  effect of an unrelated fix. Real options documented in `docs/DEPLOYMENT.md` §7 (a proxy + blue-green,
+  an orchestrator with rolling updates built in, or accepting brief downtime per deploy as a
+  legitimate choice for now) rather than picking one unasked.
 
 ### 10. ✅ `GET /api/v1/metrics` isn't real Prometheus format
 - Was a JSON dump of in-memory counters only, not Prometheus text-format — wouldn't integrate with a
@@ -178,19 +192,60 @@ were already live-verified working; the headers were only ever misleading.
   genuinely tracking real request traffic with correct `route`/`status` labels (including the
   endpoint's own earlier unauthenticated `401` attempt).
 
-### 11. 🔴 Fine-grained, permission-code RBAC is dead code
+### 11. 🟡 Fine-grained, permission-code RBAC is dead code — not fixed this pass, needs a decision first
 - `require_permission()` (`packages/api/dependencies.py:220`) is attached to **zero routes**
   (confirmed via grep), gated behind `ENABLE_RBAC` which defaults `false`. The only real, enforced
   authorization boundary today is the coarser `require_admin()` (admin-or-nothing), used across 14
-  routers. Fine for an internal tool; not fine-grained enough for a real multi-tenant enterprise
-  launch where different roles need different permissions.
+  routers.
+- **Re-read closely this pass:** this isn't an oversight — `require_permission()`'s own docstring
+  says it's deliberately gated off "since the real IAM integration... hasn't been verified end-to-end
+  with real credentials yet." The mechanism itself is fully implemented and correct (`401` with no
+  user, `403` without the permission code, a real no-op while the flag is off) — what's missing is a
+  **permission-code taxonomy** (what codes exist — `documents:delete`? `knowledge_sources:admin`? —
+  and which roles get which) and real IAM credentials to verify enforcement against, neither of which
+  exists yet.
+- **Deliberately not invented here.** Attaching `Depends(require_permission("..."))` to 14+ routers
+  requires deciding what the permission codes actually are — a real product/security design
+  question with consequences for every future route, not something to guess at silently while fixing
+  an unrelated item. The coarser `require_admin()` boundary is real and already enforced today; this
+  is an incomplete *feature*, not an open door.
 
-### 12. 🔴 Rate limiting is one flat global limit, not tightened for expensive endpoints
-- `RATE_LIMIT_REQUESTS_PER_MINUTE` (default 300/min) applies identically to a health check and to
-  `POST /chat` (which triggers an LLM call) or document upload. Compounds with item 2's per-replica bug.
+### 12. ✅ Rate limiting is one flat global limit, not tightened for expensive endpoints
+- Was: `RATE_LIMIT_REQUESTS_PER_MINUTE` (default 300/min) applied identically to a health check and
+  to `POST /chat` (an LLM call) or document upload.
+- **Fixed:** a second, tighter cap (`RATE_LIMIT_EXPENSIVE_REQUESTS_PER_MINUTE`, default 60/min)
+  layered on top of the general one, for `/chat`, `/search`, and `POST /documents` specifically
+  (`packages/api/middleware/rate_limit.py`'s `EXPENSIVE_ROUTES`) — a request to one of those still
+  counts against the general limit too, it just also has its own, stricter per-tenant/IP bucket.
+  Both buckets are independent Redis counters (same fixed-window mechanism as item 2's fix), so this
+  correctly compounds with, not conflicts with, the per-replica fix above.
+- **Verified live** (no rebuild needed — `rate_limit.py` is volume-mounted, a restart was enough):
+  forced the `expensive` bucket over its limit for one tenant via Redis, then confirmed a real
+  `POST /chat` for that tenant got `429` while a real `GET /health` for the *same* tenant still
+  returned `200` — proving the two buckets are genuinely independent, not just the general limit
+  firing early. Full unit+integration suite (382) and `e2e_local.sh` (80) both still green afterward.
 
-### 13. 🔴 No dependency-vulnerability scanning anywhere
-- No `.github/dependabot.yml`, no `pip-audit`/`safety` in `pyproject.toml` or `Makefile`.
+### 13. ✅ No dependency-vulnerability scanning anywhere
+- Was: no `.github/dependabot.yml`, no `pip-audit`/`safety` anywhere.
+- **Fixed:** added `pip-audit` as a real dev dependency and a `dependency-audit` job in
+  `.github/workflows/ci.yml`, running on every push/PR — real enforcement (fails the build), not
+  just reporting.
+- **Found real, current vulnerabilities running it — 36 across 8 packages — and fixed what could
+  actually be fixed**, rather than just wiring up the scanner and leaving known issues in place:
+  patch/minor-version bumps for `aiohttp` (3.14.1→3.14.3), `cryptography` (49.0.0→50.0.1),
+  `langgraph-checkpoint-postgres` (3.1.0→3.1.2), `pyjwt` (2.13.0→2.15.1), `pypdf` (6.14.2→6.19.0),
+  and `soupsieve` (2.8.4→2.10); a major-version bump for the transitive `oauthlib` (3.3.1→4.0.0,
+  resolved cleanly with no conflicts). Down to 5 known vulnerabilities in 1 package: `chromadb`
+  1.5.9, confirmed live against PyPI to already be the latest version — no fix exists yet, a genuine
+  upstream-pending issue, not something fixable from this side. The CI job explicitly
+  `--ignore-vuln`s only those 4 specific chromadb CVE IDs (each one named, not a blanket suppression)
+  so it still fails on anything new.
+- **Verified live**: full unit+integration suite (382) green after all the bumps; `e2e_local.sh` (80,
+  including the Google OAuth authorize-redirect check that exercises the bumped `oauthlib`) also
+  green. `docker compose ps`-level container verification blocked by the same persistent build
+  network issue as item 21 — the dependency changes themselves are correct and tested at the
+  source/host level (`uv sync` resolved and installed everything cleanly), just not yet re-baked
+  into the running image.
 
 ### 14. ✅ Debug `print()` statements in production code — see "Fixed this pass" (0c) above.
 
@@ -259,14 +314,43 @@ all import it) — not a bug itself, but worth flagging since `docs/BUILD_STATUS
 row calling it "orphaned," which could mislead a future cleanup pass into deleting live code (see the
 doc-only section below).
 
-### 21. 🔴 `worker` container has no Docker-level healthcheck
-Reasonable for a non-HTTP arq worker, but means Docker/orchestration can't auto-detect or restart a
-stuck worker process.
+### 21. 🟡 `worker` container has no Docker-level healthcheck
+- Was: reasonable for a non-HTTP arq worker, but meant Docker/orchestration couldn't auto-detect or
+  restart a stuck (not crashed — a crash already triggers `restart: unless-stopped` on its own,
+  since the worker is the container's only process) worker.
+- **Fixed:** `arq` has a real, built-in health-check mechanism (`record_health()` refreshes a Redis
+  key every `health_check_interval`; `arq <settings> --check` reads it back and exits 0/1) — no need
+  to hand-roll one. `packages/worker/main.py`'s `WorkerSettings` now sets
+  `health_check_interval = 60` (arq's own default is 3600s, too long for a responsive Docker
+  healthcheck), and `docker/Dockerfile.worker` gained a real `HEALTHCHECK` running `arq
+  packages.worker.main.WorkerSettings --check`.
+- **Verified live**, worked around a persistent, pre-existing environment limitation: a docker image
+  rebuild is needed for the `HEALTHCHECK` directive itself to take effect (it's baked into image
+  metadata), but four consecutive rebuild attempts in this pass all failed on the same transient
+  network error downloading the large `torch` dependency (`cannot decrypt peer's message` — the same
+  class of issue `docs/BUILD_STATUS.md` already documents for this environment pulling from
+  `ghcr.io`). Since `packages/worker/main.py` is volume-mounted, not baked in, its
+  `health_check_interval = 60` change *was* verifiable without a rebuild: restarted the real running
+  worker container, confirmed via `redis-cli TTL arq:queue:health-check` that the key now expires in
+  ~60s (not ~3600s), and ran `arq packages.worker.main.WorkerSettings --check` from the host —
+  `Health check successful`, exit `0`, with a live, current timestamp. The Docker `HEALTHCHECK`
+  directive's own syntax was written correctly and matches this exact command, but hasn't been
+  observed reporting `healthy` in `docker compose ps` yet — pending a rebuild once the environment's
+  network issue clears.
 
-### 22. 🔴 Upload Service `MAX_FILE_SIZE` mismatch (unverified against the real deployed service)
+### 22. 🟡 Upload Service `MAX_FILE_SIZE` mismatch — error handling confirmed already graceful, the number itself still unverifiable from here
 `docs/CHANGELOG.md:563` — this app validates uploads up to 50MB; the real Upload Service's own guide
-states a 10MB default. A 20–40MB file could pass local validation and then get a `413` from the real
-service. Needs checking against whatever the actually-deployed Upload Service is configured with.
+states a 10MB default. A 20–40MB file could pass local validation and then get rejected by the real
+service.
+- **Checked this pass, not a crash/bug:** `packages/api/routers/documents.py`'s upload route already
+  catches `SDKException` from the Upload Service call and surfaces its real rejection message as a
+  clean `400`, not a generic/opaque error (confirmed by reading the code, not just the doc's claim).
+  A rejected-for-size upload today fails cleanly with the real service's own message, just later than
+  ideal (after the full file already reached this app).
+- **Not changed:** `MAX_FILE_SIZE` itself. Lowering it to "10MB" on the strength of a doc comment
+  without access to the actually-deployed Upload Service's real current config risks the opposite
+  mistake — rejecting legitimate uploads the real service would in fact accept. This needs checking
+  against that service directly, not guessed at from this repo.
 
 ---
 

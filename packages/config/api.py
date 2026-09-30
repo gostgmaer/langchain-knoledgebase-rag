@@ -84,3 +84,14 @@ class APISettings(BaseSettings):
     rate_limit_requests_per_minute: int = Field(
         default=300, alias="RATE_LIMIT_REQUESTS_PER_MINUTE"
     )
+
+    # A tighter limit layered on top of the general one above, for routes
+    # that trigger a real LLM call or a file write (docs/BUGS.md item 12:
+    # the general limit alone doesn't distinguish a health check from
+    # POST /chat). Applies to /chat, /search, and POST /documents — see
+    # packages/api/middleware/rate_limit.py's EXPENSIVE_PREFIXES. Must not
+    # exceed the general limit; 0 disables this tighter cap specifically
+    # (the general limit above still applies).
+    rate_limit_expensive_requests_per_minute: int = Field(
+        default=60, alias="RATE_LIMIT_EXPENSIVE_REQUESTS_PER_MINUTE"
+    )

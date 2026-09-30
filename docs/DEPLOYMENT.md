@@ -144,3 +144,51 @@ matched exactly between source and restore.
 schedule/retention/off-host-storage target is an operational decision for wherever this actually
 deploys, not something to guess at from this repo alone) and shipping backups off the same host/volume
 (a local dump next to the database it backs up doesn't survive that host's disk failing).
+
+## 6. Building and deploying the production image
+
+`docs/BUGS.md` item 7: `docker-compose.prod.yml` requires a pre-built, already-tagged
+`easydev/ai-platform:${VERSION}` image (deliberately, not a floating `latest` — see the compose
+file's own comment on why), but nothing in the repo built one, so `docker compose -f
+docker-compose.prod.yml up` failed immediately with an image-not-found error.
+
+```bash
+# Build and tag locally:
+scripts/build_prod_image.sh 1.4.2
+
+# Build, tag, and push to whatever registry `docker push` is configured for:
+PUSH=1 scripts/build_prod_image.sh 1.4.2
+
+# Then deploy:
+VERSION=1.4.2 docker compose -f docker-compose.prod.yml up -d
+```
+
+Builds from `docker/Dockerfile` once and tags it for both `api` and `worker` — they already share
+the exact same dependency set (see `docker/Dockerfile.worker`'s own comment) and
+`docker-compose.prod.yml` already references one image for both services. If they ever genuinely
+diverge, this script and the compose file's `image:` lines both need to build/reference two tags
+instead of one.
+
+## 7. Zero-downtime deploys — a real, currently-open gap, not glossed over
+
+`docs/BUGS.md` item 9. Redeploying today (`docker compose -f docker-compose.prod.yml up -d` with a
+new `VERSION`) recreates the `api`/`worker` containers directly — any request in flight when the
+old container stops is dropped, and there's a real (if short) window with no `api` container
+answering the host's published port at all.
+
+This isn't fixable by a script alone: `docker-compose.yml`/`docker-compose.prod.yml` bind `api`
+directly to a host port (`8088:8000` / `8000:8000`), one container at a time — there is no reverse
+proxy or load balancer in this stack to route traffic across two temporarily-coexisting versions
+while one drains, which is what an actual zero-downtime cutover needs. Adding one (Traefik/Caddy/
+nginx in front, health-gated) is a real infrastructure decision — new services, new config, a new
+thing to keep healthy — not something to bolt on silently as a side effect of an unrelated fix.
+
+Documenting the real options rather than picking one unasked:
+- **A reverse proxy + two tagged versions running side by side**, cut over only once the new one's
+  `/api/v1/health` passes, old one drained and stopped after. The standard pattern; needs a proxy
+  added to the compose stack.
+- **Move to an orchestrator with this built in** (Docker Swarm mode's own rolling `docker service
+  update`, or Kubernetes) — a much bigger step than this repo's current docker-compose-only setup.
+- **Accept brief downtime per deploy** (what happens today) if deploy frequency and traffic don't
+  justify the added complexity yet — a legitimate choice for an early-stage deployment, as long as
+  it's a choice, not an unnoticed gap.

@@ -115,6 +115,17 @@ class WorkerSettings:
     max_jobs = settings.queue.concurrency
     max_tries = settings.queue.max_retries
 
+    # arq's own built-in mechanism (a Redis key it refreshes on every
+    # poll cycle) for `docker/Dockerfile.worker`'s HEALTHCHECK
+    # (`arq packages.worker.main.WorkerSettings --check`, docs/BUGS.md
+    # item 21) — 60s rather than arq's 3600s default, so a hung (not
+    # crashed) worker is detected on a timescale Docker's own
+    # healthcheck polling can actually act on. A fully crashed process
+    # already triggers `restart: unless-stopped` on its own (this
+    # container's only process is the worker, PID 1) — this specifically
+    # catches "still running, silently stuck."
+    health_check_interval = 60
+
     on_startup = _on_startup
     on_shutdown = _on_shutdown
 

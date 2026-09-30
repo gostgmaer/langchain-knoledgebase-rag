@@ -49,20 +49,37 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     the whole API down.
     """
 
+    # Routes that trigger a real LLM call or a file write get the tighter
+    # `rate_limit_expensive_requests_per_minute` cap, layered on top of the
+    # general one — docs/BUGS.md item 12. `(method, path_prefix)`; method
+    # `None` matches any method. Document upload is POST-only (GET
+    # /documents is a cheap list/read, not worth the tighter cap).
+    EXPENSIVE_ROUTES: tuple[tuple[str | None, str], ...] = (
+        (None, "/chat"),
+        (None, "/search"),
+        ("POST", "/documents"),
+    )
+
     def __init__(self, app) -> None:
         super().__init__(app)
         self._max_requests = settings.api.rate_limit_requests_per_minute
+        self._max_expensive_requests = settings.api.rate_limit_expensive_requests_per_minute
 
-    async def dispatch(self, request: Request, call_next) -> Response:
-        if self._max_requests <= 0:
-            return await call_next(request)
-
-        key = request.headers.get("X-Tenant-ID") or (
-            request.client.host if request.client else "unknown"
+    def _is_expensive(self, request: Request) -> bool:
+        path = request.url.path.removeprefix(settings.api.api_prefix)
+        return any(
+            (method is None or method == request.method) and path.startswith(prefix)
+            for method, prefix in self.EXPENSIVE_ROUTES
         )
 
+    async def _check(self, name: str, key: str, max_requests: int) -> Response | None:
+        """Returns a 429 Response if this bucket is over its limit, else None."""
+
+        if max_requests <= 0:
+            return None
+
         bucket = int(time.time() // WINDOW_SECONDS)
-        redis_key = f"ratelimit:{key}:{bucket}"
+        redis_key = f"ratelimit:{name}:{key}:{bucket}"
 
         try:
             async with _redis.pipeline(transaction=True) as pipe:
@@ -71,9 +88,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 count, _ = await pipe.execute()
         except Exception:
             logger.warning("Rate limiter: Redis unreachable, failing open for this request")
-            return await call_next(request)
+            return None
 
-        if count > self._max_requests:
+        if count > max_requests:
             retry_after = WINDOW_SECONDS - (int(time.time()) % WINDOW_SECONDS) + 1
             return JSONResponse(
                 status_code=429,
@@ -83,5 +100,23 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 },
                 headers={"Retry-After": str(retry_after)},
             )
+        return None
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        if self._max_requests <= 0 and self._max_expensive_requests <= 0:
+            return await call_next(request)
+
+        key = request.headers.get("X-Tenant-ID") or (
+            request.client.host if request.client else "unknown"
+        )
+
+        rejection = await self._check("general", key, self._max_requests)
+        if rejection is not None:
+            return rejection
+
+        if self._is_expensive(request):
+            rejection = await self._check("expensive", key, self._max_expensive_requests)
+            if rejection is not None:
+                return rejection
 
         return await call_next(request)
