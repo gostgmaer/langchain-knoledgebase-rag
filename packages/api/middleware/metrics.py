@@ -4,23 +4,41 @@ import time
 from collections import defaultdict
 
 from fastapi import Request
+from prometheus_client import Counter, Histogram
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+
+# Real Prometheus metrics (docs/BUGS.md item 10: GET /api/v1/metrics used to be a JSON dump of the
+# MetricsStore below, not the Prometheus text exposition format, so no real Prometheus server could
+# scrape it at all). Per-process, same as MetricsStore — that's correct, not a gap: a standard
+# Prometheus deployment scrapes every replica's own /metrics endpoint separately and aggregates
+# across replicas at query time (`sum(...) by (...)`), it doesn't expect one instance's endpoint to
+# already report a cluster-wide total.
+HTTP_REQUESTS_TOTAL = Counter(
+    "http_requests_total",
+    "Total HTTP requests handled",
+    ("route", "status"),
+)
+HTTP_REQUEST_DURATION_SECONDS = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request duration in seconds",
+    ("route",),
+)
 
 
 class MetricsStore:
     """
-    Process-local request metrics — Production hardening's own
-    "Metrics middleware" gap. `opentelemetry-*` is a declared
-    dependency but was never wired anywhere in this app, and there's no
-    reachable OTLP collector in this environment to export to (same
-    "unprovable without real infra" situation as Docker/Deployment) —
-    this is a genuinely self-contained, live-verifiable alternative:
-    counters/timers kept in memory, read back through
-    `GET /api/v1/metrics`.
+    Process-local request metrics, backing the human-readable
+    `GET /api/v1/metrics` JSON summary — kept alongside the real
+    Prometheus counters above (`GET /api/v1/metrics/prometheus`) since
+    it's a genuinely different, simpler consumer (a quick glance, no
+    Prometheus server required), not a duplicate of the same data.
 
     In-memory only, same scoping caveat as the rate limiter: per
-    process, resets on restart, doesn't aggregate across replicas.
+    process, resets on restart, doesn't aggregate across replicas — see
+    the Prometheus counters' own docstring above for why that's the
+    expected shape for the real (Prometheus-scraped) metrics, not this
+    JSON convenience view.
     """
 
     def __init__(self) -> None:
@@ -59,5 +77,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         path_template = route.path if route is not None else request.url.path
 
         metrics_store.record(path_template, response.status_code, duration)
+        HTTP_REQUESTS_TOTAL.labels(route=path_template, status=str(response.status_code)).inc()
+        HTTP_REQUEST_DURATION_SECONDS.labels(route=path_template).observe(duration)
 
         return response

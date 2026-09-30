@@ -17,6 +17,8 @@ from packages.infrastructure.container.graph import create_postgres_checkpointer
 from packages.infrastructure.database.base import Base
 from packages.shared.logging import configure_logger, get_logger
 from packages.shared.tracing import configure_opentelemetry
+from packages.api.middleware.rate_limit import close_rate_limit_redis
+from packages.memory.manager import close_memory_lock_redis
 from packages.tools.builtin.weather import close_weather_client
 
 
@@ -160,6 +162,12 @@ async def lifespan(app: FastAPI):
         # never recreated per-request — production-readiness gap #1,
         # a leaked connector/socket on every shutdown until now.
         await close_weather_client()
+
+        # Same idiom, same reason — RateLimitMiddleware's Redis client (docs/BUGS.md item 2).
+        await close_rate_limit_redis()
+
+        # Same idiom, same reason — MemoryManager's distributed summarize() lock (docs/BUGS.md item 2).
+        await close_memory_lock_redis()
 
         engine = container.database.engine()
         await engine.dispose()

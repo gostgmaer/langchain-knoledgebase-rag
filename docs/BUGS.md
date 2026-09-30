@@ -79,19 +79,27 @@ were already live-verified working; the headers were only ever misleading.
   own tooling) depends on. This is scoped as a **production deploy step**, not a local dev default.
   Remains 🟡 rather than ✅ until some real deploy path actually runs it, not just documents it.
 
-### 2. 🔴 Architecturally single-replica-only — silently breaks under horizontal scaling
-- **Where:** three separate in-memory, per-process state stores with no cross-replica coordination:
-  - `packages/api/middleware/rate_limit.py`'s `RateLimitMiddleware._hits` (own docstring admits it
-    needs a Redis-backed counter)
-  - `packages/api/middleware/metrics.py`'s `MetricsStore` (own docstring: "doesn't aggregate across
-    replicas")
-  - `packages/memory/manager.py`'s `_summary_locks: dict[UUID, asyncio.Lock]` (process-local — the
-    per-conversation race-protection lock silently stops protecting anything once >1 API replica runs)
-- **Why it matters:** `docker-compose.prod.yml` provisions real CPU/memory limits as if for genuine
-  horizontal scale. Running >1 replica today silently multiplies the effective rate limit, fragments
-  metrics, and reopens the exact conversation-summarize race a previous pass fixed for single-process.
-- **Fix:** move rate-limit counters and the summarize lock to Redis (already a running dependency);
-  either fix metrics aggregation or accept per-replica metrics with a documented caveat.
+### 2. ✅ Architecturally single-replica-only — fixed for the two state stores that were genuinely broken by design
+- **Where:** three separate in-memory, per-process state stores were flagged, two of which were
+  genuinely a correctness bug under >1 replica:
+  - `packages/api/middleware/rate_limit.py`'s `RateLimitMiddleware._hits` — **fixed**: now a
+    Redis-backed fixed-window counter (`INCR`+`EXPIRE`, atomic via a pipeline), shared by every
+    replica instead of reset-per-process. Verified live: real requests write real, correctly-TTL'd
+    keys to Redis, and forcing the counter above the limit correctly returns `429` — this enforcement
+    is now genuinely shared across replicas, not per-process. Fails open (not closed) on a Redis
+    error, matching the existing "degrade, don't crash" idiom used for the checkpointer/job queue.
+  - `packages/memory/manager.py`'s summarize-lock — **fixed**: replaced the in-process
+    `dict[UUID, asyncio.Lock]` (which only ever serialized turns handled by the *same* replica, so
+    the exact race it was built to close reopened silently under >1 replica) with a real Redis
+    distributed lock (`Redis.lock()`, SET NX PX + a release token). Verified live: a real chat turn
+    correctly produced exactly one `SUMMARY` memory row via the new lock, no errors.
+  - `packages/api/middleware/metrics.py`'s `MetricsStore` — **re-scoped, not actually a bug**: see
+    item 10 below. Per-replica metrics are the *correct*, standard Prometheus pattern (each instance
+    exposes its own `/metrics`, a real Prometheus server aggregates across replicas at query time),
+    not something the app itself needs to solve. The real gap here was that the endpoint wasn't in
+    the Prometheus format a real server can scrape at all — now fixed, see item 10.
+- Both Redis clients are module-level (matching `packages/tools/builtin/weather.py`'s existing
+  pattern) with a `close_*_redis()` hook wired into `lifespan.py`'s shutdown.
 
 ### 3. 🟡 No backup/restore strategy for Postgres — scripts built and proven, not yet scheduled anywhere
 - **Where:** was confirmed absent — no backup script, no mention in `docs/DEPLOYMENT.md`.
@@ -154,10 +162,18 @@ were already live-verified working; the headers were only ever misleading.
 - `restart: always` + a straight redeploy drops in-flight requests. No reverse-proxy health-gated
   cutover, no rolling-update config.
 
-### 10. 🔴 `GET /api/v1/metrics` isn't real Prometheus format
-- It's a JSON dump of in-memory counters (`packages/api/middleware/metrics.py`), not Prometheus
-  text-format — won't integrate with a standard Grafana/Prometheus stack without custom scrape logic,
-  on top of the per-replica aggregation gap in item 2.
+### 10. 🟡 `GET /api/v1/metrics` isn't real Prometheus format — new `GET /api/v1/metrics/prometheus` added, being rebuilt into the running image
+- Was a JSON dump of in-memory counters only, not Prometheus text-format — wouldn't integrate with a
+  standard Grafana/Prometheus stack without custom scrape logic.
+- **Fixed:** added `prometheus-client` as a real dependency and a new `GET /api/v1/metrics/prometheus`
+  route (`packages/api/routers/metrics.py`) returning real Prometheus exposition format via
+  `generate_latest()`. New `Counter`/`Histogram` metrics wired into both HTTP request handling
+  (`packages/api/middleware/metrics.py`: `http_requests_total`, `http_request_duration_seconds`) and
+  graph node execution (`packages/graph/middleware.py`: `graph_node_calls_total`,
+  `graph_node_errors_total`, `graph_node_duration_seconds`). The original JSON endpoint is untouched
+  (kept as a human-readable convenience view, not replaced).
+- 🟡 rather than ✅ pending a live check of the new endpoint's actual output — the docker image needed
+  a rebuild to pick up the new dependency; confirm the final entry below once that's done.
 
 ### 11. 🔴 Fine-grained, permission-code RBAC is dead code
 - `require_permission()` (`packages/api/dependencies.py:220`) is attached to **zero routes**

@@ -65,6 +65,7 @@ dependencies = [
     # to packages that appear as a direct dependency somewhere in the
     # workspace, not to purely transitive ones.
     "torch>=2.9.0",
+    "prometheus-client>=0.26.0",
 ]
 
 [dependency-groups]
