@@ -1,0 +1,80 @@
+name: CI
+
+# docs/BUGS.md item 4: no CI pipeline existed at all before this — every one of this project's
+# tests had only ever been run manually, locally. This runs the real unit + integration suites
+# (382 tests) against real Postgres/Redis service containers on every push and pull request.
+#
+# The exact recipe below (build the test environment from .env.example plus connection overrides,
+# no real secrets needed) was verified locally before being written here: both suites pass 334/334
+# and 48/48 using only .env.example's placeholder values, since `pytest.ini`'s default
+# `-m "not live"` already excludes the handful of tests that need a real LLM provider key.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: my_db_user
+          POSTGRES_PASSWORD: my_secure_password
+          POSTGRES_DB: my_database_name
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U my_db_user"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Build a test environment (no real secrets — placeholders from .env.example)
+        run: |
+          cp .env.example .env
+          {
+            echo "DATABASE_URL=postgresql://my_db_user:my_secure_password@localhost:5432/my_database_name"
+            echo "REDIS_URL=redis://localhost:6379/0"
+            echo "POSTGRES_USER=my_db_user"
+            echo "POSTGRES_PASSWORD=my_secure_password"
+            echo "POSTGRES_DB=my_database_name"
+            echo "CONNECTOR_CREDENTIAL_KEYS=$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+          } >> .env
+
+      - name: Create the vector extension
+        run: |
+          PGPASSWORD=my_secure_password psql -h localhost -U my_db_user -d my_database_name -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Run unit tests
+        run: uv run pytest tests/unit -q
+
+      - name: Run integration tests
+        run: uv run pytest tests/integration -q

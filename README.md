@@ -1,5 +1,7 @@
 # EasyDev AI Platform
 
+[![CI](https://github.com/gostgmaer/langchain-knoledgebase-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/gostgmaer/langchain-knoledgebase-rag/actions/workflows/ci.yml)
+
 A production-oriented, multi-tenant RAG (Retrieval-Augmented Generation) platform: a FastAPI backend orchestrated with LangChain/LangGraph, a Next.js admin/chat frontend, and a document-ingestion pipeline backing real hybrid + self-query + parent-document + multi-vector retrieval — not a tutorial project.
 
 ## What's actually built

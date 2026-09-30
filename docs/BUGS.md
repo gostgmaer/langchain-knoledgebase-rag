@@ -107,11 +107,25 @@ were already live-verified working; the headers were only ever misleading.
   actually deploys (cron cadence, retention, off-host storage target), not something to guess at from
   this repo alone.
 
-### 4. 🔴 No CI pipeline at all
-- **Where:** confirmed via `git ls-files` — zero `.github/workflows/`, no CI config of any kind exists.
+### 4. 🟡 No CI pipeline — now added (`.github/workflows/ci.yml`), not yet observed running on real GitHub infrastructure
+- **Where:** was confirmed via `git ls-files` — zero `.github/workflows/`, no CI config of any kind.
 - **Why it matters:** every one of the 382 passing tests and 144 e2e checks this project has has been
-  run manually, locally, this session. Nothing gates a merge or a deploy. A regression can ship
-  silently.
+  run manually, locally. Nothing gated a merge or a deploy — a regression could ship silently.
+- **Fixed this pass:** `.github/workflows/ci.yml` runs `tests/unit` + `tests/integration` (382 tests)
+  against real `pgvector/pgvector:pg17` and `redis:7-alpine` service containers on every push/PR, using
+  `uv` for dependency install. No real secrets needed — the test environment is built from
+  `.env.example`'s placeholder values plus connection overrides, since the default `pytest` marker
+  filter (`-m "not live"`) already excludes the handful of tests needing a real LLM provider key.
+- **Verified as thoroughly as possible without triggering real GitHub infrastructure from here**: the
+  exact recipe the workflow uses was run locally first — both suites pass 334/334 and 48/48 using only
+  `.env.example` values (via a subprocess with its own environment, never touching the real `.env`
+  file), and the YAML was parsed to confirm it's syntactically valid and structured as intended. What
+  this could **not** verify locally: the real GitHub-hosted runner environment, the service-container
+  networking specifics, and whether `uv sync --frozen` succeeds against `uv.lock` on a clean `ubuntu-latest`
+  image. Push this and watch the first real run before trusting it fully.
+- The `144 e2e checks` (`scripts/e2e_local.sh`/`e2e_sources.sh`) are **not** in this workflow yet — they
+  need a running API+worker+frontend stack (`docker compose up`), a heavier CI job than the plain
+  pytest suites. Worth a follow-up job, not bundled into this one.
 
 ### 5. 🔴 Zero frontend test coverage
 - **Where:** `frontend/package.json` has no `"test"` script, no jest/vitest/playwright/cypress
