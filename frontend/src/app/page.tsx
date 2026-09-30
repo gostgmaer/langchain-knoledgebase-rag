@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
 import { SocialButtons } from "@/components/auth/social-buttons";
+import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -88,9 +89,12 @@ function LoginForm() {
     <div className="flex min-h-screen flex-1 items-center justify-center p-6">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">RAG Platform Console</h1>
+          <span className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary">
+            <LogoMark className="h-6 w-6" />
+          </span>
+          <h1 className="text-2xl font-semibold tracking-tight">Meridian</h1>
           <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
-            Sign in with your EasyDev account. Your role and tenant are read from your account —
+            Sign in with your account. Your role and tenant are read from your account —
             there&apos;s nothing to pick here.
           </p>
         </div>

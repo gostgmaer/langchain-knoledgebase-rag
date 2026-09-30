@@ -5,8 +5,8 @@ import { Providers } from "@/components/providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "RAG Platform Console",
-  description: "Admin, tenant-admin, and customer console for the EasyDev RAG platform.",
+  title: "Meridian",
+  description: "Admin, tenant-admin, and customer console for the Meridian knowledge platform.",
 };
 
 export default function RootLayout({
