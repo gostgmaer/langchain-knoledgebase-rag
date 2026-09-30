@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { Select } from "@/components/ui/select";
+import { useTenant } from "@/hooks/use-api";
 import { useSession } from "@/lib/session";
 
 interface Workspace {
@@ -40,6 +41,12 @@ export function WorkspaceSwitcher() {
     staleTime: 60_000,
   });
 
+  // Real per-id name resolution (via IAM's GET /tenants/:id, the only lookup it actually
+  // has — no "list my tenants" endpoint exists), used as the fallback below when the
+  // multi-workspace list above is unavailable (true for everyone today: no real backend
+  // route yet serves /api/iam/tenants/mine) or only has the one tenant a JWT already names.
+  const { data: resolvedCurrent } = useTenant(session?.tenantId);
+
   if (!session) return null;
 
   const current = workspaces.find((w) => w.id === session.tenantId);
@@ -48,7 +55,10 @@ export function WorkspaceSwitcher() {
   if (workspaces.length < 2) {
     return (
       <span className="text-xs text-neutral-500">
-        Workspace: <span className="font-medium text-neutral-700 dark:text-neutral-300">{current?.name ?? session.tenantId}</span>
+        Workspace:{" "}
+        <span className="font-medium text-neutral-700 dark:text-neutral-300">
+          {current?.name ?? resolvedCurrent?.name ?? session.tenantId}
+        </span>
       </span>
     );
   }

@@ -19,6 +19,7 @@ import {
   retrievalLogs,
   retrievalSettings,
   search,
+  tenants,
   tools,
   uploadJobs,
   usage,
@@ -58,6 +59,30 @@ export function useHealth() {
     queryFn: () => health.get(identity!),
     enabled: !!identity,
     refetchInterval: 30_000,
+  });
+}
+
+// ---------------------------------------------------------------
+// Tenants
+// ---------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolves a tenant's real name/slug from IAM. `tenantId` is independent of
+ * the caller's own session tenant (e.g. an admin previewing a different
+ * tenant before switching to it) — only gated on looking like a real UUID,
+ * so it doesn't fire on every keystroke while one's being typed/edited.
+ */
+export function useTenant(tenantId: string | null | undefined) {
+  const identity = useIdentity();
+  const valid = !!tenantId && UUID_RE.test(tenantId);
+  return useQuery({
+    queryKey: ["tenant", tenantId],
+    queryFn: () => tenants.get(identity!, tenantId!),
+    enabled: !!identity && valid,
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 }
 

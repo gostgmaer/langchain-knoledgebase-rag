@@ -7,9 +7,25 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTenant } from "@/hooks/use-api";
 import { useSession } from "@/lib/session";
 
 const HISTORY_KEY = "rag-console-tenant-history";
+
+/** One "recently viewed" pill — resolves its own real name, falling back to the raw id
+ * while loading or if IAM can't be reached for it. */
+function TenantHistoryButton({ id, onSelect }: { id: string; onSelect: (id: string) => void }) {
+  const { data: tenant } = useTenant(id);
+  return (
+    <button
+      onClick={() => onSelect(id)}
+      className="rounded-md border border-neutral-200 px-2 py-1 text-xs hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
+      title={id}
+    >
+      {tenant?.name ?? <span className="font-mono">{id}</span>}
+    </button>
+  );
+}
 
 export default function TenantsPage() {
   const { session, setViewingTenant } = useSession();
@@ -42,12 +58,14 @@ export default function TenantsPage() {
         <CardHeader>
           <CardTitle>A real limit, worth being upfront about</CardTitle>
           <CardDescription>
-            The backend has no endpoint that lists every tenant across the platform — every
-            resource route (documents, agents, knowledge bases, ...) is scoped by whichever{" "}
+            IAM (the system of record for organizations) has no endpoint that lists every tenant
+            across the platform — only a by-id lookup, which this page uses to show real names
+            instead of raw ids wherever it already knows one. Every resource route (documents,
+            agents, knowledge bases, ...) is scoped by whichever{" "}
             <code className="rounded bg-neutral-100 px-1 dark:bg-neutral-800">X-Tenant-ID</code>{" "}
             header is sent. This page can only switch which single tenant you&apos;re currently
-            browsing as, one ID at a time — it can&apos;t show you a real list of tenants to pick
-            from.
+            browsing as, one ID at a time — it can&apos;t show you a real directory of every
+            tenant to pick from.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -76,13 +94,7 @@ export default function TenantsPage() {
               <p className="mb-2 text-xs font-medium text-neutral-500">Recently viewed</p>
               <div className="flex flex-wrap gap-2">
                 {history.map((id) => (
-                  <button
-                    key={id}
-                    onClick={() => switchTo(id)}
-                    className="rounded-md border border-neutral-200 px-2 py-1 font-mono text-xs hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
-                  >
-                    {id}
-                  </button>
+                  <TenantHistoryButton key={id} id={id} onSelect={switchTo} />
                 ))}
               </div>
             </div>

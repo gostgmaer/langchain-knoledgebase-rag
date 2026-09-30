@@ -58,6 +58,7 @@ import type {
   SearchRequest,
   SearchResponse,
   SubmitFeedbackRequest,
+  TenantResponse,
   ToolDefinition,
   ToolListResponse,
   UploadJob,
@@ -72,6 +73,15 @@ const PAGE = { limit: 100, offset: 0 };
 
 export const health = {
   get: (identity: Identity) => apiFetch<HealthResponse>("/health", identity),
+};
+
+// ---------------------------------------------------------------
+// Tenants
+// ---------------------------------------------------------------
+
+export const tenants = {
+  get: (identity: Identity, tenantId: string) =>
+    apiFetch<TenantResponse>(`/tenants/${tenantId}`, identity),
 };
 
 // ---------------------------------------------------------------

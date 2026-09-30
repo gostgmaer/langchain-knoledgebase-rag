@@ -12,12 +12,14 @@ import {
   useFeedbackList,
   useHealth,
   useKnowledgeBases,
+  useTenant,
 } from "@/hooks/use-api";
 import { useSession } from "@/lib/session";
 
 export function DashboardView({ basePath }: { basePath: string }) {
   const { session } = useSession();
   const { data: health } = useHealth();
+  const { data: tenant } = useTenant(session?.tenantId);
   const { data: documents, isError: documentsFailed } = useDocuments();
   const { data: knowledgeBases, isError: knowledgeBasesFailed } = useKnowledgeBases();
   const { data: agents, isError: agentsFailed } = useAgents();
@@ -40,7 +42,7 @@ export function DashboardView({ basePath }: { basePath: string }) {
       )}
       <PageHeader
         title={`Welcome, ${session?.displayName ?? ""}`}
-        description={`Browsing tenant ${session?.tenantId}`}
+        description={`Browsing ${tenant?.name ?? session?.tenantId ?? ""}`}
       />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

@@ -584,6 +584,17 @@ export interface HealthResponse {
 }
 
 // ---------------------------------------------------------------
+// Tenants
+// ---------------------------------------------------------------
+
+export interface TenantResponse {
+  id: string;
+  name: string;
+  slug: string;
+  is_active: boolean;
+}
+
+// ---------------------------------------------------------------
 // Retrieval logs & observability (admin)
 // ---------------------------------------------------------------
 

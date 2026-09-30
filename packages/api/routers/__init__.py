@@ -17,6 +17,7 @@ from packages.api.routers.metrics import router as metrics_router
 from packages.api.routers.models import router as model_router
 from packages.api.routers.prompts import router as prompt_router
 from packages.api.routers.search import router as search_router
+from packages.api.routers.tenants import router as tenant_router
 from packages.api.routers.tools import router as tool_router
 from packages.api.routers.upload_jobs import router as upload_job_router
 from packages.api.routers.observability import router as observability_router
@@ -58,6 +59,7 @@ api_router.include_router(retrieval_settings_router)
 api_router.include_router(observability_router)
 api_router.include_router(analytics_router)
 api_router.include_router(feature_flag_router)
+api_router.include_router(tenant_router)
 
 
 def register_routers(app: FastAPI) -> None:

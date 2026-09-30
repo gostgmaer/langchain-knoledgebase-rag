@@ -8,13 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
-import { useHealth } from "@/hooks/use-api";
+import { useHealth, useTenant } from "@/hooks/use-api";
 import { ROLE_LABELS, useSession } from "@/lib/session";
 
 export function Topbar() {
   const router = useRouter();
   const { session, logout, setViewingTenant } = useSession();
   const { data: health } = useHealth();
+  const { data: currentTenant } = useTenant(session?.tenantId);
   const [tenantDraft, setTenantDraft] = useState(session?.tenantId ?? "");
 
   if (!session) return null;
@@ -34,10 +35,14 @@ export function Topbar() {
             }}
           >
             <span className="text-xs text-neutral-500">Viewing tenant:</span>
+            <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+              {currentTenant?.name ?? session.tenantId}
+            </span>
             <Input
               value={tenantDraft}
               onChange={(e) => setTenantDraft(e.target.value)}
-              className="h-7 w-72 font-mono text-xs"
+              placeholder="Switch to a different tenant ID…"
+              className="h-7 w-64 font-mono text-xs"
             />
             <Button type="submit" size="sm" variant="outline">
               Switch
