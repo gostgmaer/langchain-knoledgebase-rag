@@ -162,7 +162,7 @@ were already live-verified working; the headers were only ever misleading.
 - `restart: always` + a straight redeploy drops in-flight requests. No reverse-proxy health-gated
   cutover, no rolling-update config.
 
-### 10. 🟡 `GET /api/v1/metrics` isn't real Prometheus format — new `GET /api/v1/metrics/prometheus` added, being rebuilt into the running image
+### 10. ✅ `GET /api/v1/metrics` isn't real Prometheus format
 - Was a JSON dump of in-memory counters only, not Prometheus text-format — wouldn't integrate with a
   standard Grafana/Prometheus stack without custom scrape logic.
 - **Fixed:** added `prometheus-client` as a real dependency and a new `GET /api/v1/metrics/prometheus`
@@ -172,8 +172,11 @@ were already live-verified working; the headers were only ever misleading.
   graph node execution (`packages/graph/middleware.py`: `graph_node_calls_total`,
   `graph_node_errors_total`, `graph_node_duration_seconds`). The original JSON endpoint is untouched
   (kept as a human-readable convenience view, not replaced).
-- 🟡 rather than ✅ pending a live check of the new endpoint's actual output — the docker image needed
-  a rebuild to pick up the new dependency; confirm the final entry below once that's done.
+- Verified live end to end, including through the real auth layer (not bypassed): logged in for a
+  real bearer token, called `GET /api/v1/metrics/prometheus` with it, got `200` with
+  `content-type: text/plain; version=1.0.0; charset=utf-8`, and confirmed `http_requests_total` was
+  genuinely tracking real request traffic with correct `route`/`status` labels (including the
+  endpoint's own earlier unauthenticated `401` attempt).
 
 ### 11. 🔴 Fine-grained, permission-code RBAC is dead code
 - `require_permission()` (`packages/api/dependencies.py:220`) is attached to **zero routes**
