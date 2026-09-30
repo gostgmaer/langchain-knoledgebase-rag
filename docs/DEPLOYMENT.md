@@ -56,11 +56,57 @@ The `Makefile`'s `dev`/`prod` targets pointed at `docker/compose/docker-compose.
 
 ## 3. What "deployment-ready" still doesn't mean here
 
-Worth being explicit about, since none of this is fixed by the changes in this pass:
+This section had drifted stale (see `docs/BUGS.md` for the full, currently-accurate audit) — corrected below rather than left contradicting the current code:
 
-- **No real database migrations.** `alembic/` exists (`alembic.ini`, one versions file: `44b52e61b180_initial_schema.py`), but the app doesn't actually run migrations on startup — `packages/api/lifespan.py` calls `Base.metadata.create_all()` directly against the live models every time the app boots, which only ever *adds* missing tables, never alters existing ones. Schema drift (a column added to a model after the table already exists in a running database) has to be applied by hand — this has happened for real in this project's history (`model_profiles.vector`, `memories` table dimension change), each time via a manual `ALTER TABLE`. `make migrate`/`make revision` exist as Makefile targets but aren't part of any deploy flow.
-- **`worker` now runs a real `arq` job queue**, not the old heartbeat loop — `packages/worker/main.py`'s `WorkerSettings` registers two real jobs: `cleanup_orphaned_scratch_files` (a defense-in-depth sweep of `storage/temp`, also scheduled 4x/day via `arq.cron`) and `ingest_document_job`, which now handles real document ingestion end to end (`POST /api/v1/documents` enqueues onto it via a producer-side pool created at `api` startup). Both share the same Redis instance already in the compose stack. `docker/Dockerfile.worker`'s `CMD` needed no change — `run_worker(WorkerSettings)` is arq's own documented programmatic equivalent to its CLI. If Redis is unreachable when `api` starts, document uploads fall back to running ingestion in-process instead of failing outright (`packages/api/routers/documents.py`) — the same "degrade instead of crash" idiom used for the Postgres checkpointer. Memory extraction (`packages/api/routers/chat.py`) still runs off the request path via FastAPI `BackgroundTasks`, not migrated onto `arq` — it's already proven working there and doesn't need the retry/durability a multi-step ingestion pipeline benefits from. A full live enqueue → worker-picks-it-up test for either job is still pending a reachable Redis instance in the dev environment this was built in.
-- **No rate limiting, no CORS configuration, docs exposed unconditionally.** `packages/api/middleware/rate_limit.py` exists but isn't registered (`docs/ARCHITECTURE_TUTORIAL.md` §4.1's middleware list is the real, live set — rate limiting isn't in it). `/docs`/`/redoc`/`/openapi.json` are always mounted, in every environment, with no env-gating.
-- **Secrets in `.env`** are the only secrets mechanism — no Docker secrets, no external secrets manager integration. Fine for local/dev, worth revisiting before anything resembling a real production deploy.
+- **Real Alembic migrations exist** and are live-verified (`docs/BUILD_STATUS.md` "next priorities" #23): two idempotent revisions, driven off the live SQLAlchemy models rather than a frozen DDL list, proven end to end against a genuinely empty database. `packages/api/lifespan.py` still boots via `Base.metadata.create_all()` + `apply_schema_upgrades()` by default (`SCHEMA_INIT_AT_STARTUP=true`) rather than `alembic upgrade head` — that's a deliberate choice for local/single-operator dev convenience, not a gap. See §4 below for the real-migration path a production deploy should actually use.
+- **Rate limiting, CORS, and doc-gating are all real and registered** — `RateLimitMiddleware` and `CORSMiddleware` are both in `packages/api/middleware/__init__.py`'s `register_middlewares()`, and `/docs`/`/redoc`/`/openapi.json` are gated off entirely when `APP_ENV=production` (`packages/api/app.py`). `SecurityHeadersMiddleware` (CSP/X-Frame-Options/etc.) is also registered.
+- **`worker` runs a real `arq` job queue** — `packages/worker/main.py`'s `WorkerSettings` registers real jobs (document ingestion, scratch-file cleanup), sharing the compose stack's Redis. Falls back to in-process ingestion if Redis is unreachable at `api` startup, rather than failing outright.
+- **Genuinely still open** (tracked in full in `docs/BUGS.md`): no CI pipeline, zero frontend test coverage, no load-testing tooling, no backup/restore strategy, and the app is architecturally single-replica-only today (in-memory rate limiter/metrics/locks with no cross-replica coordination) — don't run more than one `api` replica until that's addressed.
+- **Secrets in `.env`** are the only secrets mechanism — no Docker secrets, no external secrets manager integration. Fine for local/dev, worth revisiting before a real production deploy.
 
 None of this blocks running the stack locally for development or testing — it's the gap between "it runs in a container" and "it's actually production-hardened."
+
+## 4. Running as a restricted database role (Row-Level Security)
+
+The dev `.env` connects as a Postgres **superuser** (or an equivalent role with `BYPASSRLS`), which is
+the right tradeoff for solo local development (schema auto-provisions itself on every boot via
+`Base.metadata.create_all()` + `apply_schema_upgrades()`) but means the row-level-security tenant
+policies (`packages/infrastructure/database/upgrades.py`'s `rls_statements()`) are silently bypassed —
+superusers ignore every RLS policy unconditionally. In that mode, tenant isolation is enforced **only**
+by the per-repository `tenant_id` filters in application code, with no database-level backstop.
+
+A real deploy should connect as the restricted, non-superuser `rag_app` role instead, so RLS is a
+genuine second layer of defense, not just a query-layer convention. This was live-verified this pass
+against a disposable scratch database (real Alembic migration as the owner, `scripts/create_app_role.sql`
+applied, then a real API instance booted as `rag_app`): the role has exactly the privileges normal
+operation needs (`SELECT`/`INSERT`/`UPDATE`/`DELETE` on every table, `USAGE`/`SELECT` on sequences,
+`CREATE` on the schema for the LangGraph checkpointer's own `CREATE TABLE IF NOT EXISTS`), the app boots
+cleanly with no RLS-bypass warning, and — the actual point — a raw-SQL check confirmed RLS genuinely
+filters rows by `app.tenant_id` when connected as `rag_app`, which it does **not** do as a superuser.
+
+Setup, once per environment:
+
+```bash
+# 1. Run the real migration as the table owner (a superuser or the role that will own the tables).
+DATABASE_URL=<owner-url> alembic upgrade head
+
+# 2. Create the restricted role (idempotent — safe to re-run after new tables are added).
+psql -U <owner> -d <database> -v app_password='<a real generated password>' -f scripts/create_app_role.sql
+```
+
+Then, in that environment's `.env`:
+
+```bash
+# The app connects as the restricted role — RLS is genuinely enforced.
+DATABASE_URL=postgresql://rag_app:<password>@<host>:5432/<database>
+
+# The app no longer tries to create_all()/ALTER TABLE at boot (rag_app doesn't own the tables and
+# can't run DDL beyond the one CREATE it's explicitly granted for the checkpointer's own setup) —
+# schema changes go through `alembic upgrade head` as the owner instead, as a separate deploy step.
+SCHEMA_INIT_AT_STARTUP=false
+```
+
+**Not done automatically by any compose file** — `docker-compose.prod.yml` doesn't currently run the
+migration/role-creation step or default to this `DATABASE_URL`/`SCHEMA_INIT_AT_STARTUP` pair, since
+doing so unconditionally would break the common "point compose at a fresh, unmigrated database" case.
+Wire it into whatever deploy automation runs before `docker compose -f docker-compose.prod.yml up`.

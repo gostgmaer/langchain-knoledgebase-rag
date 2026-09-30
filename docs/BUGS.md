@@ -58,17 +58,26 @@ were already live-verified working; the headers were only ever misleading.
 
 ## CRITICAL — blocks a real launch
 
-### 1. 🔴 App connects to Postgres as a superuser, bypassing Row-Level Security entirely
-- **Where:** `.env`'s `DATABASE_URL` (`my_db_user`), confirmed live via `select rolsuper` → `t`.
+### 1. 🟡 App connects to Postgres as a superuser in dev, bypassing RLS — real fix documented and proven, not yet the default anywhere
+- **Where:** `.env`'s `DATABASE_URL` (`my_db_user`), confirmed live via `select rolsuper` → `t`. This
+  is intentional for local/solo dev (lets the schema auto-provision on every boot) — the real gap is
+  that no environment, including `docker-compose.prod.yml`, is set up to run any differently.
 - **Why it matters:** `packages/infrastructure/database/upgrades.py`'s `rls_statements()` are the
   documented defense-in-depth layer for multi-tenant isolation — a superuser connection bypasses RLS
-  policies unconditionally. Tenant isolation today is enforced **only** by per-repository `tenant_id`
-  filters in application code, with **zero database-level backstop** if any one repository method
-  ever misses that filter.
-- **Fix already half-built:** `scripts/create_app_role.sql` already creates the correct non-superuser
-  `rag_app` role for exactly this. Nothing currently points the running app at it.
-- **Risk of fixing:** genuine — needs testing that every migration/DDL path (which may need elevated
-  privileges, e.g. `CREATE EXTENSION vector`) still works under the restricted role before cutover.
+  policies unconditionally. Tenant isolation without it is enforced **only** by per-repository
+  `tenant_id` filters in application code, with **zero database-level backstop** if any one repository
+  method ever misses that filter.
+- **Fix proven this pass, not yet wired into any deploy path.** `scripts/create_app_role.sql` already
+  creates the correct non-superuser `rag_app` role. Live-verified end to end on a disposable scratch
+  database: ran the real Alembic migration as the table owner, applied `create_app_role.sql`, booted a
+  real API instance connected as `rag_app` with `SCHEMA_INIT_AT_STARTUP=false` — clean startup, no
+  RLS-bypass warning, passing health check — and confirmed via raw SQL that RLS genuinely filters rows
+  by `app.tenant_id` as `rag_app` (it does not as a superuser). Full account and setup steps now in
+  `docs/DEPLOYMENT.md` §4 and `.env.example`.
+- **Deliberately not changed:** the shared dev `.env` itself — flipping it to `rag_app` would break
+  the schema-auto-provision convenience this whole project's dev workflow (including this session's
+  own tooling) depends on. This is scoped as a **production deploy step**, not a local dev default.
+  Remains 🟡 rather than ✅ until some real deploy path actually runs it, not just documents it.
 
 ### 2. 🔴 Architecturally single-replica-only — silently breaks under horizontal scaling
 - **Where:** three separate in-memory, per-process state stores with no cross-replica coordination:
