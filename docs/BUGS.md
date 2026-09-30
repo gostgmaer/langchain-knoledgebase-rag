@@ -93,12 +93,19 @@ were already live-verified working; the headers were only ever misleading.
 - **Fix:** move rate-limit counters and the summarize lock to Redis (already a running dependency);
   either fix metrics aggregation or accept per-replica metrics with a documented caveat.
 
-### 3. 🔴 No backup/restore strategy for Postgres
-- **Where:** confirmed absent — `scripts/` has no backup script, `docs/DEPLOYMENT.md` has zero
-  mentions of backup/restore/`pg_dump`/disaster recovery.
+### 3. 🟡 No backup/restore strategy for Postgres — scripts built and proven, not yet scheduled anywhere
+- **Where:** was confirmed absent — no backup script, no mention in `docs/DEPLOYMENT.md`.
 - **Why it matters:** Postgres holds 100% of app data *and* the vector store (when `pgvector` is the
-  backend, which it is in this `.env`). No documented DR path today means total data loss on disk
-  failure or a bad migration.
+  backend, which it is in this `.env`). No documented DR path meant total data loss on disk failure
+  or a bad migration.
+- **Fixed this pass:** `scripts/backup_db.sh`/`scripts/restore_db.sh` (real `pg_dump -Fc`/`pg_restore
+  --clean --if-exists`, run inside the `postgres` container via `docker compose exec`). Verified live:
+  backed up the real dev database (2.4MB, 39 tables), restored it into a disposable scratch container,
+  confirmed table count and a real row count matched exactly. Documented in `docs/DEPLOYMENT.md` §5.
+- **Still open:** nothing schedules this automatically, and a local dump next to the database it backs
+  up doesn't survive that host's disk failing — both are operational decisions for wherever this
+  actually deploys (cron cadence, retention, off-host storage target), not something to guess at from
+  this repo alone.
 
 ### 4. 🔴 No CI pipeline at all
 - **Where:** confirmed via `git ls-files` — zero `.github/workflows/`, no CI config of any kind exists.

@@ -110,3 +110,37 @@ SCHEMA_INIT_AT_STARTUP=false
 migration/role-creation step or default to this `DATABASE_URL`/`SCHEMA_INIT_AT_STARTUP` pair, since
 doing so unconditionally would break the common "point compose at a fresh, unmigrated database" case.
 Wire it into whatever deploy automation runs before `docker compose -f docker-compose.prod.yml up`.
+
+## 5. Backup and restore
+
+`docs/BUGS.md` item 3: no backup/restore strategy existed at all before this. Postgres holds 100% of
+this app's data, including the vector store itself when `VECTOR_STORE_BACKEND=pgvector` (this dev
+`.env`'s current setting) — there is no separate store to fall back on.
+
+```bash
+# Back up the running `postgres` compose service to storage/backups/<db>_<UTC timestamp>.dump
+# (custom pg_dump format: compressed, selectively restorable). Reads POSTGRES_USER/POSTGRES_DB
+# from .env.
+scripts/backup_db.sh
+
+# Optionally prune dumps older than N days in the same run:
+RETENTION_DAYS=14 scripts/backup_db.sh
+
+# Restore a dump. Destructive (--clean --if-exists): drops and replaces every object in the
+# target database first. Prompts for the database name as confirmation unless -y/--yes is passed.
+scripts/restore_db.sh storage/backups/my_database_name_20260930T120000Z.dump
+```
+
+Both scripts run `pg_dump`/`pg_restore` *inside* the `postgres` container via `docker compose exec`,
+so they work identically on the host or in CI without needing a local Postgres client install that
+matches the server's major version.
+
+Verified live this pass: backed up the real dev database (2.4MB, 39 tables), restored it into a
+disposable scratch Postgres container, and confirmed table count and a real row count (`knowledge_sources`)
+matched exactly between source and restore.
+
+**Not yet done**: scheduling this to run automatically (a cron entry, a scheduled task, or a
+`postgres`-sidecar backup container are all reasonable — none is wired up here, since the right
+schedule/retention/off-host-storage target is an operational decision for wherever this actually
+deploys, not something to guess at from this repo alone) and shipping backups off the same host/volume
+(a local dump next to the database it backs up doesn't survive that host's disk failing).
