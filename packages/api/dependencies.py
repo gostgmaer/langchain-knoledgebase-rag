@@ -10,7 +10,6 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.config.loader import settings
-from packages.conversation.manager import ConversationManager
 from packages.graph.manager import GraphManager
 from packages.infrastructure.ai.manager import LLMManager
 from packages.infrastructure.container import ApplicationContainer
@@ -345,19 +344,6 @@ async def get_ai_manager(
     manager: LLMManager = Depends(Provide[ApplicationContainer.ai.manager]),
 ) -> LLMManager:
     return manager
-
-
-#
-# Conversation
-#
-
-
-@inject
-async def get_conversation_manager(
-    container: ApplicationContainer = Depends(Provide[ApplicationContainer]),
-) -> AsyncIterator[ConversationManager]:
-    async with request_scoped_session(container):
-        yield container.conversation.manager()
 
 
 #

@@ -159,8 +159,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
     conversation = providers.Container(
         ConversationContainer,
         repositories=repositories,
-        graph=graph,
-        services=services,
     )
 
     #
