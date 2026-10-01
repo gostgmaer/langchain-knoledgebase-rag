@@ -298,6 +298,33 @@ were already live-verified working; the headers were only ever misleading.
   -written `DELETE FROM ...` needed between live-script runs to avoid stale `identity_mappings`
   causing false failures). Would collide immediately under any future parallel/CI test execution.
 
+### 25. 🔴 `scripts/e2e_local.sh`'s test documents leave orphaned rows other pages surface to real users, not just clutter
+- **Found** during a frontend admin-nav audit, not a targeted investigation: the Observability page's
+  "Most retrieved documents" table was showing raw truncated document IDs instead of names for 248 of
+  415 `retrieval_result_logs` rows (60%). Traced via direct SQL to rows referencing `document_id`s with
+  no matching row in `documents` at all — both the frontend (`observability-view.tsx`) and backend
+  (`observability.py`'s real `LEFT OUTER JOIN`) were already correct; the data itself was wrong.
+  Dated across this whole session's e2e-script testing window, all `e2e_doc_*`/`e2e_restricted_*`
+  named documents created by `scripts/e2e_local.sh`.
+- **Why it matters beyond test hygiene (the gap item 18 already tracks for connector tests):** this
+  isn't just stale rows slowing down a later test run — it's test data a real admin would see as a
+  visibly broken table in a production-adjacent environment any time these e2e scripts run against a
+  shared, non-ephemeral database. The same `e2e_doc_*`/`e2e_restricted_*` documents are still visible,
+  un-archived, inside real Knowledge Base cards today (confirmed live: the `default` KB's "+22
+  archived/superseded" count includes several of them).
+- **Fixed this pass:** the 248 orphaned `retrieval_result_logs` rows were deleted directly via SQL
+  (a data fix, restoring Observability's accuracy today), and the Knowledge Base card was changed to
+  filter to current/non-archived documents so leftover test docs stop being visually indistinguishable
+  from real content (`docs/CHANGELOG.md`'s "enterprise-grade UI" entry). Neither fix touches the root
+  cause.
+- **Not fixed — the root cause:** `scripts/e2e_local.sh` has no equivalent of
+  `test_source_sync.py`'s manual cleanup discipline (itself inadequate, per item 18) and creates
+  documents through the real API (so they generate real dependent rows: chunks, retrieval logs) with
+  no teardown step at all. Needs either a real teardown pass at the end of the script (delete-by-prefix
+  on its own `e2e_*` naming convention, cascading to dependent tables) or point the script at a
+  disposable database the way `tests/integration` already does — not something to bolt on silently
+  while fixing an unrelated frontend item.
+
 ---
 
 ## MEDIUM
