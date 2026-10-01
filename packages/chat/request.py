@@ -10,9 +10,9 @@ from packages.infrastructure.ai.config import LLMConfig
 
 
 @dataclass(slots=True)
-class ChatRequest:
+class LLMChatRequest:
     """
-    Represents a single chat request.
+    A single request to `LLMChatService` — send these messages to the configured LLM.
     """
     conversation_id: UUID
     messages: list[BaseMessage]
@@ -22,7 +22,7 @@ class ChatRequest:
     stream: bool = False
     tools: list[Any] = field(default_factory=list)
     # Set when the conversation's agent has a non-default ModelProfile whose
-    # provider ChatService can actually serve (packages/graph/nodes/llm.py
+    # provider LLMChatService can actually serve (packages/graph/nodes/llm.py
     # resolves it) — docs/BUGS.md item 15: ModelProfile.provider/.model used
     # to be stored but never read; the global default was silently used
     # regardless. None means "use the shared default LLMManager", same as

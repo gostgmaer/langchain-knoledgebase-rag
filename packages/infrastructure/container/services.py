@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dependency_injector import containers, providers
 
-from packages.chat.chat_service import ChatService
+from packages.chat.chat_service import LLMChatService
 from packages.config.loader import settings as _settings
 from packages.infrastructure.resilience.circuit_breaker import CircuitBreaker
 
@@ -37,7 +37,7 @@ class ServiceContainer(containers.DeclarativeContainer):
     )
 
     chat = providers.Singleton(
-        ChatService,
+        LLMChatService,
         llm=ai.manager,
         breaker=llm_circuit_breaker,
     )

@@ -8,24 +8,32 @@ from langchain_core.messages import AIMessage
 from packages.infrastructure.ai import LLMManager
 from packages.infrastructure.resilience.circuit_breaker import CircuitBreaker
 
-from .request import ChatRequest
-from .response import ChatResponse
+from .request import LLMChatRequest
+from .response import LLMChatResponse
 
 
-class ChatService:
+class LLMChatService:
     """
     Stateless service responsible for communicating with the LLM.
+
+    Named `LLMChatService`, not `ChatService`, specifically to stay distinct from
+    `packages.application.services.chat_service.ChatService` — the top-level `POST /api/v1/chat`
+    orchestrator (conversation/message persistence, calling `GraphManager`). That one is the
+    request-scoped, multi-turn flow; this one is the stateless "send these messages to the
+    configured LLM and get a completion back" layer `LLMNode`/`WriterNode` call from inside the
+    graph. Same-named classes at these two different layers were a real, previously-flagged
+    source of confusion (docs/UNUSED_FILES.md) — this rename, not a behavior change, resolves it.
     """
 
     def __init__(self, llm: LLMManager | None = None, breaker: CircuitBreaker | None = None):
         self._llm = llm or LLMManager()
-        # Per-provider circuit breaker (one ChatService instance is a
+        # Per-provider circuit breaker (one LLMChatService instance is a
         # Singleton bound to one active provider config for the whole
         # app) — a default is built here so direct instantiation outside
         # DI (tests, scripts) still works.
         self._breaker = breaker or CircuitBreaker(name="llm-provider")
 
-    def _llm_for(self, request: ChatRequest) -> LLMManager:
+    def _llm_for(self, request: LLMChatRequest) -> LLMManager:
         # request.llm_config is set when the conversation's agent has a
         # non-default ModelProfile (docs/BUGS.md item 15) — a fresh,
         # stateless provider built just for this one call, never mutating
@@ -37,12 +45,12 @@ class ChatService:
             return LLMManager(request.llm_config)
         return self._llm
 
-    def _model(self, request: ChatRequest, llm: LLMManager):
+    def _model(self, request: LLMChatRequest, llm: LLMManager):
         if request.tools:
             return llm.bind_tools(request.tools)
         return llm
 
-    def chat_sync(self, request: ChatRequest) -> ChatResponse:
+    def chat_sync(self, request: LLMChatRequest) -> LLMChatResponse:
         """
         Execute a synchronous chat request.
         """
@@ -60,7 +68,7 @@ class ChatService:
         else:
             self._breaker.record_success()
 
-        return ChatResponse(
+        return LLMChatResponse(
             message=response,
             usage=response.usage_metadata or {},
             provider=str(llm.config.provider),
@@ -69,8 +77,8 @@ class ChatService:
 
     async def chat(
         self,
-        request: ChatRequest,
-    ) -> ChatResponse:
+        request: LLMChatRequest,
+    ) -> LLMChatResponse:
         """
         Execute an asynchronous chat request.
         """
@@ -88,7 +96,7 @@ class ChatService:
         else:
             self._breaker.record_success()
 
-        return ChatResponse(
+        return LLMChatResponse(
             message=response,
             usage=response.usage_metadata or {},
             provider=str(llm.config.provider),
@@ -97,7 +105,7 @@ class ChatService:
 
     def stream(
         self,
-        request: ChatRequest,
+        request: LLMChatRequest,
     ) -> Iterator:
         """
         Stream model output.
@@ -117,7 +125,7 @@ class ChatService:
 
     async def astream(
         self,
-        request: ChatRequest,
+        request: LLMChatRequest,
     ) -> AsyncIterator:
         """
         Stream model output asynchronously.

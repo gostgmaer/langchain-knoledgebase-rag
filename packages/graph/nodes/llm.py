@@ -6,9 +6,9 @@ from __future__ import annotations
 
 from langgraph.config import get_stream_writer
 
-from packages.chat.chat_service import ChatService
-from packages.chat.request import ChatRequest
-from packages.chat.response import ChatResponse
+from packages.chat.chat_service import LLMChatService
+from packages.chat.request import LLMChatRequest
+from packages.chat.response import LLMChatResponse
 from packages.domain.enums.model_status import ModelStatus
 from packages.graph.state import GraphState
 from packages.infrastructure.ai.config import build_llm_config_from_profile
@@ -33,7 +33,7 @@ class LLMNode:
 
     def __init__(
         self,
-        chat_service: ChatService,
+        chat_service: LLMChatService,
         prompt_builder: PromptBuilder,
         tool_manager: ToolManager,
         model_profile_repository: ModelProfileRepository,
@@ -56,7 +56,7 @@ class LLMNode:
             messages=state["messages"],
         )
 
-        request = ChatRequest(
+        request = LLMChatRequest(
             conversation_id=state["conversation_id"],
             messages=prompt,
             tools=self._tools.list() if state.get("tools_enabled", True) else [],
@@ -80,7 +80,7 @@ class LLMNode:
 
     async def _resolve_llm_config(self, model_profile_id):
         """
-        None means "use ChatService's default LLMManager", same as before
+        None means "use LLMChatService's default LLMManager", same as before
         this existed — a missing id, a deleted profile, a DISABLED/
         DEPRECATED one, or a provider LLMFactory doesn't implement yet
         (build_llm_config_from_profile's own fallback) are all treated the
@@ -97,12 +97,12 @@ class LLMNode:
 
         return build_llm_config_from_profile(profile)
 
-    async def _stream(self, request: ChatRequest, citations: list, retrieval_id=None):
+    async def _stream(self, request: LLMChatRequest, citations: list, retrieval_id=None):
         """
         Streams the LLM response token-by-token, pushing each chunk to
         the graph's stream writer (surfaced over HTTP via
         GraphManager.stream()'s stream_mode="custom"), while still
-        assembling and returning the same ChatResponse shape the
+        assembling and returning the same LLMChatResponse shape the
         non-streaming path returns — the rest of this node doesn't
         need to know the difference.
         """
@@ -157,7 +157,7 @@ class LLMNode:
             }
         )
 
-        return ChatResponse(
+        return LLMChatResponse(
             message=final,
             usage=getattr(final, "usage_metadata", None) or {},
         )
