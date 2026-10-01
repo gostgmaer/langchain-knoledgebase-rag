@@ -46,7 +46,44 @@ services:
     networks:
       - backend
 
-  api:
+  # Zero-downtime deploys (docs/BUGS.md item 9) — Traefik is the only public entrypoint now
+  # (`api_blue`/`api_green` below no longer publish a host port at all), discovering backends via
+  # the Docker provider and routing only to containers whose Docker HEALTHCHECK reports healthy
+  # (built into docker/Dockerfile already, no extra Traefik config needed for that part). Deploy
+  # with `scripts/deploy_blue_green.sh`, not a raw `docker compose up -d` — see that script and
+  # docs/DEPLOYMENT.md §7 for the real mechanism (start the idle color, wait for it to go healthy
+  # so both run briefly side by side, then drain and stop the old one).
+  traefik:
+    image: traefik:v3.2
+
+    restart: always
+
+    command:
+      - --providers.docker=true
+      # Opt-in only (`traefik.enable=true`) — without this, Traefik would also try to route to
+      # postgres/redis/worker/backup/migrate, none of which speak HTTP.
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:8000
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      # Read-only: Traefik only needs to list/inspect containers to discover backends and their
+      # health status, never to create/exec/modify them.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    logging: *default-logging
+
+    networks:
+      - backend
+
+  # api_blue / api_green: two identical replicas of the same logical Traefik service (same
+  # `traefik.http.services.api...` labels on both — Traefik load-balances across every *running*
+  # container that advertises it, which is what makes the brief both-running window during a
+  # deploy work at all). Only one is normally running at a time; scripts/deploy_blue_green.sh
+  # controls which. Neither publishes a host port directly — Traefik is the only public entrypoint.
+  api_blue:
     image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
 
     restart: always
@@ -54,8 +91,49 @@ services:
     env_file:
       - .env
 
-    ports:
-      - "8000:8000"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.api.rule: "PathPrefix(`/`)"
+      traefik.http.routers.api.entrypoints: "web"
+      traefik.http.services.api.loadbalancer.server.port: "8000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
+
+      migrate:
+        condition: service_completed_successfully
+
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+
+    logging: *default-logging
+
+    networks:
+      - backend
+
+  api_green:
+    image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
+
+    restart: always
+
+    env_file:
+      - .env
+
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.api.rule: "PathPrefix(`/`)"
+      traefik.http.routers.api.entrypoints: "web"
+      traefik.http.services.api.loadbalancer.server.port: "8000"
 
     depends_on:
       postgres:

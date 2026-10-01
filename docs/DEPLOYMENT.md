@@ -61,7 +61,8 @@ This section had drifted stale (see `docs/BUGS.md` for the full, currently-accur
 - **Real Alembic migrations exist** and are live-verified (`docs/BUILD_STATUS.md` "next priorities" #23): two idempotent revisions, driven off the live SQLAlchemy models rather than a frozen DDL list, proven end to end against a genuinely empty database. `packages/api/lifespan.py` still boots via `Base.metadata.create_all()` + `apply_schema_upgrades()` by default (`SCHEMA_INIT_AT_STARTUP=true`) rather than `alembic upgrade head` — that's a deliberate choice for local/single-operator dev convenience, not a gap. See §4 below for the real-migration path a production deploy should actually use.
 - **Rate limiting, CORS, and doc-gating are all real and registered** — `RateLimitMiddleware` and `CORSMiddleware` are both in `packages/api/middleware/__init__.py`'s `register_middlewares()`, and `/docs`/`/redoc`/`/openapi.json` are gated off entirely when `APP_ENV=production` (`packages/api/app.py`). `SecurityHeadersMiddleware` (CSP/X-Frame-Options/etc.) is also registered.
 - **`worker` runs a real `arq` job queue** — `packages/worker/main.py`'s `WorkerSettings` registers real jobs (document ingestion, scratch-file cleanup), sharing the compose stack's Redis. Falls back to in-process ingestion if Redis is unreachable at `api` startup, rather than failing outright.
-- **Genuinely still open** (tracked in full in `docs/BUGS.md`): no CI pipeline, zero frontend test coverage, no load-testing tooling, no backup/restore strategy, and the app is architecturally single-replica-only today (in-memory rate limiter/metrics/locks with no cross-replica coordination) — don't run more than one `api` replica until that's addressed.
+- **Multi-replica `api` is safe** — this row used to warn against running more than one replica (in-memory rate limiter/locks with no cross-replica coordination); both genuinely-broken-by-design state stores (`RateLimitMiddleware`, the memory summarize-lock) have since moved to Redis-backed, cross-replica-safe implementations (`docs/BUGS.md` item 2), and §7 below now runs two `api` replicas side by side during every deploy on exactly that strength. Per-replica Prometheus metrics (`MetricsStore`) were re-scoped as correct by design, not a bug — standard Prometheus pattern, a real server aggregates across replicas at query time.
+- **Genuinely still open** (tracked in full in `docs/BUGS.md`): CI not yet observed running on real GitHub infrastructure, and RBAC permission-code enforcement stays off (`ENABLE_RBAC=false`) until a real role→permission-code mapping exists on the IAM side.
 - **Secrets in `.env`** are the only secrets mechanism — no Docker secrets, no external secrets manager integration. Fine for local/dev, worth revisiting before a real production deploy.
 
 None of this blocks running the stack locally for development or testing — it's the gap between "it runs in a container" and "it's actually production-hardened."
@@ -191,26 +192,43 @@ instead of one.
 -f docker/Dockerfile .` completed cleanly (2.79GB image), confirmed with `docker images`, then
 removed the test tag again (it was only ever for verification, not a real release).
 
-## 7. Zero-downtime deploys — a real, currently-open gap, not glossed over
+## 7. Zero-downtime deploys
 
-`docs/BUGS.md` item 9. Redeploying today (`docker compose -f docker-compose.prod.yml up -d` with a
-new `VERSION`) recreates the `api`/`worker` containers directly — any request in flight when the
-old container stops is dropped, and there's a real (if short) window with no `api` container
-answering the host's published port at all.
+`docs/BUGS.md` item 9. A previous pass left this deliberately undone, documenting three real
+options rather than picking one unasked (reverse proxy + two versions side by side; move to an
+orchestrator like Swarm/Kubernetes; or accept brief downtime per deploy as a legitimate choice).
+This pass built the first option for real.
 
-This isn't fixable by a script alone: `docker-compose.yml`/`docker-compose.prod.yml` bind `api`
-directly to a host port (`8088:8000` / `8000:8000`), one container at a time — there is no reverse
-proxy or load balancer in this stack to route traffic across two temporarily-coexisting versions
-while one drains, which is what an actual zero-downtime cutover needs. Adding one (Traefik/Caddy/
-nginx in front, health-gated) is a real infrastructure decision — new services, new config, a new
-thing to keep healthy — not something to bolt on silently as a side effect of an unrelated fix.
+**How it works.** `docker-compose.prod.yml` now has three services where there used to be one
+`api`: `traefik` (the only public entrypoint, `:8000`), and `api_blue`/`api_green` — two identical
+replicas of the same logical Traefik service (same `traefik.http.services.api...` labels on both),
+neither publishing a host port directly. Traefik discovers backends via Docker and automatically
+load-balances across every *running* container advertising that service name — and automatically
+skips any container whose Docker `HEALTHCHECK` isn't reporting healthy (already baked into
+`docker/Dockerfile`, no extra Traefik config needed for that part).
 
-Documenting the real options rather than picking one unasked:
-- **A reverse proxy + two tagged versions running side by side**, cut over only once the new one's
-  `/api/v1/health` passes, old one drained and stopped after. The standard pattern; needs a proxy
-  added to the compose stack.
-- **Move to an orchestrator with this built in** (Docker Swarm mode's own rolling `docker service
-  update`, or Kubernetes) — a much bigger step than this repo's current docker-compose-only setup.
-- **Accept brief downtime per deploy** (what happens today) if deploy frequency and traffic don't
-  justify the added complexity yet — a legitimate choice for an early-stage deployment, as long as
-  it's a choice, not an unnoticed gap.
+Deploy with the script, not a raw `docker compose up -d`:
+
+```bash
+VERSION=1.4.3 scripts/deploy_blue_green.sh
+```
+
+It starts whichever color isn't currently running on the new version, waits for its own
+`HEALTHCHECK` to report healthy (Traefik is routing to *both* the old and new containers during
+this window — the actual mechanism that avoids a gap), then stops and removes the old color. If
+the new color never goes healthy within `HEALTH_TIMEOUT_SECONDS` (default 120s), it's torn down
+instead and the old color is left running, untouched — a real rollback on failure, not just a
+deploy that might leave things broken. First-ever deploy (neither color running yet) starts
+`api_blue`, same as any other deploy, with no old color to drain afterward.
+
+**Not changed**: `worker` stays single-instance with `restart: always`, same as before. It doesn't
+serve HTTP traffic that needs a gap-free cutover the way `api` does — arq job state lives in
+Redis, so a brief worker restart just delays in-flight jobs rather than dropping a live request;
+a different risk profile, out of scope for this specific gap.
+
+**Verified**: `docker compose -f docker-compose.prod.yml config` resolves cleanly — `api_blue`/
+`api_green` correctly carry no direct port publish, identical Traefik labels on both, and
+`traefik`'s own command/port/socket-mount config all render as intended. `scripts/
+deploy_blue_green.sh` passes `sh -n` (syntax-only check). Full live verification (an actual
+`VERSION=x` → `VERSION=y` deploy, watching requests succeed throughout) deferred — this
+environment's Docker Desktop was down for this pass.

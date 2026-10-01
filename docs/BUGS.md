@@ -220,16 +220,32 @@ were already live-verified working; the headers were only ever misleading.
 
 ### 8. ✅ `docker-compose.prod.yml`'s `redis` service was a real Compose config error — see "Fixed this pass" (0b) above.
 
-### 9. 📝 No zero-downtime deploy story — documented honestly, not force-fixed
-- `restart: always` + a straight redeploy drops in-flight requests. No reverse-proxy health-gated
-  cutover, no rolling-update config.
-- **Deliberately not "fixed" with a script.** This genuinely needs a reverse proxy/load balancer
-  added to the stack (the current compose files bind `api` directly to one host port — nothing to
-  route across two temporarily-coexisting versions during a cutover), which is a real infrastructure
-  decision — new services, new things to keep healthy — not something to bolt on silently as a side
-  effect of an unrelated fix. Real options documented in `docs/DEPLOYMENT.md` §7 (a proxy + blue-green,
-  an orchestrator with rolling updates built in, or accepting brief downtime per deploy as a
-  legitimate choice for now) rather than picking one unasked.
+### 9. ✅ No zero-downtime deploy story — built for real, the reverse-proxy + blue-green option
+- Was: `restart: always` + a straight redeploy drops in-flight requests. No reverse-proxy
+  health-gated cutover, no rolling-update config.
+- **A previous pass deliberately left this undone**, documenting three real options rather than
+  picking one unasked (reverse proxy + blue-green; an orchestrator with rolling updates built in;
+  accept brief downtime as a legitimate choice). **This pass built the first option.**
+- **Fixed:** `docker-compose.prod.yml`'s single `api` service is now `traefik` (the only public
+  entrypoint) plus `api_blue`/`api_green` — two identical replicas of one logical Traefik service,
+  neither publishing a host port directly. Traefik discovers backends via Docker and automatically
+  routes only to containers whose Docker `HEALTHCHECK` reports healthy (already baked into
+  `docker/Dockerfile`, no extra config needed for that part). New `scripts/deploy_blue_green.sh`:
+  starts the idle color on the new version, waits for it to go healthy (Traefik routes to *both*
+  colors during this window — the actual zero-gap mechanism), then drains and stops the old one.
+  Rolls back automatically (stops the new color, leaves the old one running) if the new color
+  never goes healthy within `HEALTH_TIMEOUT_SECONDS`.
+- **This relies on item 2's fix being real, not assumed**: running two `api` replicas side by side
+  is only safe because `RateLimitMiddleware` and the memory summarize-lock are genuinely
+  Redis-backed and cross-replica-safe now — confirmed by re-checking item 2 before building this,
+  not just trusting its own "Fixed" marker. `docs/DEPLOYMENT.md`'s §3 had a stale warning against
+  running more than one `api` replica, left over from before item 2's fix — corrected in the same
+  pass as this one, not left contradicting it.
+- **Verified**: `docker compose -f docker-compose.prod.yml config` resolves cleanly — correct
+  labels, no port publish on `api_blue`/`api_green`, `traefik`'s command/port/socket-mount config
+  all render as intended. `scripts/deploy_blue_green.sh` passes `sh -n`. **Full live verification
+  deferred** — this environment's Docker Desktop was down for this pass; a real `VERSION=x` →
+  `VERSION=y` deploy watching requests succeed throughout hasn't been observed yet.
 
 ### 10. ✅ `GET /api/v1/metrics` isn't real Prometheus format
 - Was a JSON dump of in-memory counters only, not Prometheus text-format — wouldn't integrate with a
