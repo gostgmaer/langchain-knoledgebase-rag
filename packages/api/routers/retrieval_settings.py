@@ -9,8 +9,10 @@ from packages.api.dependencies import (
     DEFAULT_USER_ID,
     get_scoped_container,
     require_admin,
+    require_permission,
     require_uuid_header,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.application.services.retrieval_settings_service import (
     MAX_RESULTS_RANGE,
@@ -77,6 +79,7 @@ def _response(overrides: RetrievalOverrides) -> RetrievalSettingsResponseSchema:
 @router.get(
     "",
     response_model=ApiResponse[RetrievalSettingsResponseSchema],
+    dependencies=[Depends(require_permission(Permission.RETRIEVAL_SETTINGS_READ))],
     summary="How retrieval is configured for this workspace",
 )
 async def get_retrieval_settings(
@@ -92,6 +95,7 @@ async def get_retrieval_settings(
     "",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[RetrievalSettingsResponseSchema],
+    dependencies=[Depends(require_permission(Permission.RETRIEVAL_SETTINGS_WRITE))],
     summary="Change retrieval behaviour for this workspace",
     description=(
         "Sets how many chunks answers use (`max_results`), the reranker score below which weaker chunks "

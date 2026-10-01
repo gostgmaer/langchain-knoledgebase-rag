@@ -19,7 +19,9 @@ from packages.api.dependencies import (
     request_scoped_session,
     require_uuid_header,
     require_admin,
+    require_permission,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.document import (
     ChunkingInfoSchema,
@@ -60,6 +62,7 @@ router = APIRouter(
     "",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=ApiResponse[DocumentUploadResponseSchema],
+    dependencies=[Depends(require_permission(Permission.DOCUMENTS_WRITE))],
     summary="Upload a document for ingestion",
     description=(
         "Stores the file in the Upload Service (the durable copy — see "
@@ -351,6 +354,7 @@ async def _document_responses(container: ApplicationContainer, rows) -> list[Doc
     "",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[DocumentListResponseSchema],
+    dependencies=[Depends(require_permission(Permission.DOCUMENTS_READ))],
     summary="List documents",
     description=(
         "Lists a tenant's documents, most recently ingested first, across every knowledge base it owns "
@@ -393,6 +397,7 @@ async def list_documents(
     "/{document_id}",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[DocumentResponseSchema],
+    dependencies=[Depends(require_permission(Permission.DOCUMENTS_READ))],
     summary="Fetch a document",
     description="Fetches a single document's metadata by ID.",
 )
@@ -422,6 +427,7 @@ async def get_document(
     "/{document_id}/chunks",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[DocumentChunkListResponseSchema],
+    dependencies=[Depends(require_permission(Permission.DOCUMENTS_READ))],
     summary="List a document's chunks",
     description=(
         "Every stored chunk of one document, in reading order, with its full text and all "
@@ -503,6 +509,7 @@ async def list_document_chunks(
     "/{document_id}/versions",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[DocumentVersionListResponseSchema],
+    dependencies=[Depends(require_permission(Permission.DOCUMENTS_READ))],
     summary="List a document's version history",
     description=(
         "Lists every version in this document's re-upload lineage, oldest "
@@ -582,6 +589,7 @@ async def _queue_reindex(
     "/reindex-outdated",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=ApiResponse[ReindexResponseSchema],
+    dependencies=[Depends(require_permission(Permission.DOCUMENTS_WRITE))],
     summary="Re-index every document processed by an older (or unrecorded) pipeline",
     description=(
         "Queues a re-index for this workspace's current, ready documents whose recorded pipeline version "
@@ -614,6 +622,7 @@ async def reindex_outdated(
     "/{document_id}/reindex",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=ApiResponse[ReindexResponseSchema],
+    dependencies=[Depends(require_permission(Permission.DOCUMENTS_WRITE))],
     summary="Re-index one document",
     description=(
         "Re-downloads the original file and re-runs chunking and embedding with the current pipeline and "
@@ -647,6 +656,7 @@ async def reindex_document(
     "/{document_id}",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[DocumentResponseSchema],
+    dependencies=[Depends(require_permission(Permission.DOCUMENTS_WRITE))],
     summary="Change a document's access level or classification",
     description=(
         "Sets `visibility` ('tenant' = every member may retrieve it, 'restricted' = administrators "
@@ -721,6 +731,7 @@ async def update_document(
     "/{document_id}",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[None],
+    dependencies=[Depends(require_permission(Permission.DOCUMENTS_DELETE))],
     summary="Delete a document",
     description=(
         "Deletes a document's chunks from the vector store and its "

@@ -10,8 +10,10 @@ from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
     get_scoped_container,
     require_admin,
+    require_permission,
     require_uuid_header,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.agent import (
     AgentListResponseSchema,
@@ -38,7 +40,7 @@ def _slugify(name: str) -> str:
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=ApiResponse[AgentResponseSchema],
-    dependencies=[Depends(require_admin())],
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.AGENTS_WRITE))],
     summary="Create an agent",
     description="Creates a new agent for the calling tenant, referencing an existing model profile.",
 )
@@ -94,6 +96,7 @@ async def create_agent(
     "",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[AgentListResponseSchema],
+    dependencies=[Depends(require_permission(Permission.AGENTS_READ))],
     summary="List agents",
     description="Lists the calling tenant's agents, any status.",
 )
@@ -125,6 +128,7 @@ async def list_agents(
     "/{agent_id}",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[AgentResponseSchema],
+    dependencies=[Depends(require_permission(Permission.AGENTS_READ))],
     summary="Fetch an agent",
     description="Fetches a single agent's configuration by ID.",
 )

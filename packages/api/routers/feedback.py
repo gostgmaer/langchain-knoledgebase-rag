@@ -10,7 +10,9 @@ from packages.api.dependencies import (
     get_scoped_container,
     require_uuid_header,
     require_admin,
+    require_permission,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.feedback import (
     FeedbackListResponseSchema,
@@ -95,7 +97,7 @@ async def submit_feedback(
     "",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[FeedbackListResponseSchema],
-    dependencies=[Depends(require_admin())],
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.FEEDBACK_READ))],
     summary="Review feedback",
     description="Lists the calling tenant's feedback, optionally filtered by rating, most recent first.",
 )

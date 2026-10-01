@@ -117,19 +117,29 @@ were already live-verified working; the headers were only ever misleading.
 - Both Redis clients are module-level (matching `packages/tools/builtin/weather.py`'s existing
   pattern) with a `close_*_redis()` hook wired into `lifespan.py`'s shutdown.
 
-### 3. 🟡 No backup/restore strategy for Postgres — scripts built and proven, not yet scheduled anywhere
+### 3. ✅ No backup/restore strategy for Postgres — now scheduled automatically, not just manual scripts
 - **Where:** was confirmed absent — no backup script, no mention in `docs/DEPLOYMENT.md`.
 - **Why it matters:** Postgres holds 100% of app data *and* the vector store (when `pgvector` is the
   backend, which it is in this `.env`). No documented DR path meant total data loss on disk failure
   or a bad migration.
-- **Fixed this pass:** `scripts/backup_db.sh`/`scripts/restore_db.sh` (real `pg_dump -Fc`/`pg_restore
+- **Fixed, scripts:** `scripts/backup_db.sh`/`scripts/restore_db.sh` (real `pg_dump -Fc`/`pg_restore
   --clean --if-exists`, run inside the `postgres` container via `docker compose exec`). Verified live:
   backed up the real dev database (2.4MB, 39 tables), restored it into a disposable scratch container,
-  confirmed table count and a real row count matched exactly. Documented in `docs/DEPLOYMENT.md` §5.
-- **Still open:** nothing schedules this automatically, and a local dump next to the database it backs
-  up doesn't survive that host's disk failing — both are operational decisions for wherever this
-  actually deploys (cron cadence, retention, off-host storage target), not something to guess at from
-  this repo alone.
+  confirmed table count and a real row count matched exactly.
+- **Fixed this pass, closes the scheduling gap:** `docker-compose.prod.yml` gained a `backup`
+  sidecar (new `scripts/backup_db_scheduled.sh`) — same image as `postgres` (so its bundled
+  `pg_dump` always matches the server's major version), connecting directly over the `backend`
+  network rather than a docker-socket mount (pg_dump is read-only; no reason to grant a backup
+  sidecar that much privilege). Loops on a real interval (`BACKUP_INTERVAL_SECONDS`, default
+  daily), pruning dumps older than `BACKUP_RETENTION_DAYS` (default 14) each cycle.
+- **Verified live**: ran a disposable instance of the sidecar (15s interval, for a fast test) against
+  the real dev database over the compose network — a real 2.8MB dump landed within a second, and
+  `pg_restore --list` against it confirmed 313 real, valid TOC entries (not a corrupt/empty file).
+  Documented in `docs/DEPLOYMENT.md` §5.
+- **Still open, genuinely an operational decision, not guessed at here:** `backups-data` is a volume
+  on the *same host* as `postgres-data` — this closes "nothing schedules it," not "survives that
+  host's disk failing." Shipping dumps off-host (S3, a remote volume, an rsync step) needs a real
+  target, which only whoever operates the actual deployment can specify.
 
 ### 4. 🟡 No CI pipeline — now added (`.github/workflows/ci.yml`), not yet observed running on real GitHub infrastructure
 - **Where:** was confirmed via `git ls-files` — zero `.github/workflows/`, no CI config of any kind.
@@ -168,16 +178,17 @@ were already live-verified working; the headers were only ever misleading.
 
 ## HIGH
 
-### 7. 🟡 `docker-compose.prod.yml` requires a pre-built image nothing in the repo builds
+### 7. ✅ `docker-compose.prod.yml` requires a pre-built image nothing in the repo builds
 - Was: requires `easydev/ai-platform:${VERSION}` via Compose's `:?` required-var syntax, but nothing
   in the repo built/tagged/pushed that image.
 - **Fixed:** `scripts/build_prod_image.sh <version>` builds `docker/Dockerfile` once and tags it as
   `easydev/ai-platform:<version>`, matching what the compose file expects (`api`/`worker` already
   share one image); `PUSH=1` also pushes it. Documented in `docs/DEPLOYMENT.md` §6.
-- 🟡 rather than ✅: the script's logic was reviewed and matches the already-working `docker/Dockerfile`
-  exactly (same command `docker/DEPLOYMENT.md`'s own manual instructions used), but a live end-to-end
-  run of the script itself hit the same persistent build-network issue as items 13/21 (the large
-  `torch` download) before completing — pending a clean run once that clears.
+- **Verified live this pass**, once this environment's persistent build-network issue (the same one
+  blocking items 13/21 — large `torch` download) cleared on its own: ran the script for real
+  (`scripts/build_prod_image.sh 0.1.0-test`), got a clean `docker build` (2.79GB image), confirmed
+  via `docker images`, then removed the test tag again (never pushed — it was only ever for
+  verification, not a real release).
 
 ### 8. ✅ `docker-compose.prod.yml`'s `redis` service was a real Compose config error — see "Fixed this pass" (0b) above.
 
@@ -208,23 +219,48 @@ were already live-verified working; the headers were only ever misleading.
   genuinely tracking real request traffic with correct `route`/`status` labels (including the
   endpoint's own earlier unauthenticated `401` attempt).
 
-### 11. 🟡 Fine-grained, permission-code RBAC is dead code — not fixed this pass, needs a decision first
-- `require_permission()` (`packages/api/dependencies.py:220`) is attached to **zero routes**
+### 11. ✅ Fine-grained, permission-code RBAC is dead code — taxonomy now proposed and wired, inert until deliberately turned on
+- `require_permission()` (`packages/api/dependencies.py:220`) was attached to **zero routes**
   (confirmed via grep), gated behind `ENABLE_RBAC` which defaults `false`. The only real, enforced
-  authorization boundary today is the coarser `require_admin()` (admin-or-nothing), used across 14
+  authorization boundary was the coarser `require_admin()` (admin-or-nothing), used across 14
   routers.
-- **Re-read closely this pass:** this isn't an oversight — `require_permission()`'s own docstring
-  says it's deliberately gated off "since the real IAM integration... hasn't been verified end-to-end
-  with real credentials yet." The mechanism itself is fully implemented and correct (`401` with no
-  user, `403` without the permission code, a real no-op while the flag is off) — what's missing is a
-  **permission-code taxonomy** (what codes exist — `documents:delete`? `knowledge_sources:admin`? —
-  and which roles get which) and real IAM credentials to verify enforcement against, neither of which
-  exists yet.
-- **Deliberately not invented here.** Attaching `Depends(require_permission("..."))` to 14+ routers
-  requires deciding what the permission codes actually are — a real product/security design
-  question with consequences for every future route, not something to guess at silently while fixing
-  an unrelated item. The coarser `require_admin()` boundary is real and already enforced today; this
-  is an incomplete *feature*, not an open door.
+- **Re-read closely the previous pass:** this wasn't an oversight — `require_permission()`'s own
+  docstring says it's deliberately gated off "since the real IAM integration... hasn't been verified
+  end-to-end with real credentials yet." The mechanism itself was already fully implemented and
+  correct (`401` with no user, `403` without the permission code, a real no-op while the flag is
+  off) — what was missing was a **permission-code taxonomy** (what codes exist, which roles get
+  which) and real IAM credentials to verify enforcement against. Deliberately not invented
+  silently in that pass — attaching codes to 14+ routers is a real product/security decision.
+- **This pass, with the user's explicit go-ahead to propose a taxonomy**: added
+  `packages/api/permissions.py` — a `Permission` class of `<resource>:<action>` string constants
+  (read/write/delete per router, matching each router's URL prefix), with a module docstring
+  explaining the scope rules (additive on top of `require_admin()`, never a replacement; most
+  resources get read/write/delete; a couple get one extra, narrower code where one specific action
+  is genuinely higher-risk than the rest of that resource's writes —
+  `knowledge_sources:credentials` for rotating/revoking a connector's real external secret,
+  `observability:purge` for the platform-wide retention-delete route, which already had its own
+  separate `require_super_admin()`). Wired a matching `Depends(require_permission(...))` onto every
+  route previously gated only by `require_admin()` across all 14 routers (documents and
+  knowledge_sources — the two largest and most sensitive — got full per-route read/write/delete/
+  credentials granularity; smaller, uniformly-admin routers got one code per resource).
+- **`feature_flags` deliberately excluded, not an oversight**: that router manages the `enable_rbac`
+  flag itself, and `require_permission()`'s enforcement is gated by that same flag — stacking a
+  permission-code check on the very router that controls it risks locking an admin out of ever
+  turning `enable_rbac` back off once it's on. Documented inline in
+  `packages/api/routers/feature_flags.py`; it keeps `require_admin()` as its only guard.
+  `feedback`'s public submit route (`POST /feedback`) also deliberately gets no code — only the
+  admin-only review route does; submitting feedback stays open to any authenticated user, unchanged.
+- **Verified live**: full unit+integration suite (383) and the separate `tests/api` suite (7) both
+  green. A real import of `packages.api.app` confirms every router still wires up with no error.
+  Restarted the real running dev API container (picks up the new code, volume-mounted) — clean
+  startup, no tracebacks. With `ENABLE_RBAC` at its real default (`false`), loaded the live
+  Knowledge Sources and Documents admin pages as a real logged-in admin — both render real data
+  exactly as before, confirming the new `require_permission()` dependencies are genuinely inert
+  no-ops today, not a behavior change.
+- **Still open, by design, not glossed over**: nobody's real IAM-issued JWT carries any of these
+  codes yet — turning `ENABLE_RBAC` on anywhere real, before a role→code mapping exists on the IAM
+  side, would lock every admin out of these routes rather than narrow anything. This taxonomy is a
+  proposal ready for review, not a decision to flip the flag on.
 
 ### 12. ✅ Rate limiting is one flat global limit, not tightened for expensive endpoints
 - Was: `RATE_LIMIT_REQUESTS_PER_MINUTE` (default 300/min) applied identically to a health check and
@@ -357,43 +393,50 @@ all import it) — not a bug itself, but worth flagging since `docs/BUILD_STATUS
 row calling it "orphaned," which could mislead a future cleanup pass into deleting live code (see the
 doc-only section below).
 
-### 21. 🟡 `worker` container has no Docker-level healthcheck
+### 21. ✅ `worker` container has no Docker-level healthcheck
 - Was: reasonable for a non-HTTP arq worker, but meant Docker/orchestration couldn't auto-detect or
   restart a stuck (not crashed — a crash already triggers `restart: unless-stopped` on its own,
   since the worker is the container's only process) worker.
 - **Fixed:** `arq` has a real, built-in health-check mechanism (`record_health()` refreshes a Redis
   key every `health_check_interval`; `arq <settings> --check` reads it back and exits 0/1) — no need
-  to hand-roll one. `packages/worker/main.py`'s `WorkerSettings` now sets
-  `health_check_interval = 60` (arq's own default is 3600s, too long for a responsive Docker
-  healthcheck), and `docker/Dockerfile.worker` gained a real `HEALTHCHECK` running `arq
+  to hand-roll one. `packages/worker/main.py`'s `WorkerSettings` sets `health_check_interval = 60`
+  (arq's own default is 3600s, too long for a responsive Docker healthcheck), and
+  `docker/Dockerfile.worker` has a real `HEALTHCHECK` running `arq
   packages.worker.main.WorkerSettings --check`.
-- **Verified live**, worked around a persistent, pre-existing environment limitation: a docker image
-  rebuild is needed for the `HEALTHCHECK` directive itself to take effect (it's baked into image
-  metadata), but four consecutive rebuild attempts in this pass all failed on the same transient
-  network error downloading the large `torch` dependency (`cannot decrypt peer's message` — the same
-  class of issue `docs/BUILD_STATUS.md` already documents for this environment pulling from
-  `ghcr.io`). Since `packages/worker/main.py` is volume-mounted, not baked in, its
-  `health_check_interval = 60` change *was* verifiable without a rebuild: restarted the real running
-  worker container, confirmed via `redis-cli TTL arq:queue:health-check` that the key now expires in
-  ~60s (not ~3600s), and ran `arq packages.worker.main.WorkerSettings --check` from the host —
-  `Health check successful`, exit `0`, with a live, current timestamp. The Docker `HEALTHCHECK`
-  directive's own syntax was written correctly and matches this exact command, but hasn't been
-  observed reporting `healthy` in `docker compose ps` yet — pending a rebuild once the environment's
-  network issue clears.
+- **A second real bug found and fixed this pass, once the image could finally be rebuilt** (the
+  previous pass's build-network blocker cleared — see item 7): the `HEALTHCHECK`'s own
+  `--timeout=10s` was too short for the command it runs. `arq ... --check` imports
+  `packages.worker.main` — and transitively the whole RAG/ML dependency chain (torch, transformers,
+  etc.) — before it ever reaches Redis, measured live at ~18s inside this exact image. The 10s
+  timeout made Docker report a genuinely healthy worker as `unhealthy` forever: `docker inspect`'s
+  health log showed `"Health check exceeded timeout (10s)"` on every single attempt, while running
+  the identical command directly (untimed) succeeded in ~18s every time. Fixed by bumping both
+  `--timeout` and `--start-period` to 30s.
+- **Verified live, end to end, closing the exact gap the previous pass left open**: rebuilt the
+  worker image for real (`docker compose build worker`), recreated the container, and watched it
+  transition through Docker's own health states — confirmed via `docker inspect` and
+  `docker compose ps worker`, which now genuinely reports `Up ... (healthy)`, not just a correctly-
+  written but unobserved `HEALTHCHECK` directive.
 
-### 22. 🟡 Upload Service `MAX_FILE_SIZE` mismatch — error handling confirmed already graceful, the number itself still unverifiable from here
-`docs/CHANGELOG.md:563` — this app validates uploads up to 50MB; the real Upload Service's own guide
+### 22. ✅ Upload Service `MAX_FILE_SIZE` mismatch — checked against the real, actually-running service, not guessed
+`docs/CHANGELOG.md:563` — this app validated uploads up to 50MB; the real Upload Service's own guide
 states a 10MB default. A 20–40MB file could pass local validation and then get rejected by the real
 service.
-- **Checked this pass, not a crash/bug:** `packages/api/routers/documents.py`'s upload route already
-  catches `SDKException` from the Upload Service call and surfaces its real rejection message as a
-  clean `400`, not a generic/opaque error (confirmed by reading the code, not just the doc's claim).
-  A rejected-for-size upload today fails cleanly with the real service's own message, just later than
-  ideal (after the full file already reached this app).
-- **Not changed:** `MAX_FILE_SIZE` itself. Lowering it to "10MB" on the strength of a doc comment
-  without access to the actually-deployed Upload Service's real current config risks the opposite
-  mistake — rejecting legitimate uploads the real service would in fact accept. This needs checking
-  against that service directly, not guessed at from this repo.
+- **Checked, not a crash/bug (previous pass):** `packages/api/routers/documents.py`'s upload route
+  already catches `SDKException` from the Upload Service call and surfaces its real rejection
+  message as a clean `400`, not a generic/opaque error. A rejected-for-size upload fails cleanly
+  with the real service's own message, just later than ideal (after the full file already reached
+  this app) — this part was already fine and is unchanged.
+- **Fixed for real this pass**: the real Upload Service happens to be running locally in this
+  environment (`file-upload-service`), so — rather than continuing to guess from a doc comment —
+  read its actual source directly: `config/index.js:53` is
+  `maxFileSize: _int(process.env.MAX_FILE_SIZE, 10485760)` (10MB), and its container's real env
+  (`docker exec file-upload-service printenv`) confirmed `MAX_FILE_SIZE` is **not** set, i.e. it
+  genuinely is running at that 10MB default today, not some higher value this app couldn't know
+  about. `packages/config/storage.py`'s `StorageSettings.max_file_size` default changed from 50MB to
+  10MB to match, with a comment citing exactly how this was verified (not a repeat of the original
+  doc-comment guess) and how to override it (`MAX_FILE_SIZE`) if the real service is ever
+  reconfigured with a higher limit. `.env.example` updated to match.
 
 ---
 

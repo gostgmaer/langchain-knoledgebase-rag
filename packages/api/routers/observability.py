@@ -13,9 +13,11 @@ from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
     get_scoped_container,
     require_admin,
+    require_permission,
     require_super_admin,
     require_uuid_header,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.application.services.retention_service import purge_expired
 from packages.domain.enums.document_status import DocumentStatus
@@ -30,7 +32,10 @@ from packages.knowledge.pipelines.ingestion import PIPELINE_VERSION
 router = APIRouter(
     prefix="/observability",
     tags=["Observability"],
-    dependencies=[Depends(require_admin())],
+    # Covers the read routes below; the retention-purge route further down has its own,
+    # separate require_super_admin() plus Permission.OBSERVABILITY_PURGE — it deletes rows
+    # platform-wide, across every tenant, a meaningfully different risk from these reads.
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.OBSERVABILITY_READ))],
 )
 
 
@@ -330,7 +335,7 @@ async def audit_events(
         "Platform-wide: it applies to every tenant's expired rows, not only the caller's."
     ),
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(require_super_admin())],
+    dependencies=[Depends(require_super_admin()), Depends(require_permission(Permission.OBSERVABILITY_PURGE))],
 )
 async def run_retention_purge(container: ApplicationContainer = Depends(get_scoped_container)):
     return ApiResponse(

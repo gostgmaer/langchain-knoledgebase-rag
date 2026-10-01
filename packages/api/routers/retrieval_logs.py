@@ -10,8 +10,10 @@ from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
     get_scoped_container,
     require_admin,
+    require_permission,
     require_uuid_header,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.retrieval_log import (
     RetrievalLogDetailSchema,
@@ -30,7 +32,7 @@ router = APIRouter(
     prefix="/retrieval-logs",
     tags=["Retrieval Logs"],
     # Retrieval internals (scores, ranks, which chunks were considered) are for operators only.
-    dependencies=[Depends(require_admin())],
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.RETRIEVAL_LOGS_READ))],
 )
 
 

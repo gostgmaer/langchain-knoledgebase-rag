@@ -8,7 +8,9 @@ from packages.api.dependencies import (
     get_scoped_container,
     require_uuid_header,
     require_admin,
+    require_permission,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.usage import DailyUsageSchema, UsageResponseSchema
 from packages.infrastructure.container import ApplicationContainer
@@ -16,7 +18,7 @@ from packages.infrastructure.container import ApplicationContainer
 router = APIRouter(
     prefix="/usage",
     tags=["Usage"],
-    dependencies=[Depends(require_admin())],
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.USAGE_READ))],
 )
 
 

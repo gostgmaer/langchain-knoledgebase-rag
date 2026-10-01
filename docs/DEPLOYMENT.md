@@ -147,11 +147,20 @@ Verified live this pass: backed up the real dev database (2.4MB, 39 tables), res
 disposable scratch Postgres container, and confirmed table count and a real row count (`knowledge_sources`)
 matched exactly between source and restore.
 
-**Not yet done**: scheduling this to run automatically (a cron entry, a scheduled task, or a
-`postgres`-sidecar backup container are all reasonable — none is wired up here, since the right
-schedule/retention/off-host-storage target is an operational decision for wherever this actually
-deploys, not something to guess at from this repo alone) and shipping backups off the same host/volume
-(a local dump next to the database it backs up doesn't survive that host's disk failing).
+**Now scheduled automatically in `docker-compose.prod.yml`** via a `backup` sidecar
+(`scripts/backup_db_scheduled.sh`) — same image as `postgres` (so its bundled `pg_dump` always
+matches the server's major version), connecting directly over the `backend` network rather than a
+docker-socket mount (pg_dump is read-only; no reason to grant a backup sidecar that much
+privilege). Runs every `BACKUP_INTERVAL_SECONDS` (default 86400 = daily), pruning dumps older than
+`BACKUP_RETENTION_DAYS` (default 14) each cycle, into the `backups-data` volume. Verified live:
+ran a disposable instance of the sidecar (15s interval) against the real dev database over the
+compose network, confirmed a real 2.8MB dump landed on schedule, and confirmed it's genuinely
+restorable (`pg_restore --list` — 313 real TOC entries).
+
+**Still a real, open gap**: `backups-data` is a volume on the same host as `postgres-data` — this
+does not by itself survive that host's disk failing. Shipping dumps off-host (S3/a remote volume/
+an rsync step) is a genuine operational decision for wherever this actually deploys, not something
+to guess at from this repo alone.
 
 ## 6. Building and deploying the production image
 
@@ -176,6 +185,11 @@ the exact same dependency set (see `docker/Dockerfile.worker`'s own comment) and
 `docker-compose.prod.yml` already references one image for both services. If they ever genuinely
 diverge, this script and the compose file's `image:` lines both need to build/reference two tags
 instead of one.
+
+**Verified live, end to end, once this environment's earlier build-network issue cleared**: ran
+`scripts/build_prod_image.sh 0.1.0-test` for real — `docker build -t easydev/ai-platform:0.1.0-test
+-f docker/Dockerfile .` completed cleanly (2.79GB image), confirmed with `docker images`, then
+removed the test tag again (it was only ever for verification, not a real release).
 
 ## 7. Zero-downtime deploys — a real, currently-open gap, not glossed over
 

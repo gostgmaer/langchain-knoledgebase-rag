@@ -25,8 +25,10 @@ from packages.api.dependencies import (
     DEFAULT_USER_ID,
     get_scoped_container,
     require_admin,
+    require_permission,
     require_uuid_header,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.knowledge_source import (
     ALLOWED_INTERVALS,
@@ -182,7 +184,12 @@ def _credential_error(exc: Exception) -> HTTPException:
 
 
 # ====================================================================== catalogue and summary
-@router.get("/types", response_model=ApiResponse[ConnectorTypesSchema], summary="Connector types and their settings")
+@router.get(
+    "/types",
+    response_model=ApiResponse[ConnectorTypesSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_READ))],
+    summary="Connector types and their settings",
+)
 async def list_types():
     return ApiResponse(
         message="Connector types retrieved.",
@@ -204,7 +211,12 @@ async def list_types():
     )
 
 
-@router.get("/summary", response_model=ApiResponse[SourcesSummarySchema], summary="Aggregate source health")
+@router.get(
+    "/summary",
+    response_model=ApiResponse[SourcesSummarySchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_READ))],
+    summary="Aggregate source health",
+)
 async def summary(request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, _ = _ids(request)
     session = container.database.session()
@@ -266,7 +278,12 @@ async def summary(request: Request, container: ApplicationContainer = Depends(ge
 
 
 # ====================================================================== identity mappings
-@router.get("/identity-mappings", response_model=ApiResponse[IdentityMappingListSchema], summary="External identity mappings")
+@router.get(
+    "/identity-mappings",
+    response_model=ApiResponse[IdentityMappingListSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_READ))],
+    summary="External identity mappings",
+)
 async def list_mappings(request: Request, provider: str | None = Query(default=None), container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, _ = _ids(request)
     stmt = select(IdentityMapping).where(IdentityMapping.tenant_id == tenant_id).order_by(IdentityMapping.provider, IdentityMapping.external_id)
@@ -279,7 +296,12 @@ async def list_mappings(request: Request, provider: str | None = Query(default=N
     )
 
 
-@router.put("/identity-mappings", response_model=ApiResponse[IdentityMappingSchema], summary="Map an external user or group to an internal user or role")
+@router.put(
+    "/identity-mappings",
+    response_model=ApiResponse[IdentityMappingSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_WRITE))],
+    summary="Map an external user or group to an internal user or role",
+)
 async def upsert_mapping(payload: IdentityMappingSchema, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, user_id = _ids(request)
     if not _registry.is_available(payload.provider):
@@ -304,7 +326,12 @@ async def upsert_mapping(payload: IdentityMappingSchema, request: Request, conta
     return ApiResponse(message="Mapping saved.", data=IdentityMappingSchema(id=row.id, provider=row.provider, principal_type=row.principal_type, external_id=row.external_id, internal_type=row.internal_type, internal_id=row.internal_id))
 
 
-@router.delete("/identity-mappings/{mapping_id}", response_model=ApiResponse[None], summary="Remove an identity mapping")
+@router.delete(
+    "/identity-mappings/{mapping_id}",
+    response_model=ApiResponse[None],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_DELETE))],
+    summary="Remove an identity mapping",
+)
 async def delete_mapping(mapping_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, user_id = _ids(request)
     session = container.database.session()
@@ -320,7 +347,12 @@ async def delete_mapping(mapping_id: UUID, request: Request, container: Applicat
 
 
 # ====================================================================== connection test (unsaved)
-@router.post("/test", response_model=ApiResponse[ConnectionTestSchema], summary="Validate and test a configuration before saving it")
+@router.post(
+    "/test",
+    response_model=ApiResponse[ConnectionTestSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_WRITE))],
+    summary="Validate and test a configuration before saving it",
+)
 async def test_unsaved(payload: TestConnectionSchema, container: ApplicationContainer = Depends(get_scoped_container)):
     errors, connector = await _check_config(payload.type, payload.configuration, payload.credentials)
     validation = ValidationSchema(ok=not errors, errors=errors)
@@ -339,7 +371,13 @@ async def test_unsaved(payload: TestConnectionSchema, container: ApplicationCont
 
 
 # ====================================================================== CRUD
-@router.post("", status_code=status.HTTP_201_CREATED, response_model=ApiResponse[SourceResponseSchema], summary="Create a knowledge source (paused until you start the first sync)")
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ApiResponse[SourceResponseSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_WRITE))],
+    summary="Create a knowledge source (paused until you start the first sync)",
+)
 async def create_source(payload: SourceCreateSchema, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, user_id = _ids(request)
     errors, connector = await _check_config(payload.type, payload.configuration, payload.credentials, check_credentials=payload.credentials is not None)
@@ -376,7 +414,12 @@ async def create_source(payload: SourceCreateSchema, request: Request, container
     return ApiResponse(message="Knowledge source created.", data=await _response(session, source, {}, webhook_secret=webhook_secret))
 
 
-@router.get("", response_model=ApiResponse[SourceListSchema], summary="List knowledge sources")
+@router.get(
+    "",
+    response_model=ApiResponse[SourceListSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_READ))],
+    summary="List knowledge sources",
+)
 async def list_sources(request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, _ = _ids(request)
     session = container.database.session()
@@ -385,7 +428,12 @@ async def list_sources(request: Request, container: ApplicationContainer = Depen
     return ApiResponse(message="Sources retrieved.", data=SourceListSchema(total=len(rows), sources=[await _response(session, s, counts) for s in rows]))
 
 
-@router.get("/{source_id}", response_model=ApiResponse[SourceResponseSchema], summary="One knowledge source")
+@router.get(
+    "/{source_id}",
+    response_model=ApiResponse[SourceResponseSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_READ))],
+    summary="One knowledge source",
+)
 async def get_source(source_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, _ = _ids(request)
     session = container.database.session()
@@ -393,7 +441,12 @@ async def get_source(source_id: UUID, request: Request, container: ApplicationCo
     return ApiResponse(message="Source retrieved.", data=await _response(session, source, await _counts(session, tenant_id, [source.id])))
 
 
-@router.patch("/{source_id}", response_model=ApiResponse[SourceResponseSchema], summary="Edit a knowledge source")
+@router.patch(
+    "/{source_id}",
+    response_model=ApiResponse[SourceResponseSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_WRITE))],
+    summary="Edit a knowledge source",
+)
 async def update_source(source_id: UUID, payload: SourceUpdateSchema, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, user_id = _ids(request)
     session = container.database.session()
@@ -438,7 +491,12 @@ async def update_source(source_id: UUID, payload: SourceUpdateSchema, request: R
     return ApiResponse(message="Knowledge source updated.", data=await _response(session, source, await _counts(session, tenant_id, [source.id]), webhook_secret=webhook_secret))
 
 
-@router.delete("/{source_id}", response_model=ApiResponse[None], summary="Delete a source (its documents are archived, credentials destroyed)")
+@router.delete(
+    "/{source_id}",
+    response_model=ApiResponse[None],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_DELETE))],
+    summary="Delete a source (its documents are archived, credentials destroyed)",
+)
 async def delete_source(source_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, user_id = _ids(request)
     # request_cancel runs in its own transaction and closes the shared session, so do it before loading the source:
@@ -458,7 +516,12 @@ async def delete_source(source_id: UUID, request: Request, container: Applicatio
 
 
 # ====================================================================== credentials
-@router.put("/{source_id}/credentials", response_model=ApiResponse[CredentialStatusSchema], summary="Set or rotate the source's credentials (write-only)")
+@router.put(
+    "/{source_id}/credentials",
+    response_model=ApiResponse[CredentialStatusSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_CREDENTIALS))],
+    summary="Set or rotate the source's credentials (write-only)",
+)
 async def set_credentials(source_id: UUID, payload: CredentialsSchema, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, user_id = _ids(request)
     session = container.database.session()
@@ -482,7 +545,12 @@ async def set_credentials(source_id: UUID, payload: CredentialsSchema, request: 
     return ApiResponse(message="Credentials saved.", data=CredentialStatusSchema(**await _credentials.status(session, source)))
 
 
-@router.delete("/{source_id}/credentials", response_model=ApiResponse[CredentialStatusSchema], summary="Revoke the source's credentials")
+@router.delete(
+    "/{source_id}/credentials",
+    response_model=ApiResponse[CredentialStatusSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_CREDENTIALS))],
+    summary="Revoke the source's credentials",
+)
 async def revoke_credentials(source_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, user_id = _ids(request)
     session = container.database.session()
@@ -509,7 +577,12 @@ async def _connector_for(session, source: KnowledgeSource):
     return connector_class(specific, secret, allow_private=settings.rag.connector_allow_private_hosts)
 
 
-@router.post("/{source_id}/test-connection", response_model=ApiResponse[ConnectionTestSchema], summary="Test the saved connection")
+@router.post(
+    "/{source_id}/test-connection",
+    response_model=ApiResponse[ConnectionTestSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_WRITE))],
+    summary="Test the saved connection",
+)
 async def test_saved(source_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, _ = _ids(request)
     session = container.database.session()
@@ -525,7 +598,12 @@ async def test_saved(source_id: UUID, request: Request, container: ApplicationCo
     return ApiResponse(message="Connection tested.", data=ConnectionTestSchema(ok=result.ok, message=result.message, authenticated=result.authenticated, details=result.details))
 
 
-@router.post("/{source_id}/preview", response_model=ApiResponse[PreviewSchema], summary="List what a sync would ingest (nothing is stored)")
+@router.post(
+    "/{source_id}/preview",
+    response_model=ApiResponse[PreviewSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_READ))],
+    summary="List what a sync would ingest (nothing is stored)",
+)
 async def preview(source_id: UUID, request: Request, limit: int = Query(default=20, ge=1, le=50), container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, _ = _ids(request)
     session = container.database.session()
@@ -551,7 +629,13 @@ async def preview(source_id: UUID, request: Request, limit: int = Query(default=
     return ApiResponse(message="Preview ready.", data=PreviewSchema(items=items, truncated=truncated, warnings=warnings))
 
 
-@router.post("/{source_id}/sync", status_code=status.HTTP_202_ACCEPTED, response_model=ApiResponse[SyncRunSchema], summary="Start a sync now")
+@router.post(
+    "/{source_id}/sync",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=ApiResponse[SyncRunSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_WRITE))],
+    summary="Start a sync now",
+)
 async def start_sync(source_id: UUID, request: Request, background_tasks: BackgroundTasks, payload: SyncRequestSchema | None = None, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, user_id = _ids(request)
     session = container.database.session()
@@ -573,7 +657,12 @@ async def start_sync(source_id: UUID, request: Request, background_tasks: Backgr
     return ApiResponse(message="Sync queued.", data=_run_schema(run))
 
 
-@router.post("/{source_id}/sync/cancel", response_model=ApiResponse[None], summary="Stop the running sync (between documents)")
+@router.post(
+    "/{source_id}/sync/cancel",
+    response_model=ApiResponse[None],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_WRITE))],
+    summary="Stop the running sync (between documents)",
+)
 async def cancel_sync(source_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, user_id = _ids(request)
     await _get_source(container.database.session(), tenant_id, source_id)
@@ -583,7 +672,12 @@ async def cancel_sync(source_id: UUID, request: Request, container: ApplicationC
     return ApiResponse(message="Cancellation requested.")
 
 
-@router.post("/{source_id}/pause", response_model=ApiResponse[SourceResponseSchema], summary="Pause syncing")
+@router.post(
+    "/{source_id}/pause",
+    response_model=ApiResponse[SourceResponseSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_WRITE))],
+    summary="Pause syncing",
+)
 async def pause_source(source_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, user_id = _ids(request)
     session = container.database.session()
@@ -593,7 +687,12 @@ async def pause_source(source_id: UUID, request: Request, container: Application
     return ApiResponse(message="Source paused.", data=await _response(session, source, await _counts(session, tenant_id, [source.id])))
 
 
-@router.post("/{source_id}/resume", response_model=ApiResponse[SourceResponseSchema], summary="Resume syncing")
+@router.post(
+    "/{source_id}/resume",
+    response_model=ApiResponse[SourceResponseSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_WRITE))],
+    summary="Resume syncing",
+)
 async def resume_source(source_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, user_id = _ids(request)
     session = container.database.session()
@@ -617,7 +716,12 @@ def _run_schema(run: SourceSyncRun) -> SyncRunSchema:
     )
 
 
-@router.get("/{source_id}/runs", response_model=ApiResponse[SyncRunListSchema], summary="Sync history")
+@router.get(
+    "/{source_id}/runs",
+    response_model=ApiResponse[SyncRunListSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_READ))],
+    summary="Sync history",
+)
 async def list_runs(source_id: UUID, request: Request, limit: int = Query(default=20, ge=1, le=100), offset: int = Query(default=0, ge=0), container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, _ = _ids(request)
     session = container.database.session()
@@ -628,7 +732,12 @@ async def list_runs(source_id: UUID, request: Request, limit: int = Query(defaul
     return ApiResponse(message="Sync history retrieved.", data=SyncRunListSchema(total=total, limit=limit, offset=offset, runs=[_run_schema(r) for r in rows]))
 
 
-@router.get("/{source_id}/runs/{run_id}", response_model=ApiResponse[SyncRunDetailSchema], summary="One sync run, with its errors")
+@router.get(
+    "/{source_id}/runs/{run_id}",
+    response_model=ApiResponse[SyncRunDetailSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_READ))],
+    summary="One sync run, with its errors",
+)
 async def get_run(source_id: UUID, run_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, _ = _ids(request)
     session = container.database.session()
@@ -638,7 +747,12 @@ async def get_run(source_id: UUID, run_id: UUID, request: Request, container: Ap
     return ApiResponse(message="Sync run retrieved.", data=SyncRunDetailSchema(**_run_schema(run).model_dump(), errors=run.errors or []))
 
 
-@router.get("/{source_id}/documents", response_model=ApiResponse[ExternalDocumentListSchema], summary="Documents indexed from this source")
+@router.get(
+    "/{source_id}/documents",
+    response_model=ApiResponse[ExternalDocumentListSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_READ))],
+    summary="Documents indexed from this source",
+)
 async def list_documents(
     source_id: UUID, request: Request, limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0),
     doc_status: str | None = Query(default=None, alias="status"), q: str | None = Query(default=None, max_length=200),
@@ -677,7 +791,12 @@ async def list_documents(
     )
 
 
-@router.post("/{source_id}/documents/{record_id}/retry", response_model=ApiResponse[None], summary="Clear a document's failure count so the next sync retries it")
+@router.post(
+    "/{source_id}/documents/{record_id}/retry",
+    response_model=ApiResponse[None],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_WRITE))],
+    summary="Clear a document's failure count so the next sync retries it",
+)
 async def retry_document(source_id: UUID, record_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, _ = _ids(request)
     session = container.database.session()
@@ -688,7 +807,12 @@ async def retry_document(source_id: UUID, record_id: UUID, request: Request, con
     return ApiResponse(message="The document will be retried on the next sync.")
 
 
-@router.get("/{source_id}/health", response_model=ApiResponse[SourceHealthSchema], summary="Connection health of one source")
+@router.get(
+    "/{source_id}/health",
+    response_model=ApiResponse[SourceHealthSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_READ))],
+    summary="Connection health of one source",
+)
 async def source_health(source_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, _ = _ids(request)
     session = container.database.session()
@@ -715,7 +839,12 @@ async def source_health(source_id: UUID, request: Request, container: Applicatio
     )
 
 
-@router.get("/{source_id}/permissions", response_model=ApiResponse[SourcePermissionsSchema], summary="How this source's permissions are applied, and what is not mapped yet")
+@router.get(
+    "/{source_id}/permissions",
+    response_model=ApiResponse[SourcePermissionsSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_SOURCES_READ))],
+    summary="How this source's permissions are applied, and what is not mapped yet",
+)
 async def source_permissions(source_id: UUID, request: Request, container: ApplicationContainer = Depends(get_scoped_container)):
     tenant_id, _ = _ids(request)
     session = container.database.session()
