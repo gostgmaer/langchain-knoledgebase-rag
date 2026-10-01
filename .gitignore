@@ -11,6 +11,10 @@ wheels/
 .env
 .env.local
 
+# Real secret values for docker-compose.prod.yml's Docker-secrets setup (secrets/README.md) —
+# the *.txt.example placeholders stay tracked, the real *.txt files never do.
+secrets/*.txt
+
 .idea/
 .vscode/
 

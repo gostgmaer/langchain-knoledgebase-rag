@@ -482,6 +482,30 @@ service.
   doc-comment guess) and how to override it (`MAX_FILE_SIZE`) if the real service is ever
   reconfigured with a higher limit. `.env.example` updated to match.
 
+### 26. ✅ Secrets in `.env` — no Docker secrets, no external secrets manager integration
+`docs/DEPLOYMENT.md` §3 flagged this: genuinely sensitive values (API keys, DB passwords, connection
+strings) sat in plain-text `.env` alongside ordinary non-sensitive config, with no separation between
+the two in production.
+
+- **Fixed:** `docker-compose.prod.yml` now has a real Docker-secrets mechanism (file-based `secrets:`,
+  works with a plain `docker compose up`, no Swarm required) covering 20 genuinely sensitive values —
+  database/cache credentials, auth/crypto secrets, and every LLM-provider/tool-integration API key.
+  `scripts/docker_secrets_entrypoint.sh` (new, generic — adding a secret later means adding it to the
+  compose file's `secrets:` list, not touching this script) turns each mounted `/run/secrets/<name>`
+  file into a real environment variable before exec'ing the service's actual command, so
+  `packages/config/*.py` needed zero changes. `postgres` uses the official image's native
+  `POSTGRES_PASSWORD_FILE` support directly instead. Full mechanism and setup steps in
+  `secrets/README.md` and `docs/DEPLOYMENT.md` §8; `secrets/*.txt.example` placeholders are tracked,
+  real `secrets/*.txt` values are gitignored.
+- **Verified live**, inside the real application image against a disposable scratch Postgres: mounted
+  fake secret files (one containing special characters, to rule out a quoting bug) alongside a
+  deliberately-wrong `-e DATABASE_URL=...`/`-e MIGRATION_DATABASE_URL=...` override on the container
+  itself, and confirmed the resolved environment used the secret-file value, not the wrong `-e`
+  override — i.e. the mechanism genuinely takes precedence rather than merely being present.
+  `alembic upgrade head` and `scripts/create_app_role.py` (item 1) both then ran successfully using
+  that resolved value. `docker compose -f docker-compose.prod.yml config` also resolves cleanly with
+  no real `*.txt` files present.
+
 ---
 
 ## LOW
