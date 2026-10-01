@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 import { useHealth, useTenant } from "@/hooks/use-api";
 import { ROLE_LABELS, useSession } from "@/lib/session";
@@ -75,6 +76,7 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
         <span className="hidden max-w-32 truncate text-sm font-medium sm:block lg:max-w-none">
           {session.displayName}
         </span>
+        <ThemeToggle />
         <Button
           variant="ghost"
           size="icon"
