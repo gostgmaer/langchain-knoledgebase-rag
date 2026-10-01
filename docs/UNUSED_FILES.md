@@ -21,18 +21,14 @@ Confidence levels, in order of how sure this doc is:
 |---|---|
 | ~~`packages/infrastructure/repositories/__init__.zip`~~ | **Deleted**, early pass. |
 | ~~`packages/graph.zip`~~ | **Deleted** in commit `ff11edd` (twelfth audit pass) — confirmed via `git show --stat HEAD`. |
-| `packages.zip` (repo root, ~232 KB) — **still committed** | A full zip snapshot of the entire `packages/` source tree, committed in `e5d8709`. Still present, unchanged, twelve passes running. |
-| `graph.png` (repo root) | Still present, unchanged. Generated output from `GraphVisualizer.save_png()` — a build artifact, not source. `.gitignore` still doesn't exclude it. It is at least being correctly regenerated now (`lifespan.py`'s missing `await` fix means it updates on every startup instead of silently failing to render). |
-
-**Fix:** `git rm packages.zip graph.png`, then add `*.zip` and a root-level `graph.png` rule to `.gitignore` so they can't be re-committed.
+| ~~`packages.zip`~~ | **Already gone** — re-verified this pass (`ls packages.zip` → not found, `git ls-files` → not tracked). This row had gone stale; whatever pass actually removed it never updated this doc. |
+| ~~`graph.png`~~ | **Untracked this pass** (`git rm --cached`) — the file on disk is correctly regenerated on every API startup (as this row already noted), the problem was only that git was still tracking a point-in-time snapshot of a build artifact. `.gitignore` now excludes `/graph.png` and `*.zip` so neither can be re-committed. |
 
 ## Duplicate dependency manifest
 
 | File | Why it's redundant |
 |---|---|
-| `requirements.txt` (99 lines, unpinned) | Duplicates `pyproject.toml`'s `dependencies` list (67 lines, with version floors) and the `uv.lock` file that pins exact resolved versions. Two manifests for the same dependency set can silently drift out of sync — `pyproject.toml` + `uv.lock` is already the real source of truth (confirmed: `uv sync` in `docker/Dockerfile` uses `pyproject.toml`/`uv.lock`, not `requirements.txt`). |
-
-**Fix:** delete `requirements.txt`, or regenerate it from `uv export` if something outside this repo still needs a flat pip-installable file.
+| ~~`requirements.txt`~~ | **Already gone** — re-verified this pass (`ls requirements.txt` → not found, `git ls-files` → not tracked). Same as `packages.zip` above: already deleted, this doc just never caught up. `pyproject.toml` + `uv.lock` remain the real source of truth. |
 
 ---
 
@@ -52,17 +48,15 @@ Verified via `grep` for every plausible import path (`from packages.X import`, `
 | `packages/application/dto/chat.py` (`ChatRequest`, `ChatResponse`) | **Now live** — the request/response shape for the new top-level flow. Note: this is a *third*, distinct `ChatRequest` class in this codebase, alongside `packages.chat.request.ChatRequest` and `packages.conversation.models.ChatRequest` (the now-unused one `ConversationManager` took). |
 | `packages/application/dto/conversation.py` (`CreateConversationRequest`, `ConversationResponse`) | **Now live** — used by `ConversationService`. |
 | `packages/application/exceptions.py` (`ResourceNotFoundError`, etc.) | **Now live** — real, was previously just never imported by anything. |
-| `packages/application/dto/*.py` (remaining: message, agent, document, etc.) | Still confirmed unused — `dto/message.py`'s `CreateMessageRequest`/`MessageResponse` aren't actually used by `MessageService` (it takes plain params, not the DTO). |
-| `packages/application/mappers/*.py` (2 files) | Still confirmed unused. |
-| `packages/application/validators/*.py` (2 files) | Still confirmed unused. |
-| `packages/application/application.py` | Still confirmed unused — its only meaningful import (`packages.conversation.store`) is itself dead code (see below). |
-| `packages/application/services/runtime_service.py` | Still confirmed unused. |
-| `packages/application/services/history_services.py` | Still confirmed unused (also currently broken — imports `packages.domain.repositories.message`, which doesn't exist; real path is `packages.infrastructure.repositories.message`). |
-| `packages/application/services/{agent,document,embedding,knowledge_base,model_profile,prompt,rag,tool}_service.py` (8 files) | Still confirmed unused — each is a 1-line comment stub, never implemented. |
+| ~~`packages/application/dto/agent.py`, `dto/message.py`~~ | **Deleted this pass.** Re-verified zero references first (`grep -rl` across `packages/`/`cli.py`/`main.py`) — `dto/message.py`'s `CreateMessageRequest`/`MessageResponse` were never actually used by `MessageService` (it takes plain params, not the DTO), confirming the earlier note. `dto/common.py`, `dto/conversation.py`, `dto/knowledge_base.py`, `dto/document.py` are newer, real, live-used additions not reflected in this doc's last update — left alone. |
+| ~~`packages/application/mappers/*.py`~~ | **Deleted this pass**, whole directory including `__init__.py` — re-verified zero references to the file, and to `packages.application.mappers` as a package, before removing. |
+| ~~`packages/application/validators/*.py`~~ | **Deleted this pass**, whole directory including `__init__.py` — same verification as mappers above. |
+| ~~`packages/application/application.py`~~, ~~`runtime_service.py`~~, ~~`history_services.py`~~ | **Already gone** — not present on disk as of this pass (`find packages/application -name "*.py"` doesn't list them). Already deleted in some earlier, undocumented pass; this doc just never caught up. |
+| ~~`packages/application/services/{agent,document,embedding,knowledge_base,model_profile,prompt,rag,tool}_service.py`~~ (8 files) | **Deleted this pass** — re-verified each was still a genuine 1-line comment stub with zero references before removing. Real documents/knowledge_bases functionality lives in `packages/api/routers/` + `packages/infrastructure/repositories/` directly, never routed through these stubs. |
 
-**Practical impact of this reversal:** `packages/conversation/manager.py`'s `ConversationManager` — previously the live top-level flow, extensively tested across the last several audit passes — is now itself unused. `packages/api/dependencies.py`'s `get_conversation_manager` has no remaining callers. See "New this pass" below.
+**Practical impact of this reversal:** `packages/conversation/manager.py`'s `ConversationManager` — previously the live top-level flow, extensively tested across the last several audit passes — is now itself unused. `packages/api/dependencies.py`'s `get_conversation_manager` has no remaining callers. See "New this pass" below. **Not deleted this pass** — it's DI-wired (container + `dependencies.py` + `__init__.py` exports, not a standalone stub file), a bigger, riskier removal than the rest of this section; left as a real, flagged candidate for a dedicated pass rather than bundled in here.
 
-**Recommendation, updated:** do not delete this package. Finish cleaning out only the parts confirmed still dead (mappers, validators, the 8 stub services, `runtime_service.py`, `history_services.py`, `application.py`, and the unused DTOs).
+**Recommendation, updated:** do not delete the whole package — `chat_service.py`/`conversation_service.py`/`message_service.py`/`audit_service.py`/`feature_flag_service.py`/`ingestion_audit.py`/`reindex.py`/`retention_service.py`/`retrieval_log_service.py`/`retrieval_settings_service.py` and their matching DTOs are all live, several of them (`retention_service`, `reindex`, `audit_service`, `retrieval_settings_service`) added after this doc's last update and genuinely wired into real routes. The confirmed-dead parts (mappers, validators, the 8 stub services, the two dead DTOs) are now gone.
 
 ### Other confirmed-dead files
 
@@ -114,10 +108,10 @@ Previously flagged: five `__init__.py` files, evidently scaffolded by copying on
 
 ## Suggested cleanup order
 
-1. `git rm packages.zip graph.png`, then add `*.zip` and a root-level `graph.png` rule to `.gitignore`. (`packages/graph.zip`, the `GraphPlanner` duplicates, and — as of the thirteenth pass — `packages/rag/`/`packages/agent/` are already gone.)
-2. Delete `requirements.txt` (or regenerate it from `uv export` if some external process depends on it).
-3. Delete only the still-dead parts of `packages/application/` — `mappers/`, `validators/`, the 8 stub `*_service.py` files, `runtime_service.py`, `history_services.py`, `application.py`, and the unused DTOs. **Not the whole package** — `chat_service.py`/`conversation_service.py`/`message_service.py`/`dto/chat.py`/`dto/conversation.py`/`exceptions.py` are all live, see above.
+1. ~~`git rm packages.zip graph.png`, add `*.zip`/`graph.png` to `.gitignore`.~~ — **Done.** `packages.zip` was already gone (this doc just hadn't caught up); `graph.png` untracked and `.gitignore` updated this pass.
+2. ~~Delete `requirements.txt`.~~ — **Already gone**, same as `packages.zip` — this doc hadn't caught up.
+3. ~~Delete only the still-dead parts of `packages/application/`~~ — **Done this pass**: `mappers/`, `validators/`, the 8 stub `*_service.py` files, and the 2 dead DTOs (`dto/agent.py`, `dto/message.py`). `application.py`/`runtime_service.py`/`history_services.py` were already gone. **Not the whole package** — see the updated recommendation above for what's genuinely live now.
 4. `packages/sdk/upload/` is done, not a cleanup target — fixed and wired in for real (see above). `packages/sdk/notification/` is deleted (a later pass); `packages/sdk/common/models.py` no longer exists either.
-5. Delete `packages/infrastructure/ai/factory.py` and the `registry` provider in `packages/infrastructure/container/ai.py` (plus its now-unused import of `LLMRegistry`).
-6. Resolve the `ChatService`/`ChatRequest` duplication (`packages/application/services/chat_service.py` vs. `packages/chat/chat_service.py`) — pick one layer's shape, delete the rest, following the pattern that resolved `GraphPlanner` and, this pass, `packages/rag/`/`packages/agent/`.
+5. ~~Delete `packages/infrastructure/ai/factory.py`...~~ — **Already gone** (re-verified this pass: not on disk). This item contradicted the "Other confirmed-dead files" table above, which already correctly said it was deleted — just never removed from this list.
+6. **Still open, deliberately not done in this pass**: resolve the `ChatService`/`ChatRequest` duplication (`packages/application/services/chat_service.py` vs. `packages/chat/chat_service.py`), and decide `packages/conversation/manager.py`'s now-fully-dead `ConversationManager` (plus its DI wiring in `packages/infrastructure/container/conversation.py` and `packages/api/dependencies.py`'s `get_conversation_manager`) — pick one layer's shape, delete the rest, following the pattern that resolved `GraphPlanner` and `packages/rag/`/`packages/agent/`. Bigger and riskier than the stub-file deletions above (real DI wiring to unwind, not just an unreferenced file), worth a dedicated pass rather than bundling into general cleanup.
 7. `packages/knowledge/` is done, not a cleanup target — it's the canonical, live RAG stack; see `docs/BUILD_STATUS.md`.
