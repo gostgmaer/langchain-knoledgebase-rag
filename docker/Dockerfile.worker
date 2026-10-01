@@ -68,7 +68,18 @@ USER app
 # packages/worker/main.py), so this catches a worker that's still running
 # but has silently stopped polling, not just a fully crashed process
 # (which already triggers `restart: unless-stopped` on its own).
-HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+#
+# --timeout=30s, not the first-draft 10s: `arq ... --check` itself imports
+# packages.worker.main (and transitively the whole RAG/ML dependency chain
+# — torch, transformers, etc.) before it ever reaches Redis, measured live
+# at ~18s in this exact image — a 10s timeout made Docker report a
+# genuinely healthy worker as `unhealthy` on every single check, forever
+# (confirmed live: `docker inspect`'s health log showed "Health check
+# exceeded timeout (10s)" on every attempt while the same command run
+# directly, untimed, succeeded in ~18s). --start-period=30s for the same
+# reason, so the first few checks during that heavy import don't count
+# against --retries while the container is still legitimately starting.
+HEALTHCHECK --interval=30s --timeout=30s --start-period=30s --retries=3 \
     CMD ["arq", "packages.worker.main.WorkerSettings", "--check"]
 
 CMD ["python", "-m", "packages.worker.main"]

@@ -143,6 +143,42 @@ services:
     networks:
       - backend
 
+  # Runs scripts/backup_db_scheduled.sh on a real interval (docs/BUGS.md item 3: the scripts
+  # existed and were proven but nothing scheduled them). Same image as `postgres` so the bundled
+  # pg_dump always matches the server's major version exactly, connecting directly over the
+  # `backend` network rather than via a docker-socket mount (pg_dump is read-only; no reason to
+  # hand a backup sidecar that much privilege). Dumps land in the `backups-data` volume — still
+  # on the same host as `postgres-data`, so this does not by itself survive that host's disk
+  # failing; shipping dumps off-host is a separate, real operational decision for wherever this
+  # deploys (docs/DEPLOYMENT.md §5), not something to guess at from this repo alone.
+  backup:
+    image: pgvector/pgvector:pg17
+
+    restart: always
+
+    entrypoint: ["sh", "/scripts/backup_db_scheduled.sh"]
+
+    env_file:
+      - .env
+
+    environment:
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      PGHOST: postgres
+
+    volumes:
+      - ./scripts/backup_db_scheduled.sh:/scripts/backup_db_scheduled.sh:ro
+      - backups-data:/backups
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    logging: *default-logging
+
+    networks:
+      - backend
+
   redis:
     image: redis:8-alpine
 
@@ -182,3 +218,4 @@ networks:
 volumes:
   postgres-data:
   redis-data:
+  backups-data:
