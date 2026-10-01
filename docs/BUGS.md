@@ -58,26 +58,42 @@ were already live-verified working; the headers were only ever misleading.
 
 ## CRITICAL — blocks a real launch
 
-### 1. 🟡 App connects to Postgres as a superuser in dev, bypassing RLS — real fix documented and proven, not yet the default anywhere
+### 1. ✅ App connects to Postgres as a superuser in dev, bypassing RLS — now wired into a real deploy path by default
 - **Where:** `.env`'s `DATABASE_URL` (`my_db_user`), confirmed live via `select rolsuper` → `t`. This
-  is intentional for local/solo dev (lets the schema auto-provision on every boot) — the real gap is
-  that no environment, including `docker-compose.prod.yml`, is set up to run any differently.
+  is intentional for local/solo dev (lets the schema auto-provision on every boot) — the real gap was
+  that no environment, including `docker-compose.prod.yml`, was set up to run any differently.
 - **Why it matters:** `packages/infrastructure/database/upgrades.py`'s `rls_statements()` are the
   documented defense-in-depth layer for multi-tenant isolation — a superuser connection bypasses RLS
   policies unconditionally. Tenant isolation without it is enforced **only** by per-repository
   `tenant_id` filters in application code, with **zero database-level backstop** if any one repository
   method ever misses that filter.
-- **Fix proven this pass, not yet wired into any deploy path.** `scripts/create_app_role.sql` already
-  creates the correct non-superuser `rag_app` role. Live-verified end to end on a disposable scratch
-  database: ran the real Alembic migration as the table owner, applied `create_app_role.sql`, booted a
-  real API instance connected as `rag_app` with `SCHEMA_INIT_AT_STARTUP=false` — clean startup, no
-  RLS-bypass warning, passing health check — and confirmed via raw SQL that RLS genuinely filters rows
-  by `app.tenant_id` as `rag_app` (it does not as a superuser). Full account and setup steps now in
-  `docs/DEPLOYMENT.md` §4 and `.env.example`.
-- **Deliberately not changed:** the shared dev `.env` itself — flipping it to `rag_app` would break
-  the schema-auto-provision convenience this whole project's dev workflow (including this session's
-  own tooling) depends on. This is scoped as a **production deploy step**, not a local dev default.
-  Remains 🟡 rather than ✅ until some real deploy path actually runs it, not just documents it.
+- **Fixed this pass — closes the gap the previous pass left open ("proven, not yet wired into any
+  deploy path").** `docker-compose.prod.yml` now has a one-shot `migrate` service that runs
+  `alembic upgrade head` (as the table owner, via `MIGRATION_DATABASE_URL`) and a new
+  `scripts/create_app_role.py` (creates/updates the restricted `rag_app` role — the same statements as
+  `scripts/create_app_role.sql`, run via `psycopg` so no `psql` client is needed inside the image) —
+  and `api`/`worker` now both declare `depends_on: migrate: condition: service_completed_successfully`,
+  so a plain `docker compose -f docker-compose.prod.yml up` genuinely can't start the app ahead of RLS
+  being enforced. Full setup now in `docs/DEPLOYMENT.md` §4 and `.env.example`
+  (`MIGRATION_DATABASE_URL`/`APP_DB_PASSWORD`, new).
+- **A real bug found and fixed while building this:** `ALTER ROLE rag_app PASSWORD %s` with a bound
+  psycopg parameter failed outright (`psycopg.errors.SyntaxError: syntax error at or near "$1"`) —
+  Postgres's own grammar for `ALTER ROLE ... PASSWORD` takes a literal, not a bind parameter. Fixed
+  with `psycopg.sql.Literal`, which still escapes the password safely client-side rather than
+  interpolating the raw string, just not through the wire-protocol parameter mechanism.
+- **Verified live, inside the real application image** (not a bare-host Python process): ran the exact
+  `migrate` command (`alembic upgrade head && PYTHONPATH=. python scripts/create_app_role.py`) in a
+  container from this project's own built image, against a disposable scratch Postgres. Confirmed
+  `rag_app` has exactly the privileges normal operation needs, a real login as `rag_app` reports
+  `rolsuper = f`/`rolbypassrls = f`, and re-ran the same command a second time to confirm it's
+  genuinely idempotent. `docker compose -f docker-compose.prod.yml config` validates the new
+  `depends_on`/`service_completed_successfully` wiring is syntactically correct.
+- **Not yet observed:** a full `docker compose -f docker-compose.prod.yml up` run exercising the real
+  `migrate`→`api`/`worker` startup ordering end to end (verified piecewise above — the command in the
+  real image, and the compose graph's validity — but not that exact sequence together under a real
+  `up`), and the shared dev `.env` is deliberately still untouched (flipping it to `rag_app` would
+  break the schema-auto-provision convenience local dev depends on) — this was always scoped as a
+  production deploy concern, not a local dev default.
 
 ### 2. ✅ Architecturally single-replica-only — fixed for the two state stores that were genuinely broken by design
 - **Where:** three separate in-memory, per-process state stores were flagged, two of which were

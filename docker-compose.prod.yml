@@ -20,6 +20,32 @@ x-logging: &default-logging
 
 services:
 
+  # One-shot: runs the real Alembic migrations as the table owner, then
+  # creates/updates the restricted `rag_app` role RLS depends on
+  # (docs/DEPLOYMENT.md §4, docs/BUGS.md item 1) — both via
+  # MIGRATION_DATABASE_URL, since `rag_app` itself can't run schema DDL
+  # or create its own role. `api`/`worker` only start once this exits 0,
+  # so a production `docker compose up` enforces RLS by default instead
+  # of it being a manual step someone has to remember to run first.
+  migrate:
+    image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
+
+    command: ["sh", "-c", "alembic upgrade head && PYTHONPATH=. python scripts/create_app_role.py"]
+
+    restart: "no"
+
+    env_file:
+      - .env
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    logging: *default-logging
+
+    networks:
+      - backend
+
   api:
     image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
 
@@ -37,6 +63,9 @@ services:
 
       redis:
         condition: service_healthy
+
+      migrate:
+        condition: service_completed_successfully
 
     deploy:
       resources:
@@ -68,6 +97,9 @@ services:
 
       redis:
         condition: service_healthy
+
+      migrate:
+        condition: service_completed_successfully
 
     deploy:
       resources:

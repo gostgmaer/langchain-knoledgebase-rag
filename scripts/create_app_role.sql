@@ -5,6 +5,10 @@
 -- Run once as the table owner / a superuser, inside the application database:
 --   psql -U <owner> -d <database> -v app_password='<strong password>' -f scripts/create_app_role.sql
 --
+-- docker-compose.prod.yml's `migrate` service runs this same sequence automatically (no `psql`
+-- needed there) via scripts/create_app_role.py — this .sql file is for a managed/external Postgres
+-- you're pointing the compose stack at instead, or any other psql-based workflow.
+--
 -- Then: connect the app as rag_app (DATABASE_URL), keep the owner for migrations
 -- (MIGRATION_DATABASE_URL=<owner url>; `alembic upgrade head`), and set SCHEMA_INIT_AT_STARTUP=false.
 -- Re-run after new tables are added (it is idempotent); default privileges cover tables the owner

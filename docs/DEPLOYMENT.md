@@ -76,40 +76,48 @@ superusers ignore every RLS policy unconditionally. In that mode, tenant isolati
 by the per-repository `tenant_id` filters in application code, with no database-level backstop.
 
 A real deploy should connect as the restricted, non-superuser `rag_app` role instead, so RLS is a
-genuine second layer of defense, not just a query-layer convention. This was live-verified this pass
-against a disposable scratch database (real Alembic migration as the owner, `scripts/create_app_role.sql`
-applied, then a real API instance booted as `rag_app`): the role has exactly the privileges normal
-operation needs (`SELECT`/`INSERT`/`UPDATE`/`DELETE` on every table, `USAGE`/`SELECT` on sequences,
-`CREATE` on the schema for the LangGraph checkpointer's own `CREATE TABLE IF NOT EXISTS`), the app boots
-cleanly with no RLS-bypass warning, and — the actual point — a raw-SQL check confirmed RLS genuinely
-filters rows by `app.tenant_id` when connected as `rag_app`, which it does **not** do as a superuser.
+genuine second layer of defense, not just a query-layer convention.
 
-Setup, once per environment:
+**`docker-compose.prod.yml` now does this automatically** via a one-shot `migrate` service that runs
+`alembic upgrade head` (as the table owner) and then `scripts/create_app_role.py` (creates/updates the
+`rag_app` role, idempotent) *before* `api`/`worker` are allowed to start
+(`depends_on: migrate: condition: service_completed_successfully`) — this is no longer a manual step
+someone has to remember. It needs two env vars set in that environment's `.env` (see `.env.example`):
 
 ```bash
-# 1. Run the real migration as the table owner (a superuser or the role that will own the tables).
-DATABASE_URL=<owner-url> alembic upgrade head
+# The table-owner connection the `migrate` service uses for the actual migration/role-creation DDL
+# (normally POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB composed into a URL). Falls back to
+# DATABASE_URL when unset, which is only correct when DATABASE_URL is itself still a superuser
+# connection — set this explicitly once DATABASE_URL below points at rag_app instead.
+MIGRATION_DATABASE_URL=postgresql://<owner-user>:<owner-password>@postgres:5432/<database>
 
-# 2. Create the restricted role (idempotent — safe to re-run after new tables are added).
-psql -U <owner> -d <database> -v app_password='<a real generated password>' -f scripts/create_app_role.sql
-```
+# The password `migrate` sets on the rag_app role — generate a real one, don't reuse the owner's.
+APP_DB_PASSWORD=<a real generated password>
 
-Then, in that environment's `.env`:
+# The app itself connects as the restricted role — RLS is genuinely enforced.
+DATABASE_URL=postgresql://rag_app:<APP_DB_PASSWORD's value>@postgres:5432/<database>
 
-```bash
-# The app connects as the restricted role — RLS is genuinely enforced.
-DATABASE_URL=postgresql://rag_app:<password>@<host>:5432/<database>
-
-# The app no longer tries to create_all()/ALTER TABLE at boot (rag_app doesn't own the tables and
-# can't run DDL beyond the one CREATE it's explicitly granted for the checkpointer's own setup) —
-# schema changes go through `alembic upgrade head` as the owner instead, as a separate deploy step.
+# rag_app can't run schema DDL — alembic (via MIGRATION_DATABASE_URL, as the owner) is the only path
+# schema changes go through now, not the auto-provisioning create_all()/ALTER TABLE this flag gates.
 SCHEMA_INIT_AT_STARTUP=false
 ```
 
-**Not done automatically by any compose file** — `docker-compose.prod.yml` doesn't currently run the
-migration/role-creation step or default to this `DATABASE_URL`/`SCHEMA_INIT_AT_STARTUP` pair, since
-doing so unconditionally would break the common "point compose at a fresh, unmigrated database" case.
-Wire it into whatever deploy automation runs before `docker compose -f docker-compose.prod.yml up`.
+Live-verified end to end against a disposable scratch database, inside the real application image (not
+just a bare-host Python process): ran the exact `migrate` command sequence
+(`alembic upgrade head && PYTHONPATH=. python scripts/create_app_role.py`) in a container from the
+project's own built image, confirmed `rag_app` has exactly the privileges normal operation needs
+(`SELECT`/`INSERT`/`UPDATE`/`DELETE` on every table, `USAGE`/`SELECT` on sequences, `CREATE` on the
+schema for the LangGraph checkpointer's own `CREATE TABLE IF NOT EXISTS`), confirmed a real login as
+`rag_app` reports `rolsuper = f`/`rolbypassrls = f`, and re-ran the same command a second time to
+confirm it's genuinely idempotent (safe to re-run after new tables are added, exactly like the
+underlying `.sql` it's based on). A full `docker compose -f docker-compose.prod.yml up` run (the
+`migrate`→`api`/`worker` dependency chain on real GitHub-free infrastructure, not just the command in
+isolation) hasn't been observed yet — pending an actual production deploy to confirm the `depends_on`
+ordering behaves the same way compose's `config` validation already confirms it's wired to.
+
+If you're pointing the compose stack at an external/managed Postgres instead and want to run this by
+hand, `scripts/create_app_role.sql` (the same statements, via `psql`) still works exactly as before —
+see its own header for the one-liner.
 
 ## 5. Backup and restore
 
