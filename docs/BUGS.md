@@ -161,11 +161,19 @@ were already live-verified working; the headers were only ever misleading.
   need a running API+worker+frontend stack (`docker compose up`), a heavier CI job than the plain
   pytest suites. Worth a follow-up job, not bundled into this one.
 
-### 5. 🔴 Zero frontend test coverage
-- **Where:** `frontend/package.json` has no `"test"` script, no jest/vitest/playwright/cypress
+### 5. ✅ Zero frontend test coverage — a real harness now exists, not exhaustive coverage
+- **Was:** `frontend/package.json` had no `"test"` script, no jest/vitest/playwright/cypress
   dependency, 0 test files anywhere under `frontend/`.
 - **Why it matters:** the entire UI layer — including the Knowledge Sources wizard walked through
-  live this session — is unverified by automation. A backend-safe deploy can still ship a broken UI.
+  live earlier this session — was unverified by automation. A backend-safe deploy could still ship
+  a broken UI.
+- **Fixed:** Vitest + React Testing Library (`frontend/vitest.config.mts`), with real tests for
+  `lib/utils.ts` and two presentational components (`StatusBadge`'s status→variant mapping,
+  `ChunkingBadge`'s requested-vs-actual label logic) — not stubs. 29 tests, all passing, 100%
+  coverage of the files they touch. Wired into `.github/workflows/ci.yml` as a new `frontend-test`
+  job (type-check + `pnpm test`) alongside the backend jobs.
+- **Scope, stated honestly:** this establishes the harness and pattern, not exhaustive coverage of
+  every component — a realistic scope for one pass given the size of the original gap.
 
 ### 6. ✅ No load/performance testing tooling — now real, run live, and it immediately found a genuine capacity issue
 - **Was:** no k6/locust/artillery config anywhere in the repo. The only load exercise found was the
