@@ -167,10 +167,30 @@ were already live-verified working; the headers were only ever misleading.
 - **Why it matters:** the entire UI layer — including the Knowledge Sources wizard walked through
   live this session — is unverified by automation. A backend-safe deploy can still ship a broken UI.
 
-### 6. 🔴 No load/performance testing tooling
-- **Where:** no k6/locust/artillery config anywhere in the repo. The only load exercise found is the
+### 6. ✅ No load/performance testing tooling — now real, run live, and it immediately found a genuine capacity issue
+- **Was:** no k6/locust/artillery config anywhere in the repo. The only load exercise found was the
   `LOAD_ITEMS` env var in `tests/integration/test_source_sync.py`, which stresses only connector-sync
   bookkeeping, not the real chat/retrieval/embedding pipeline under concurrent users.
+- **Fixed:** `loadtest/k6_baseline.js` — a real k6 script against this app's actual API (health +
+  authenticated document-list + a real search request exercising the full embedding/hybrid-search/
+  rerank pipeline), with latency/error-rate thresholds as real pass/fail criteria, not just traffic
+  generation. `loadtest/k6_chat_smoke.js` is a separate, deliberately tiny single-request script for
+  a full chat round trip (real LLM generation) — kept apart so a routine load-test run never
+  silently racks up provider costs. `loadtest/README.md` documents how to get k6 (a standalone
+  binary, not an npm/pip package) and a real bearer token.
+- **Run live against this dev stack at 15 concurrent users (a modest, realistic number) — and it
+  surfaced a genuine, previously-unknown capacity constraint on the first try**: 76.6% of requests
+  failed. Not backend capacity — `RATE_LIMIT_EXPENSIVE_REQUESTS_PER_MINUTE` (default 60/min) and
+  `RATE_LIMIT_REQUESTS_PER_MINUTE` (default 300/min) are both keyed on `X-Tenant-ID`
+  (`packages/api/middleware/rate_limit.py`), meaning **one shared 60-req/min budget for an entire
+  tenant's chat/search/upload traffic combined, not per-user**. Confirmed directly: a plain request
+  right after the run returned a real `429`. This is the rate limiter correctly doing its job (item
+  12), not a bug — but it's a genuine, concrete answer to this item's own question ("how many
+  concurrent users can this handle"): as few as ~10 people in one tenant each sending one message a
+  minute would already hit that ceiling. Full writeup in `loadtest/README.md`.
+- **Not done**: a follow-up run with the rate limit raised/disabled to find the *next* real ceiling
+  (backend/DB capacity) — changing that in a live environment is a deliberate operational decision
+  for whoever actually deploys this, not something to flip silently while building the tooling.
 - **Why it matters:** no evidence-based answer exists today for "how many concurrent users can this
   handle," which is a basic launch question.
 
