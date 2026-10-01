@@ -4,14 +4,16 @@ from __future__ import annotations
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from packages.api.dependencies import get_scoped_container
+from packages.api.dependencies import get_current_user, get_scoped_container
 from packages.api.responses import ApiResponse
 from packages.api.schemas.auth import (
+    CurrentUserResponseSchema,
     RefreshTokenRequestSchema,
     RefreshTokenResponseSchema,
 )
 from packages.infrastructure.container import ApplicationContainer
 from packages.sdk.common.exceptions import SDKException, UnauthorizedException
+from packages.sdk.iam.models import CurrentUser
 from packages.shared.logging import get_logger
 
 logger = get_logger(__name__)
@@ -20,6 +22,40 @@ router = APIRouter(
     prefix="/auth",
     tags=["Auth"],
 )
+
+
+@router.get(
+    "/me",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[CurrentUserResponseSchema],
+    summary="The calling user's profile",
+    description=(
+        "first_name/last_name specifically — the access token's own JWT claims don't carry "
+        "them, so a frontend session built purely from local JWT decoding has no way to show a "
+        "real name instead of falling back to the raw email. Meant to be called once at login/"
+        "refresh, not on every page load: the authentication middleware has already resolved "
+        "this from IAM's real GET /auth/me for every authenticated request regardless, so this "
+        "costs nothing beyond what already happens."
+    ),
+)
+async def me(
+    current_user: CurrentUser | None = Depends(get_current_user),
+):
+    if current_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required.",
+        )
+
+    return ApiResponse(
+        message="Current user retrieved.",
+        data=CurrentUserResponseSchema(
+            id=str(current_user.id),
+            email=current_user.email,
+            first_name=current_user.first_name,
+            last_name=current_user.last_name,
+        ),
+    )
 
 
 @router.post(
