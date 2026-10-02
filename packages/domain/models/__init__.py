@@ -14,6 +14,14 @@ from .entity_mention import EntityMention
 from .feature_flag import FeatureFlag
 from .feedback import Feedback
 from .knowledge_base import KnowledgeBase
+from .knowledge_source import (
+    DocumentAccessRule,
+    ExternalDocumentRecord,
+    IdentityMapping,
+    KnowledgeSource,
+    SourceCredential,
+    SourceSyncRun,
+)
 from .memory import Memory
 from .message import Message
 from .message_citation import MessageCitation
@@ -21,6 +29,9 @@ from .model_profile import ModelProfile
 from .prompt import Prompt
 from .prompt_version import PromptVersion
 from .relationship import Relationship
+from .audit_event import AuditEvent
+from .retrieval_log import RetrievalLog, RetrievalResultLog
+from .retrieval_settings import RetrievalSettings
 from .tool import Tool
 from .upload_job import UploadJob
 
@@ -41,6 +52,12 @@ __all__ = [
     "FeatureFlag",
     "Feedback",
     "KnowledgeBase",
+    "KnowledgeSource",
+    "SourceCredential",
+    "SourceSyncRun",
+    "ExternalDocumentRecord",
+    "DocumentAccessRule",
+    "IdentityMapping",
     "Memory",
     "Message",
     "MessageCitation",
@@ -48,6 +65,10 @@ __all__ = [
     "Prompt",
     "PromptVersion",
     "Relationship",
+    "AuditEvent",
+    "RetrievalLog",
+    "RetrievalResultLog",
+    "RetrievalSettings",
     "Tool",
     "UploadJob",
 ]

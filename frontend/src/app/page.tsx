@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
 import { SocialButtons } from "@/components/auth/social-buttons";
+import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -55,12 +56,28 @@ function LoginForm() {
     );
   }, [isLoading, session, router]);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+
+    // Read what is actually in the fields: browser autofill does not always update React
+    // state, and can drop in a saved username from another app on the same host.
+    const data = new FormData(e.currentTarget);
+    const emailValue = String(data.get("email") ?? email).trim();
+    const passwordValue = String(data.get("password") ?? password);
+
+    if (!emailValue || !passwordValue) {
+      setError("Enter your email address and password.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
+      setError(`"${emailValue}" is not an email address. Sign in with the email of your account, for example name@example.com.`);
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const user = await login(email.trim(), password);
+      const user = await login(emailValue, passwordValue);
       router.push(ROLE_HOME[user.role]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed.");
@@ -72,36 +89,39 @@ function LoginForm() {
     <div className="flex min-h-screen flex-1 items-center justify-center p-6">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">RAG Platform Console</h1>
+          <span className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary">
+            <LogoMark className="h-6 w-6" />
+          </span>
+          <h1 className="text-2xl font-semibold tracking-tight">Meridian</h1>
           <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
-            Sign in with your EasyDev account. Your role and tenant are read from your account —
+            Sign in with your account. Your role and tenant are read from your account —
             there&apos;s nothing to pick here.
           </p>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           <Card>
             <CardContent className="grid gap-4 pt-5">
               <div className="grid gap-1.5">
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
+                  name="email"
                   type="email"
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  required
                 />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
+                  name="password"
                   type="password"
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  required
                 />
               </div>
               {(error ?? redirectError) && (

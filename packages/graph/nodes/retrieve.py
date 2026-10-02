@@ -5,8 +5,21 @@ packages/graph/nodes/retrieve.py
 from __future__ import annotations
 
 import asyncio
+import time
 
+import structlog
+
+from packages.application.services.retrieval_log_service import (
+    CandidateRecord,
+    RetrievalLogService,
+    RetrievalRecord,
+)
+from packages.application.services.retrieval_settings_service import (
+    RetrievalSettingsService,
+    platform_defaults,
+)
 from packages.config.loader import settings
+from packages.shared.access import retrieval_filters
 from packages.graph.state import GraphState
 from packages.knowledge.manager import KnowledgeManager
 from packages.knowledge.reranking.cross_encoder import (
@@ -42,21 +55,33 @@ class RetrieveNode:
         self,
         knowledge_manager: KnowledgeManager,
         reranker: CrossEncoderReranker,
+        retrieval_log: RetrievalLogService | None = None,
+        retrieval_settings: RetrievalSettingsService | None = None,
     ) -> None:
         self._knowledge = knowledge_manager
         self._reranker = reranker
+        self._retrieval_log = retrieval_log
+        self._retrieval_settings = retrieval_settings
 
     async def __call__(
         self,
         state: GraphState,
     ) -> GraphState:
 
+        started = time.perf_counter()
         primary_query = state.get("rewritten_query") or state["messages"][-1].content
         queries = [primary_query, *state.get("expanded_queries", [])]
+
+        config = (
+            await self._retrieval_settings.get_effective(state["tenant_id"])
+            if self._retrieval_settings is not None
+            else platform_defaults()
+        )
 
         filters = SearchFilter(
             tenant_id=state["tenant_id"],
             model_profile_id=state["model_profile_id"],
+            **retrieval_filters(),
         )
 
         # Independent sub-queries, fetched concurrently rather than
@@ -74,6 +99,7 @@ class RetrieveNode:
             )
         )
 
+        search_done = time.perf_counter()
         merged: dict[object, object] = {}
 
         for results in per_query_results:
@@ -84,15 +110,35 @@ class RetrieveNode:
 
         candidates = list(merged.values())
 
-        top_k = settings.rag.max_results
+        top_k = config.max_results
 
-        reranked = await self._reranker.rerank(
-            primary_query,
-            candidates,
+        rerank_started = time.perf_counter()
+        if config.reranking_enabled:
+            reranked = await self._reranker.rerank(
+                primary_query,
+                candidates,
+                top_k=top_k,
+            )
+            reranked = apply_relevance_floor(reranked, config.min_relevance_score)
+        else:
+            # Reranking switched off for this workspace: keep the search ranking. The relevance
+            # floor is defined on reranker scores, so it does not apply here.
+            reranked = sorted(candidates, key=lambda r: r.score, reverse=True)[:top_k]
+        rerank_done = time.perf_counter()
+
+        retrieval_id = await self._log_retrieval(
+            state,
+            primary_query=primary_query,
+            query_count=len(queries),
+            candidates=candidates,
+            reranked=reranked,
             top_k=top_k,
+            config=config,
+            search_ms=int((search_done - started) * 1000),
+            rerank_ms=int((rerank_done - rerank_started) * 1000),
+            total_ms=int((time.perf_counter() - started) * 1000),
         )
-
-        reranked = apply_relevance_floor(reranked, settings.rag.min_relevance_score)
+        state["retrieval_id"] = retrieval_id
 
         state["context"] = [result.chunk.content for result in reranked]
 
@@ -118,3 +164,64 @@ class RetrieveNode:
         ]
 
         return state
+
+    async def _log_retrieval(
+        self,
+        state: GraphState,
+        *,
+        primary_query: str,
+        query_count: int,
+        candidates: list,
+        reranked: list,
+        top_k: int,
+        config,
+        search_ms: int,
+        rerank_ms: int,
+        total_ms: int,
+    ):
+        """Records this retrieval (ids and scores only). Returns its retrieval id, or None when logging is off."""
+        if self._retrieval_log is None:
+            return None
+
+        context = structlog.contextvars.get_contextvars()
+        by_rerank = {r.chunk.id: (rank, r.score) for rank, r in enumerate(reranked, start=1)}
+        ordered = sorted(candidates, key=lambda r: r.score, reverse=True)
+
+        record = RetrievalRecord(
+            tenant_id=state["tenant_id"],
+            user_id=state.get("user_id"),
+            conversation_id=state.get("conversation_id"),
+            model_profile_id=state.get("model_profile_id"),
+            trace_id=context.get("trace_id"),
+            request_id=context.get("request_id"),
+            query=primary_query,
+            sub_query_count=query_count,
+            strategy=settings.rag.retrieval_strategy,
+            top_k=top_k,
+            min_relevance_score=config.min_relevance_score if config.reranking_enabled else None,
+            reranking_enabled=config.reranking_enabled,
+            reranker_model=getattr(self._reranker, "_model_name", None) if config.reranking_enabled else None,
+            search_latency_ms=search_ms,
+            rerank_latency_ms=rerank_ms,
+            latency_ms=total_ms,
+            filters={"tenant_scoped": True},
+            candidates=[
+                CandidateRecord(
+                    chunk_id=r.chunk.id,
+                    document_id=r.chunk.document_id,
+                    chunk_index=r.chunk.chunk_index,
+                    retrieval_rank=position,
+                    retrieval_score=float(r.score),
+                    vector_score=r.vector_score,
+                    keyword_score=r.keyword_score,
+                    reranker_score=(
+                        by_rerank[r.chunk.id][1] if config.reranking_enabled and r.chunk.id in by_rerank else None
+                    ),
+                    final_rank=by_rerank[r.chunk.id][0] if r.chunk.id in by_rerank else None,
+                    selected=r.chunk.id in by_rerank,
+                )
+                for position, r in enumerate(ordered, start=1)
+            ],
+        )
+        await self._retrieval_log.record(record)
+        return record.retrieval_id

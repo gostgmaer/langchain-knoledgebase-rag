@@ -35,6 +35,11 @@ from packages.shared.messages import normalize_message_content
 
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
 
+# Recorded on every document and chunk so a result can be traced to the code that produced it.
+# Bump these when the ingestion or splitting behaviour changes in a way that alters output.
+PIPELINE_VERSION = "ingest-v2"
+CHUNKING_VERSION = "chunking-v1"
+
 logger = get_logger(__name__)
 
 # Bounds the ingestion-time summary prompt to a reasonable excerpt
@@ -99,10 +104,17 @@ class IngestionPipeline:
 
         checksum = self._checksum(request.file)
 
-        existing = await self.document_repository.get_by_checksum(
-            request.knowledge_base_id,
-            checksum,
-        )
+        if request.external_id is not None:
+            # An external item's identity is (source, external id), never its file name or (across
+            # items) its content: two different pages may legitimately have identical text.
+            existing = await self.document_repository.get_by_source_external_checksum(
+                request.tenant_id, request.source_id, request.external_id, checksum
+            )
+        else:
+            existing = await self.document_repository.get_by_checksum(
+                request.knowledge_base_id,
+                checksum,
+            )
         if existing is not None:
             return IngestionResponse(
                 document_id=existing.id,
@@ -115,11 +127,16 @@ class IngestionPipeline:
         # Document exists it also defaults `is_current=True` and
         # shares the same file_name, so this lookup has to happen
         # first or it can no longer tell old from new.
-        previous = await self.document_repository.get_current_by_tenant_kb_and_filename(
-            request.tenant_id,
-            request.knowledge_base_id,
-            request.document_name,
-        )
+        if request.external_id is not None:
+            previous = await self.document_repository.get_current_by_source_external(
+                request.tenant_id, request.source_id, request.external_id
+            )
+        else:
+            previous = await self.document_repository.get_current_by_tenant_kb_and_filename(
+                request.tenant_id,
+                request.knowledge_base_id,
+                request.document_name,
+            )
 
         document = await self._create_document_row(
             request,
@@ -129,23 +146,36 @@ class IngestionPipeline:
         if previous is not None:
             await self._track_version(previous, document)
 
+        stage = "extracting"
         try:
             loaded_documents = await self._load(request)
 
+            stage = "cleaning"
             cleaned_documents = await self._clean(loaded_documents)
 
+            stage = "chunking"
             chunked_documents = await self._split(
                 cleaned_documents,
                 request,
             )
 
+            stage = "embedding"
             embeddings = await self._embed(
                 chunked_documents,
                 request,
                 document.id,
             )
+            provenance = await self._provenance(request)
+            self._stamp_chunks(embeddings, provenance)
 
+            stage = "indexing"
             await self.vector_store.store.add_many(embeddings)
+
+            # New dict (not an in-place edit) so SQLAlchemy sees the JSONB column change.
+            document.metadata_ = {
+                **(document.metadata_ or {}),
+                "chunking": self._chunking_summary(request, chunked_documents, embeddings),
+            }
 
             await self._store_summary_representation(
                 chunked_documents,
@@ -159,18 +189,24 @@ class IngestionPipeline:
                 document.id,
             )
 
+            self._record_processing(document, request, provenance, chunked_documents)
             document.status = DocumentStatus.READY
             await self.document_repository.session.flush()
 
-        except Exception:
+        except Exception as exc:
             document.status = DocumentStatus.FAILED
+            document.processing_stage = stage
+            document.error_reason = str(exc)[:1000]
             await self.document_repository.session.flush()
+            # Lets the job runner report *where* it failed (upload job error, logs).
+            exc.ingestion_stage = stage  # type: ignore[attr-defined]
             raise
 
         return IngestionResponse(
             document_id=document.id,
             chunk_count=len(chunked_documents),
             embedding_count=len(embeddings),
+            superseded_document_id=previous.id if previous is not None else None,
         )
 
     async def delete_document(
@@ -230,6 +266,9 @@ class IngestionPipeline:
             )
             scratch_path.write_bytes(content)
 
+            # Re-chunk with the strategy the user originally asked for; without this a
+            # re-index silently fell back to the default and changed how the document was split.
+            previous_choice = ((document.metadata_ or {}).get("chunking") or {}).get("requested")
             request = IngestionRequest(
                 tenant_id=document.tenant_id,
                 model_profile_id=profile.id,
@@ -237,6 +276,7 @@ class IngestionPipeline:
                 file=scratch_path,
                 file_id=document.file_id,
                 document_name=document.file_name,
+                chunking_strategy=previous_choice if previous_choice in ("auto", "recursive", "markdown", "semantic") else "recursive",
             )
 
             await self.vector_store.store.delete_document(
@@ -248,9 +288,16 @@ class IngestionPipeline:
             cleaned_documents = await self._clean(loaded_documents)
             chunked_documents = await self._split(cleaned_documents, request)
             embeddings = await self._embed(chunked_documents, request, document.id)
+            provenance = await self._provenance(request)
+            self._stamp_chunks(embeddings, provenance)
 
             await self.vector_store.store.add_many(embeddings)
+            self._record_processing(document, request, provenance, chunked_documents)
 
+            document.metadata_ = {
+                **(document.metadata_ or {}),
+                "chunking": self._chunking_summary(request, chunked_documents, embeddings),
+            }
             document.checksum = self._checksum(scratch_path)
             document.status = DocumentStatus.READY
             await self.document_repository.session.flush()
@@ -288,6 +335,56 @@ class IngestionPipeline:
     @staticmethod
     def _checksum(path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    async def _provenance(self, request: IngestionRequest) -> dict[str, object]:
+        """What produced this document's chunks: embedding model, chunking method, pipeline versions."""
+        # The embedding model is the configured embedding client's, not the profile's `model`
+        # (that is the chat model); the profile only fixes the vector dimension.
+        profile = await self.model_profile_repository.get(request.model_profile_id)
+        return {
+            "embedding_provider": settings.rag.embedding_provider,
+            "embedding_model": settings.rag.embedding_model,
+            "embedding_dimensions": getattr(profile, "embedding_dimensions", None),
+            "chunking_strategy": self.splitter_factory.resolve(
+                strategy=request.chunking_strategy,
+                file_extension=request.file.suffix.lower(),
+            ),
+            "chunking_version": CHUNKING_VERSION,
+            "pipeline_version": PIPELINE_VERSION,
+        }
+
+    @staticmethod
+    def _stamp_chunks(embeddings: list[Embedding], provenance: dict[str, object]) -> None:
+        """Fills each chunk's provenance columns (content hash, models, versions, index time)."""
+        indexed_at = datetime.now(UTC)
+        for embedding in embeddings:
+            chunk = embedding.chunk
+            chunk.content_hash = hashlib.sha256(chunk.content.encode("utf-8")).hexdigest()
+            chunk.indexed_at = indexed_at
+            for column, value in provenance.items():
+                setattr(chunk, column, value)
+
+    @staticmethod
+    def _record_processing(
+        document: Document,
+        request: IngestionRequest,
+        provenance: dict[str, object],
+        chunked_documents: list[LangChainDocument],
+    ) -> None:
+        """Document-level processing record (who, from where, with which pipeline, when)."""
+        if request.uploaded_by is not None:
+            document.uploaded_by = request.uploaded_by
+        document.source_type = document.source_type or "upload"
+        document.processing_version = PIPELINE_VERSION
+        document.parser_name = (chunked_documents[0].metadata.get("loader") if chunked_documents else None)
+        document.chunking_strategy = provenance["chunking_strategy"]  # type: ignore[assignment]
+        document.chunking_version = CHUNKING_VERSION
+        document.embedding_provider = provenance["embedding_provider"]  # type: ignore[assignment]
+        document.embedding_model = provenance["embedding_model"]  # type: ignore[assignment]
+        document.embedding_dimensions = provenance["embedding_dimensions"]  # type: ignore[assignment]
+        document.processing_stage = "completed"
+        document.error_reason = None
+        document.processed_at = datetime.now(UTC)
 
     async def _track_version(
         self,
@@ -352,11 +449,25 @@ class IngestionPipeline:
             title=request.document_name,
             file_id=request.file_id or str(uuid4()),
             file_name=request.document_name,
+            source_id=request.source_id,
+            source_type=request.source_type or "upload",
+            external_id=request.external_id,
+            canonical_url=request.canonical_url,
+            external_version=request.external_version,
+            external_updated_at=request.external_updated_at,
+            last_synced_at=datetime.now(UTC) if request.source_id is not None else None,
+            sync_id=request.sync_id,
+            allowed_roles=request.allowed_roles,
+            allowed_users=request.allowed_users,
             mime_type=mime_type or "application/octet-stream",
             extension=request.file.suffix.lower(),
             size_bytes=request.file.stat().st_size,
             checksum=checksum,
             status=DocumentStatus.PROCESSING,
+            visibility=request.visibility,
+            document_type=request.document_type,
+            category=request.category,
+            tags=request.tags,
             metadata_=request.metadata,
         )
 
@@ -370,7 +481,24 @@ class IngestionPipeline:
 
         ingested_at = datetime.now(UTC).isoformat()
         for document in documents:
+            # The loader records the scratch file's path ("storage/temp/<uuid>_name.ext"), which is an
+            # internal detail that changes every run. Record the document's real name instead.
+            document.metadata["source"] = request.document_name
+            document.metadata["filename"] = request.document_name
             document.metadata.setdefault("ingested_at", ingested_at)
+            if request.source_id is not None:
+                # Provenance on every chunk: which source, which external item and version, which sync.
+                document.metadata.update(
+                    {
+                        "source_id": str(request.source_id),
+                        "source_type": request.source_type,
+                        "external_id": request.external_id,
+                        "canonical_url": request.canonical_url,
+                        "external_version": request.external_version,
+                        "sync_id": str(request.sync_id) if request.sync_id else None,
+                        **request.source_metadata,
+                    }
+                )
 
         return documents
 
@@ -389,7 +517,45 @@ class IngestionPipeline:
             strategy=request.chunking_strategy,
             file_extension=request.file.suffix.lower(),
         )
-        return await splitter.split(documents)
+        chunks = await splitter.split(documents)
+
+        # Stamp every chunk with how it was produced, so the metadata a user inspects in the
+        # UI says which method made it (not just what the splitter happened to leave behind).
+        effective = self.splitter_factory.resolve(
+            strategy=request.chunking_strategy,
+            file_extension=request.file.suffix.lower(),
+        )
+        for chunk in chunks:
+            chunk.metadata["chunking_strategy"] = effective
+            chunk.metadata["chunking_requested"] = request.chunking_strategy
+            chunk.metadata["chunk_total"] = len(chunks)
+
+        return chunks
+
+    def _chunking_summary(
+        self,
+        request: IngestionRequest,
+        chunks: list[LangChainDocument],
+        embeddings: list[Embedding],
+    ) -> dict[str, object]:
+        """Document-level record of how it was chunked (stored under metadata_["chunking"])."""
+        extension = request.file.suffix.lower()
+        splitter = self.splitter_factory.create(
+            strategy=request.chunking_strategy,
+            file_extension=extension,
+        )
+        return {
+            "requested": request.chunking_strategy,
+            "strategy": self.splitter_factory.resolve(
+                strategy=request.chunking_strategy,
+                file_extension=extension,
+            ),
+            "splitter": type(splitter).__name__,
+            "chunk_size": settings.rag.chunk_size,
+            "chunk_overlap": settings.rag.chunk_overlap,
+            "chunk_count": len(chunks),
+            "total_tokens": sum(e.chunk.token_count for e in embeddings),
+        }
 
     async def _embed(
         self,
@@ -420,7 +586,9 @@ class IngestionPipeline:
             )
 
             chunk = DocumentChunk(
-                id=uuid4(),
+                # Deterministic: processing the same document row twice yields the same chunk
+                # ids (so a retry can never leave duplicate chunks behind).
+                id=uuid.uuid5(document_id, f"chunk:{index}"),
                 tenant_id=request.tenant_id,
                 document_id=document_id,
                 chunk_index=index,
@@ -496,6 +664,10 @@ class IngestionPipeline:
                 character_count=len(summary_text),
                 metadata_={},
             )
+            summary_chunk.content_hash = hashlib.sha256(summary_text.encode("utf-8")).hexdigest()
+            summary_chunk.indexed_at = datetime.now(UTC)
+            for column, value in (await self._provenance(request)).items():
+                setattr(summary_chunk, column, value)
 
             await self.vector_store.store.add(
                 Embedding(

@@ -6,17 +6,20 @@ from dependency_injector import containers, providers
 from packages.conversation.context import ConversationContextBuilder
 from packages.conversation.formatter import MessageFormatter
 from packages.conversation.history import ConversationHistory
-from packages.conversation.manager import ConversationManager
-from packages.conversation.service import ConversationService
-from packages.conversation.summarizer import ConversationSummarizer
 
 
 class ConversationContainer(containers.DeclarativeContainer):
-    """Dependency injection container for the conversation package."""
+    """
+    Dependency injection container for the conversation package.
+
+    Only the pieces `packages.application.services.chat_service.ChatService` (the real
+    `POST /api/v1/chat` entry point) actually uses: `context`, built from `history`/`formatter`.
+    `ConversationManager`/`ConversationService`/`ConversationSummarizer` and their providers
+    (`manager`/`service`/`summarizer`) were a now-unused predecessor flow, deleted along with this
+    trimming — see docs/UNUSED_FILES.md and docs/CHANGELOG.md for the full account.
+    """
 
     repositories = providers.DependenciesContainer()
-    graph = providers.DependenciesContainer()
-    services = providers.DependenciesContainer()
 
     formatter = providers.Singleton(
         MessageFormatter,
@@ -27,26 +30,8 @@ class ConversationContainer(containers.DeclarativeContainer):
         repository=repositories.message,
     )
 
-    service = providers.Factory(
-        ConversationService,
-        conversations=repositories.conversation,
-        messages=repositories.message,
-    )
-
     context = providers.Factory(
         ConversationContextBuilder,
         history=history,
         formatter=formatter,
-    )
-
-    summarizer = providers.Factory(
-        ConversationSummarizer,
-        chat=services.chat,
-    )
-
-    manager = providers.Factory(
-        ConversationManager,
-        service=service,
-        context=context,
-        graph=graph.manager,
     )

@@ -43,14 +43,17 @@ async def http_exception_handler(
     )
 
 
-def _is_provider_outage(exc: BaseException) -> bool:
+def _is_provider_outage(exc: BaseException, seen: set[int] | None = None) -> bool:
     """LLM / embedding provider overloaded or unreachable (not a bug in this app)."""
-    seen: set[int] = set()
+    # One visited-set for the whole walk, including nested exception groups: a group and the exceptions it
+    # contains can reference each other through __context__, which made this recurse until RecursionError
+    # (masking the real error as a bare 500).
+    seen = set() if seen is None else seen
     while exc is not None and id(exc) not in seen:
         seen.add(id(exc))
         # Exception groups (anyio task groups) wrap the real cause.
         for inner in getattr(exc, "exceptions", ()) or ():
-            if _is_provider_outage(inner):
+            if _is_provider_outage(inner, seen):
                 return True
         module = type(exc).__module__ or ""
         name = type(exc).__name__

@@ -1,0 +1,144 @@
+name: CI
+
+# docs/BUGS.md item 4: no CI pipeline existed at all before this — every one of this project's
+# tests had only ever been run manually, locally. This runs the real unit + integration suites
+# (382 tests) against real Postgres/Redis service containers on every push and pull request.
+#
+# The exact recipe below (build the test environment from .env.example plus connection overrides,
+# no real secrets needed) was verified locally before being written here: both suites pass 334/334
+# and 48/48 using only .env.example's placeholder values, since `pytest.ini`'s default
+# `-m "not live"` already excludes the handful of tests that need a real LLM provider key.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  dependency-audit:
+    # docs/BUGS.md item 13: no dependency-vulnerability scanning existed at all. Real enforcement,
+    # not just reporting — fails the build on anything pip-audit finds that isn't explicitly
+    # ignored below. The four ignored IDs are all the same package (chromadb 1.5.9, confirmed
+    # live to already be the latest version on PyPI — no fix exists yet); everything else must
+    # stay clean or get a fix/upgrade, not silently added to this list.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Audit dependencies for known vulnerabilities
+        run: >
+          uv run pip-audit
+          --ignore-vuln PYSEC-2026-311
+          --ignore-vuln PYSEC-2026-3814
+          --ignore-vuln PYSEC-2026-3815
+          --ignore-vuln PYSEC-2026-3813
+
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: my_db_user
+          POSTGRES_PASSWORD: my_secure_password
+          POSTGRES_DB: my_database_name
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U my_db_user"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Build a test environment (no real secrets — placeholders from .env.example)
+        run: |
+          cp .env.example .env
+          {
+            echo "DATABASE_URL=postgresql://my_db_user:my_secure_password@localhost:5432/my_database_name"
+            echo "REDIS_URL=redis://localhost:6379/0"
+            echo "POSTGRES_USER=my_db_user"
+            echo "POSTGRES_PASSWORD=my_secure_password"
+            echo "POSTGRES_DB=my_database_name"
+            echo "CONNECTOR_CREDENTIAL_KEYS=$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+          } >> .env
+
+      - name: Create the vector extension
+        run: |
+          PGPASSWORD=my_secure_password psql -h localhost -U my_db_user -d my_database_name -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Run unit tests
+        run: uv run pytest tests/unit -q
+
+      - name: Run integration tests
+        run: uv run pytest tests/integration -q
+
+      - name: Run API contract tests
+        run: uv run pytest tests/api -q
+
+  frontend-test:
+    # docs/BUGS.md item 5: zero frontend test coverage existed at all — no test runner, no test
+    # files, nothing gating a UI regression. Runs the new Vitest suite (frontend/vitest.config.mts)
+    # plus a real type-check on every push/PR, same as the backend jobs above.
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: pnpm test

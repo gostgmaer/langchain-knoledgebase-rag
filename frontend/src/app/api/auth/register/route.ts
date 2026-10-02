@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { setAuthCookies } from "@/lib/auth/cookies";
+import { setAuthCookies, setDisplayNameCookie } from "@/lib/auth/cookies";
 import {
   decodeAccessToken,
   GatewayError,
@@ -51,9 +51,19 @@ export async function POST(request: Request) {
     if (tokens) {
       const cookieStore = await cookies();
       setAuthCookies(cookieStore, tokens);
+
+      const session = sessionFromClaims(decodeAccessToken(tokens.accessToken));
+      // Already have it from the form itself — no need to round-trip to GET /auth/me for data
+      // the registering user just typed in.
+      const displayName = [firstName, lastName].filter(Boolean).join(" ");
+      if (displayName) {
+        session.displayName = displayName;
+        setDisplayNameCookie(cookieStore, displayName, tokens.accessExpiresIn ?? 15 * 60);
+      }
+
       return NextResponse.json({
         authenticated: true,
-        user: sessionFromClaims(decodeAccessToken(tokens.accessToken)),
+        user: session,
       });
     }
 

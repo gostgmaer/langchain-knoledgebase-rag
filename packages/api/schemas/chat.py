@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class ChatFiltersSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_types: list[str] | None = Field(default=None, max_length=20)
+    categories: list[str] | None = Field(default=None, max_length=20)
+    tags: list[str] | None = Field(default=None, max_length=20)
+    language: str | None = Field(default=None, max_length=20)
+    sources: list[str] | None = Field(default=None, max_length=20, description="Only these source types.")
+    source_ids: list[UUID] | None = Field(default=None, max_length=50, description="Only these knowledge sources.")
 
 
 class ChatRequestSchema(BaseModel):
@@ -31,6 +43,11 @@ class ChatRequestSchema(BaseModel):
 
     stream: bool = False
 
+    filters: "ChatFiltersSchema | None" = Field(
+        default=None,
+        description="Restrict retrieval to documents with this metadata (applied inside the search).",
+    )
+
 
 class CitationSchema(BaseModel):
     """
@@ -48,6 +65,26 @@ class CitationSchema(BaseModel):
     chunk_index: int
 
     score: float
+
+    label: str | None = None
+    """Marker to cite in the answer text, e.g. \"[1]\"."""
+
+    document_name: str | None = None
+
+    page_number: int | None = None
+
+    section: str | None = None
+
+    source_type: str | None = None
+    """Where the document came from: upload, web, confluence, ..."""
+
+    source_name: str | None = None
+
+    url: str | None = None
+    """The original page/file URL for external sources (never an internal API URL)."""
+
+    updated_at: datetime | None = None
+    """When the source last changed the document."""
 
 
 class PendingToolCallSchema(BaseModel):

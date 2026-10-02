@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dependency_injector import containers, providers
 
+from packages.application.services.audit_service import AuditService
 from packages.infrastructure.container.chat_service import ChatServiceContainer
 from packages.infrastructure.container.conversation import ConversationContainer
 
@@ -56,6 +57,12 @@ class ApplicationContainer(containers.DeclarativeContainer):
     feature_flags = providers.Container(
         FeatureFlagsContainer,
         database=database,
+    )
+
+    # Append-only audit trail; its own session factory, so it never joins a request transaction.
+    audit = providers.Singleton(
+        AuditService,
+        session_factory=database.session_factory,
     )
 
     #
@@ -136,11 +143,13 @@ class ApplicationContainer(containers.DeclarativeContainer):
     graph = providers.Container(
         GraphContainer,
         settings=settings,
+        database=database,
         ai=ai,
         rag=rag,
         tools=tools,
         memory=memory,
         services=services,
+        repositories=repositories,
     )
 
     #
@@ -150,8 +159,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
     conversation = providers.Container(
         ConversationContainer,
         repositories=repositories,
-        graph=graph,
-        services=services,
     )
 
     #

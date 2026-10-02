@@ -1,8 +1,14 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { setAuthCookies } from "@/lib/auth/cookies";
-import { decodeAccessToken, GatewayError, gatewayLogin, sessionFromClaims } from "@/lib/auth/gateway";
+import { setAuthCookies, setDisplayNameCookie } from "@/lib/auth/cookies";
+import {
+  decodeAccessToken,
+  fetchDisplayName,
+  GatewayError,
+  gatewayLogin,
+  sessionFromClaims,
+} from "@/lib/auth/gateway";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
@@ -20,7 +26,14 @@ export async function POST(request: Request) {
     const cookieStore = await cookies();
     setAuthCookies(cookieStore, tokens);
 
-    return NextResponse.json({ user: sessionFromClaims(claims) });
+    const session = sessionFromClaims(claims);
+    const displayName = await fetchDisplayName(tokens.accessToken);
+    if (displayName) {
+      session.displayName = displayName;
+      setDisplayNameCookie(cookieStore, displayName, tokens.accessExpiresIn ?? 15 * 60);
+    }
+
+    return NextResponse.json({ user: session });
   } catch (error) {
     const status = error instanceof GatewayError ? error.status : 502;
     // IAM rate-limits sign-ins per IP; its own text ("ThrottlerException: Too Many

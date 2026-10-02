@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { Sidebar, type NavItem } from "@/components/layout/sidebar";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ export function AppShell({
 }) {
   const router = useRouter();
   const { session, isLoading, logout } = useSession();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (isLoading) return;
@@ -59,10 +60,10 @@ export function AppShell({
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar items={navItems} homeHref={homeHref} />
-      <div className="flex h-screen flex-1 flex-col overflow-hidden">
-        <Topbar />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+      <Sidebar items={navItems} homeHref={homeHref} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
+        <Topbar onMenuClick={() => setSidebarOpen(true)} />
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
       </div>
     </div>
   );

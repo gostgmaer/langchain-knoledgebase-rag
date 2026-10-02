@@ -1,14 +1,3 @@
-# ============================================================
-# core/tools/weather.py — Weather Tool
-# ============================================================
-# TODO: Define `get_weather(location)` tool function
-# TODO: Call OpenWeatherMap API using WEATHER_API_KEY
-# TODO: Parse and format the weather response
-# TODO: Handle API errors and invalid locations
-# ============================================================
-
-
-
 import httpx
 from langchain.tools import tool
 
@@ -157,7 +146,7 @@ async def get_weather(city: str):
                 f"wind speed of {data['wind']['speed']} m/s."
             ),
         }
-        print(data)
+        logger.debug("Weather lookup result", city=city, summary=data["summary"])
         return data
 
     except httpx.HTTPStatusError as e:

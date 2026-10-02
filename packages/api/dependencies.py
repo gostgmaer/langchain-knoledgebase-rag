@@ -10,7 +10,6 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.config.loader import settings
-from packages.conversation.manager import ConversationManager
 from packages.graph.manager import GraphManager
 from packages.infrastructure.ai.manager import LLMManager
 from packages.infrastructure.container import ApplicationContainer
@@ -197,6 +196,26 @@ async def _rbac_enabled(request: Request) -> bool:
     return await service.get_effective("enable_rbac", tenant_id)
 
 
+def conversation_visible_to(
+    conversation,
+    tenant_id: UUID,
+    current_user: CurrentUser | None,
+) -> bool:
+    """
+    A conversation is visible only inside its own tenant, and within it only to its owner or an
+    administrator. Anonymous development mode (AUTH_REQUIRED off, no verified user) keeps the
+    legacy tenant-only check. Callers answer "not visible" with 404, never 403, so the existence
+    of someone else's conversation id is not revealed.
+    """
+    if conversation.tenant_id != tenant_id:
+        return False
+    if current_user is None:
+        return True
+    if set(current_user.roles) & set(settings.api.admin_roles):
+        return True
+    return conversation.user_id == current_user.id
+
+
 def require_permission(code: str):
     """
     FastAPI dependency factory: raises 401 if no verified user is
@@ -325,19 +344,6 @@ async def get_ai_manager(
     manager: LLMManager = Depends(Provide[ApplicationContainer.ai.manager]),
 ) -> LLMManager:
     return manager
-
-
-#
-# Conversation
-#
-
-
-@inject
-async def get_conversation_manager(
-    container: ApplicationContainer = Depends(Provide[ApplicationContainer]),
-) -> AsyncIterator[ConversationManager]:
-    async with request_scoped_session(container):
-        yield container.conversation.manager()
 
 
 #

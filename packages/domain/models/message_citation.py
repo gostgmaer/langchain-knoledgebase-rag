@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
     Numeric,
+    String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -39,10 +43,6 @@ class MessageCitation(BaseModel):
             name="uq_message_chunk",
         ),
         CheckConstraint(
-            "score >= 0",
-            name="ck_citation_score",
-        ),
-        CheckConstraint(
             "rank >= 1",
             name="ck_citation_rank",
         ),
@@ -63,11 +63,21 @@ class MessageCitation(BaseModel):
         nullable=False,
     )
 
-    chunk_id: Mapped[PGUUID] = mapped_column(
+    # SET NULL (not CASCADE): re-indexing replaces a document's chunks, and an answer given earlier
+    # must keep its sources. The snapshot columns below carry what the reader sees.
+    chunk_id: Mapped[PGUUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("document_chunks.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("document_chunks.id", ondelete="SET NULL"),
+        nullable=True,
     )
+
+    document_name: Mapped[str | None] = mapped_column(String(512))
+    source_type: Mapped[str | None] = mapped_column(String(32))
+    source_name: Mapped[str | None] = mapped_column(String(200))
+    canonical_url: Mapped[str | None] = mapped_column(Text)
+    external_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    page_number: Mapped[int | None] = mapped_column(Integer)
+    section: Mapped[str | None] = mapped_column(String(512))
 
     rank: Mapped[int] = mapped_column(
         Integer,
@@ -85,4 +95,4 @@ class MessageCitation(BaseModel):
 
     document: Mapped[Document] = relationship()
 
-    chunk: Mapped[DocumentChunk] = relationship()
+    chunk: Mapped[DocumentChunk | None] = relationship()

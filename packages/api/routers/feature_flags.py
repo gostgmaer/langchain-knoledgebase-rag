@@ -30,6 +30,12 @@ router = APIRouter(
     # on its own flag let any signed-in member create/toggle flags (including
     # enable_rbac itself). On top of this, GLOBAL flags (tenant_id null) and other
     # tenants' flags can only be changed by a platform administrator - see _may_manage.
+    #
+    # For the same reason, this router deliberately gets no require_permission(...)
+    # codes either (docs/BUGS.md item 11, packages/api/permissions.py) — that check is
+    # itself gated behind enable_rbac, so stacking it here would risk locking an admin
+    # out of ever turning enable_rbac back off once it's on. require_admin() stays the
+    # only guard, unconditionally.
     dependencies=[Depends(require_admin())],
 )
 

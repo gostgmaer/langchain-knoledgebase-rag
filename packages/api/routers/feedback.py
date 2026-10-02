@@ -5,11 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
+    conversation_visible_to,
     DEFAULT_USER_ID,
     get_scoped_container,
     require_uuid_header,
     require_admin,
+    require_permission,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.feedback import (
     FeedbackListResponseSchema,
@@ -52,7 +55,11 @@ async def submit_feedback(
     message = await messages.get(payload.message_id)
     conversation = await conversations.get(message.conversation_id) if message else None
 
-    if message is None or conversation is None or conversation.tenant_id != tenant_id:
+    if (
+        message is None
+        or conversation is None
+        or not conversation_visible_to(conversation, tenant_id, getattr(request.state, "current_user", None))
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Message not found.",
@@ -90,7 +97,7 @@ async def submit_feedback(
     "",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[FeedbackListResponseSchema],
-    dependencies=[Depends(require_admin())],
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.FEEDBACK_READ))],
     summary="Review feedback",
     description="Lists the calling tenant's feedback, optionally filtered by rating, most recent first.",
 )

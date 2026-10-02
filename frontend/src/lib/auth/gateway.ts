@@ -233,3 +233,30 @@ export function sessionFromClaims(claims: AccessTokenClaims): Session {
     displayName: claims.email,
   };
 }
+
+// The access token's own JWT claims don't carry first/last name (confirmed live: a decoded token
+// has sub/email/tenantId/roles/etc, nothing else) — sessionFromClaims above falls back to the raw
+// email for exactly that reason. This fetches the real thing from the RAG API's GET /auth/me
+// (server-to-server, same as app/api/rag/[...path]/route.ts's own RAG_API_URL calls — never from
+// the browser), meant to be called once at login/refresh and cached (see cookies.ts's
+// DISPLAY_NAME_COOKIE), not on every session check. Fails soft: a real name is a nicety, not
+// something worth ever blocking login or a page load over.
+const RAG_API_URL = process.env.RAG_API_URL ?? "http://127.0.0.1:8088/api/v1";
+
+export async function fetchDisplayName(accessToken: string): Promise<string | null> {
+  try {
+    const response = await fetch(`${RAG_API_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) return null;
+
+    const json = await response.json().catch(() => null);
+    const firstName = typeof json?.data?.first_name === "string" ? json.data.first_name.trim() : "";
+    const lastName = typeof json?.data?.last_name === "string" ? json.data.last_name.trim() : "";
+    const fullName = [firstName, lastName].filter(Boolean).join(" ");
+
+    return fullName || null;
+  } catch {
+    return null;
+  }
+}

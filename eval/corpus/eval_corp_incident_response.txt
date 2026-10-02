@@ -1,0 +1,3 @@
+Production Incident Response
+
+Incidents are classified by severity. A SEV1 incident, meaning a full outage or data loss, pages the on-call engineer immediately and requires an acknowledgement within 15 minutes. SEV2 covers major degraded functionality and must be acknowledged within one hour. Every SEV1 and SEV2 incident needs a written postmortem published within 5 working days, describing the timeline, root cause and follow-up actions. Customers are notified on the status page within 30 minutes of a SEV1.

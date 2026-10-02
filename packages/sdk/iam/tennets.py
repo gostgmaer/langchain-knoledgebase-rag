@@ -23,12 +23,22 @@ class IAMTenantsSDK(BaseClient):
     async def get_tenant(
         self,
         tenant_id: str,
+        access_token: str | None = None,
     ) -> Tenant:
+        """
+        `access_token`: the caller's own bearer token, forwarded as-is — IAM's
+        `/tenants/:id` is a user-context endpoint (same idiom as `auth.refresh_token()`
+        taking the caller's own refresh token), not one this SDK has a separate
+        service credential for.
+        """
+
+        headers = {"Authorization": f"Bearer {access_token}"} if access_token else None
 
         response = await self._get(
             IAMEndpoints.TENANT.format(
                 tenant_id=tenant_id,
-            )
+            ),
+            headers=headers,
         )
 
         return Tenant.model_validate(

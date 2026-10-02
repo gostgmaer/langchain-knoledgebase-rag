@@ -10,8 +10,10 @@ from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
     get_scoped_container,
     require_admin,
+    require_permission,
     require_uuid_header,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.prompt import (
     CreatePromptRequestSchema,
@@ -37,7 +39,7 @@ def _slugify(name: str) -> str:
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=ApiResponse[PromptResponseSchema],
-    dependencies=[Depends(require_admin())],
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.PROMPTS_WRITE))],
     summary="Create a prompt",
     description=(
         "Creates a new prompt's metadata for the calling tenant. Does not "
@@ -84,6 +86,7 @@ async def create_prompt(
     "",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[PromptListResponseSchema],
+    dependencies=[Depends(require_permission(Permission.PROMPTS_READ))],
     summary="List prompts",
     description="Lists the calling tenant's prompts, any status.",
 )
@@ -115,6 +118,7 @@ async def list_prompts(
     "/{prompt_id}",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[PromptResponseSchema],
+    dependencies=[Depends(require_permission(Permission.PROMPTS_READ))],
     summary="Fetch a prompt",
     description="Fetches a single prompt's metadata by ID.",
 )

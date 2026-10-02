@@ -4,10 +4,30 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+from prometheus_client import Counter, Histogram
+
 from packages.graph.state import GraphState
 from packages.shared.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Real Prometheus metrics, same rationale as packages/api/middleware/metrics.py's HTTP counters
+# (docs/BUGS.md item 10) — GraphMetricsStore below remains for the human-readable JSON summary.
+GRAPH_NODE_CALLS_TOTAL = Counter(
+    "graph_node_calls_total",
+    "Total graph node executions",
+    ("node",),
+)
+GRAPH_NODE_ERRORS_TOTAL = Counter(
+    "graph_node_errors_total",
+    "Total graph node executions that raised",
+    ("node",),
+)
+GRAPH_NODE_DURATION_SECONDS = Histogram(
+    "graph_node_duration_seconds",
+    "Graph node execution duration in seconds (successful calls only)",
+    ("node",),
+)
 
 
 class GraphMiddleware:
@@ -105,9 +125,13 @@ class MetricsMiddleware(GraphMiddleware):
 
     async def after(self, state: GraphState, node_name: str, duration_ms: float) -> None:
         graph_metrics_store.record(node_name, duration_ms, error=False)
+        GRAPH_NODE_CALLS_TOTAL.labels(node=node_name).inc()
+        GRAPH_NODE_DURATION_SECONDS.labels(node=node_name).observe(duration_ms / 1000)
 
     async def on_error(self, state: GraphState, node_name: str, exc: Exception) -> None:
         graph_metrics_store.record(node_name, 0.0, error=True)
+        GRAPH_NODE_CALLS_TOTAL.labels(node=node_name).inc()
+        GRAPH_NODE_ERRORS_TOTAL.labels(node=node_name).inc()
 
 
 class MiddlewarePipeline:

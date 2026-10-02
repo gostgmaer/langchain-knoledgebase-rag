@@ -29,6 +29,8 @@ from packages.graph.nodes.extract_memory import ExtractMemoryNode
 from packages.graph.nodes.llm import LLMNode
 from packages.graph.nodes.load_memory import LoadMemoryNode
 from packages.graph.nodes.researcher import ResearcherNode
+from packages.application.services.retrieval_log_service import RetrievalLogService
+from packages.application.services.retrieval_settings_service import RetrievalSettingsService
 from packages.graph.nodes.retrieve import RetrieveNode
 from packages.graph.nodes.supervisor import SupervisorNode
 from packages.graph.nodes.tool import GraphToolNode
@@ -212,11 +214,13 @@ async def create_postgres_checkpointer() -> ThreadedPostgresSaver:
 class GraphContainer(containers.DeclarativeContainer):
 
     settings = providers.DependenciesContainer()
+    database = providers.DependenciesContainer()
     ai = providers.DependenciesContainer()
     rag = providers.DependenciesContainer()
     tools = providers.DependenciesContainer()
     memory = providers.DependenciesContainer()
     services = providers.DependenciesContainer()
+    repositories = providers.DependenciesContainer()
     prompt_builder = providers.Singleton(PromptBuilder)
 
     # NOTE: this whole chain is Factory, not Singleton, on purpose.
@@ -244,10 +248,24 @@ class GraphContainer(containers.DeclarativeContainer):
         memory_manager=memory.manager,
     )
 
+    # Singleton: stateless, holds only the session factory (see RetrievalLogService).
+    retrieval_log = providers.Singleton(
+        RetrievalLogService,
+        session_factory=database.session_factory,
+    )
+
+    # Singleton: holds a short-lived per-tenant cache and only the session factory.
+    retrieval_settings = providers.Singleton(
+        RetrievalSettingsService,
+        session_factory=database.session_factory,
+    )
+
     retrieve = providers.Factory(
         RetrieveNode,
         knowledge_manager=rag.knowledge_manager,
         reranker=rag.reranker,
+        retrieval_log=retrieval_log,
+        retrieval_settings=retrieval_settings,
     )
 
     tool = providers.Factory(
@@ -260,6 +278,7 @@ class GraphContainer(containers.DeclarativeContainer):
         chat_service=services.chat,
         prompt_builder=prompt_builder,
         tool_manager=tools.manager,
+        model_profile_repository=repositories.model_profile,
     )
 
     # Multi-Agent (docs/mvpRAG.md v2.0) — all Factory, matching this
@@ -276,6 +295,7 @@ class GraphContainer(containers.DeclarativeContainer):
         ResearchRetrieveNode,
         knowledge_manager=rag.knowledge_manager,
         reranker=rag.reranker,
+        retrieval_settings=retrieval_settings,
     )
 
     research_synthesize = providers.Factory(

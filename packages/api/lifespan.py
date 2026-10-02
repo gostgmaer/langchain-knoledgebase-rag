@@ -10,12 +10,15 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 import packages.domain.models  # noqa: F401 - Ensure models are loaded for Base.metadata
+from packages.infrastructure.database.upgrades import apply_schema_upgrades
 from packages.graph.visualizer import GraphVisualizer
 from packages.infrastructure.container import ApplicationContainer
 from packages.infrastructure.container.graph import create_postgres_checkpointer
 from packages.infrastructure.database.base import Base
 from packages.shared.logging import configure_logger, get_logger
 from packages.shared.tracing import configure_opentelemetry
+from packages.api.middleware.rate_limit import close_rate_limit_redis
+from packages.memory.manager import close_memory_lock_redis
 from packages.tools.builtin.weather import close_weather_client
 
 
@@ -61,8 +64,23 @@ async def lifespan(app: FastAPI):
     try:
         engine = container.database.engine()
         async with engine.begin() as conn:
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-            await conn.run_sync(Base.metadata.create_all)
+            if settings.database.schema_init_at_startup:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                await conn.run_sync(Base.metadata.create_all)
+                await apply_schema_upgrades(conn)
+            else:
+                logger.info("SCHEMA_INIT_AT_STARTUP=false: not touching the schema; run alembic upgrade head.")
+            bypass = (
+                await conn.execute(
+                    text("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")
+                )
+            ).scalar_one_or_none()
+            if bypass:
+                logger.warning(
+                    "Row-level security is NOT enforced: the database role is a superuser or has "
+                    "BYPASSRLS. Query-layer tenant filters still apply; connect as an ordinary role "
+                    "in production (docs/PROVENANCE.md, scripts/create_app_role.sql)."
+                )
         logger.info("Database schema initialized successfully.")
     except Exception as exc:
         logger.error("Failed to initialize database schema: %s", exc)
@@ -144,6 +162,12 @@ async def lifespan(app: FastAPI):
         # never recreated per-request — production-readiness gap #1,
         # a leaked connector/socket on every shutdown until now.
         await close_weather_client()
+
+        # Same idiom, same reason — RateLimitMiddleware's Redis client (docs/BUGS.md item 2).
+        await close_rate_limit_redis()
+
+        # Same idiom, same reason — MemoryManager's distributed summarize() lock (docs/BUGS.md item 2).
+        await close_memory_lock_redis()
 
         engine = container.database.engine()
         await engine.dispose()

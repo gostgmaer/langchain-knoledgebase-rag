@@ -1,6 +1,8 @@
 # Router search
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Request, status
 
 from packages.api.dependencies import (
@@ -55,6 +57,13 @@ async def search(
         tenant_id=tenant_id,
         model_profile_id=model_profile.id,
         document_id=payload.document_id,
+        knowledge_base_id=payload.knowledge_base_id,
+        document_types=payload.document_types,
+        categories=payload.categories,
+        tags=payload.tags,
+        language=payload.language,
+        source_types=payload.sources,
+        source_ids=payload.source_ids,
     )
 
     candidates = await knowledge_manager.search(
@@ -65,6 +74,20 @@ async def search(
 
     reranked = await reranker.rerank(payload.query, candidates, top_k=payload.limit)
 
+    # The chunk/search-result objects only ever carry a document_id, never a
+    # name (packages/knowledge/vectorstores/schema.py's SearchResult) -- this
+    # was previously missing from the response entirely, showing only a raw
+    # document_id in the admin Search UI. One lookup per unique document in
+    # the result set (never more than `limit`, already deduplicated) rather
+    # than a batch-fetch method that doesn't exist on the base repository.
+    documents = container.repositories.document()
+    titles: dict[UUID, str] = {}
+    for result in reranked:
+        doc_id = result.chunk.document_id
+        if doc_id not in titles:
+            document = await documents.get(doc_id)
+            titles[doc_id] = document.title if document is not None else "Unknown document"
+
     return ApiResponse(
         message="Search completed.",
         data=SearchResponseSchema(
@@ -72,6 +95,7 @@ async def search(
             results=[
                 SearchResultSchema(
                     document_id=result.chunk.document_id,
+                    document_name=titles[result.chunk.document_id],
                     chunk_id=result.chunk.id,
                     chunk_index=result.chunk.chunk_index,
                     content=result.chunk.content,

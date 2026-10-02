@@ -9,6 +9,7 @@ from starlette.responses import JSONResponse, Response
 
 from packages.auth.service import AuthService, NoTenantError
 from packages.config.loader import settings
+from packages.shared.access import set_can_read_restricted, set_user
 from packages.infrastructure.container import ApplicationContainer
 
 
@@ -31,7 +32,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
     AUTH_SCHEME = "Bearer "
 
     # Reachable without a token even when AUTH_REQUIRED is on.
-    PUBLIC_PREFIXES = ("/api/v1/health", "/api/v1/auth/refresh")
+    PUBLIC_PREFIXES = ("/api/v1/health", "/api/v1/auth/refresh", "/api/v1/webhooks/")
     PUBLIC_PATHS = ("/docs", "/redoc", "/openapi.json")
 
     @classmethod
@@ -100,5 +101,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             request.state.current_user = current_user
             request.state.tenant_id = str(current_user.tenant_id)
             request.state.user_id = str(current_user.id)
+
+        # Restricted documents are readable by administrators only. Anonymous development mode
+        # (AUTH_REQUIRED off) keeps its legacy everything-open behaviour.
+        if current_user is not None:
+            clearance = bool(set(current_user.roles) & set(settings.api.admin_roles))
+        else:
+            clearance = not required
+        set_can_read_restricted(clearance)
+        set_user(str(current_user.id) if current_user is not None else None, current_user.roles if current_user is not None else ())
 
         return await call_next(request)

@@ -10,12 +10,14 @@ from sqlalchemy.exc import IntegrityError
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
+    conversation_visible_to,
     DEFAULT_USER_ID,
     get_scoped_container,
     request_scoped_session,
     require_uuid_header,
 )
 from packages.api.responses import ApiResponse
+from packages.shared.access import set_retrieval_filters
 from packages.api.schemas.chat import (
     ChatRequestSchema,
     ChatResponseSchema,
@@ -62,6 +64,12 @@ async def chat(
 
     tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
     user_id = require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID)
+    if payload.filters:
+        chosen = payload.filters.model_dump()
+        chosen["source_types"] = chosen.pop("sources")  # the API says "sources", retrieval says "source_types"
+        set_retrieval_filters(chosen)
+    else:
+        set_retrieval_filters(None)
 
     conversations = container.repositories.conversation()
 
@@ -70,6 +78,12 @@ async def chat(
         if payload.conversation_id is not None
         else None
     )
+
+    current_user = getattr(request.state, "current_user", None)
+    if conversation is not None and not conversation_visible_to(conversation, tenant_id, current_user):
+        # Same answer as "does not exist": someone else's conversation id must not be usable
+        # (or even confirmable) from another tenant or another member.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
 
     if conversation is None:
         model_profiles = container.repositories.model_profile()
@@ -111,6 +125,8 @@ async def chat(
                 conversation = await conversations.get(payload.conversation_id)
                 if conversation is None:
                     raise
+                if not conversation_visible_to(conversation, tenant_id, current_user):
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
         else:
             conversation = await ensure_default_conversation(
                 tenant_id,
@@ -199,7 +215,9 @@ async def resume(
     conversations = container.repositories.conversation()
     conversation = await conversations.get(conversation_id)
 
-    if conversation is None or conversation.tenant_id != tenant_id:
+    if conversation is None or not conversation_visible_to(
+        conversation, tenant_id, getattr(request.state, "current_user", None)
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found.",
@@ -243,6 +261,14 @@ def _to_response_schema(response: ChatResponse, model: str) -> ChatResponseSchem
                 chunk_id=citation.chunk_id,
                 chunk_index=citation.chunk_index,
                 score=citation.score,
+                label=citation.label,
+                document_name=citation.document_name,
+                page_number=citation.page_number,
+                section=citation.section,
+                source_type=citation.source_type,
+                source_name=citation.source_name,
+                url=citation.url,
+                updated_at=citation.updated_at,
             )
             for citation in response.citations
         ],

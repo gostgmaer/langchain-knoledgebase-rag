@@ -16,7 +16,11 @@ class RAGSettings(BaseSettings):
     embedding_model: str = Field(
         default="models/embedding-001", alias="EMBEDDING_MODEL"
     )
-    vector_store_backend: str = Field(default="chroma", alias="VECTOR_STORE_BACKEND")
+    # pgvector is the real default (reuses the Postgres this app already runs; no separate server
+    # needed) -- testing and production always use it. Chroma is available for local development
+    # only (opt in via .env), and its own embedded-client concurrency caveat below is exactly why
+    # it isn't the default anywhere it matters.
+    vector_store_backend: str = Field(default="pgvector", alias="VECTOR_STORE_BACKEND")
     vector_collection_name: str = Field(
         default="langchain", alias="VECTOR_COLLECTION_NAME"
     )
@@ -47,6 +51,10 @@ class RAGSettings(BaseSettings):
     ]
 
     retrieval_strategy: str = Field(default="hybrid", alias="RETRIEVAL_STRATEGY")
+    # Weight of the BM25 keyword ranking relative to the dense ranking when the hybrid retriever fuses
+    # them (1.0 = equal). Lower it if keyword matches on common words outrank the right document; measure
+    # with scripts/evaluate_retrieval.py before changing it.
+    keyword_weight: float = Field(default=1.0, ge=0.0, le=2.0, alias="RETRIEVAL_KEYWORD_WEIGHT")
     max_results: int = Field(default=5, alias="RAG_MAX_RESULTS")
     context_token_budget: int = Field(default=4000, alias="RAG_CONTEXT_TOKEN_BUDGET")
     min_relevance_score: float = Field(default=0.0, alias="RAG_MIN_RELEVANCE_SCORE")
@@ -66,3 +74,21 @@ class RAGSettings(BaseSettings):
     # not re-embedded in this many days becomes a candidate for the
     # weekly reindex_stale_documents_job.
     reindex_stale_after_days: int = Field(default=90, alias="REINDEX_STALE_AFTER_DAYS")
+
+    # Data retention. Retrieval logs and audit events are deleted once older than this;
+    # 0 disables the purge for that table (keep forever).
+    retention_retrieval_log_days: int = Field(default=90, alias="RETENTION_RETRIEVAL_LOG_DAYS")
+    retention_audit_days: int = Field(default=365, alias="RETENTION_AUDIT_DAYS")
+
+    # External knowledge sources (connectors).
+    # Fernet key(s), comma separated. The first encrypts, all decrypt (rotation). No key = credentials cannot be stored.
+    connector_credential_keys: str | None = Field(default=None, alias="CONNECTOR_CREDENTIAL_KEYS")
+    # Let connectors call private-network addresses (self-hosted Confluence, an intranet site). OFF by default:
+    # it is the switch that stops a source URL from reaching the platform's own network.
+    connector_allow_private_hosts: bool = Field(default=False, alias="CONNECTOR_ALLOW_PRIVATE_HOSTS")
+    # Optional headless-browser service for JavaScript-rendered pages (Browserless-compatible: POST {url}/content).
+    # It must be network-isolated (pages it loads can request anything); unset = JavaScript rendering unavailable.
+    connector_render_url: str | None = Field(default=None, alias="CONNECTOR_RENDER_URL")
+    connector_render_token: str | None = Field(default=None, alias="CONNECTOR_RENDER_TOKEN")
+    connector_sync_concurrency: int = Field(default=4, ge=1, le=16, alias="CONNECTOR_SYNC_CONCURRENCY")
+    connector_max_error_details: int = Field(default=100, alias="CONNECTOR_MAX_ERROR_DETAILS")

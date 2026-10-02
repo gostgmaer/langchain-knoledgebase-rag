@@ -7,9 +7,9 @@ from langchain_core.messages import AIMessage
 
 
 @dataclass(slots=True)
-class ChatResponse:
+class LLMChatResponse:
     """
-    Represents a chat response.
+    `LLMChatService`'s response to one `LLMChatRequest`.
     """
 
     message: AIMessage

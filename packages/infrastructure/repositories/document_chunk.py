@@ -148,3 +148,44 @@ class DocumentChunkRepository(BaseRepository[DocumentChunk]):
         result = await self.session.execute(stmt)
 
         return result.rowcount or 0
+
+    async def list_page_by_document(
+        self,
+        document_id: UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[DocumentChunk]:
+        """A page of one document's chunks in reading order (the summary/graph
+        representations, which have negative chunk_index, come first)."""
+        stmt = (
+            select(DocumentChunk)
+            .where(DocumentChunk.document_id == document_id)
+            .order_by(DocumentChunk.chunk_index.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+
+        return await self.scalars(stmt)
+
+    async def count_primary_by_documents(
+        self,
+        document_ids: list[UUID],
+    ) -> dict[UUID, tuple[int, int]]:
+        """document_id -> (primary chunks, extra representations such as summary/graph)."""
+        if not document_ids:
+            return {}
+
+        stmt = (
+            select(
+                DocumentChunk.document_id,
+                func.count().filter(DocumentChunk.chunk_index >= 0),
+                func.count().filter(DocumentChunk.chunk_index < 0),
+            )
+            .where(DocumentChunk.document_id.in_(document_ids))
+            .group_by(DocumentChunk.document_id)
+        )
+
+        rows = (await self.session.execute(stmt)).all()
+
+        return {row[0]: (int(row[1]), int(row[2])) for row in rows}

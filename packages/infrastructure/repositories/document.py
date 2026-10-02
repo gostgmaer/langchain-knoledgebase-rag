@@ -9,6 +9,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from packages.domain.enums.document_status import DocumentStatus
 from packages.domain.models.document import Document
 from packages.infrastructure.repositories.base import BaseRepository
 
@@ -46,9 +47,46 @@ class DocumentRepository(BaseRepository[Document]):
             .where(
                 Document.knowledge_base_id == knowledge_base_id,
                 Document.checksum == checksum,
+                # A failed attempt must not block a retry, and a superseded version must not
+                # swallow a re-upload of its old content (that is a new version, not a duplicate).
+                Document.is_current.is_(True),
+                Document.status != DocumentStatus.FAILED,
             )
         )
 
+        return await self.scalar(stmt)
+
+    async def get_current_by_source_external(
+        self,
+        tenant_id: UUID,
+        source_id: UUID,
+        external_id: str,
+    ) -> Document | None:
+        """The live version of one external item (archived counts: a returning item supersedes it)."""
+        stmt = select(Document).where(
+            Document.tenant_id == tenant_id,
+            Document.source_id == source_id,
+            Document.external_id == external_id,
+            Document.is_current.is_(True),
+        )
+        return await self.scalar(stmt)
+
+    async def get_by_source_external_checksum(
+        self,
+        tenant_id: UUID,
+        source_id: UUID,
+        external_id: str,
+        checksum: str,
+    ) -> Document | None:
+        """The current, non-failed version of this external item when its content is byte-identical."""
+        stmt = select(Document).where(
+            Document.tenant_id == tenant_id,
+            Document.source_id == source_id,
+            Document.external_id == external_id,
+            Document.checksum == checksum,
+            Document.is_current.is_(True),
+            Document.status != DocumentStatus.FAILED,
+        )
         return await self.scalar(stmt)
 
     async def get_current_by_tenant_kb_and_filename(
@@ -100,32 +138,40 @@ class DocumentRepository(BaseRepository[Document]):
         *,
         limit: int = 100,
         offset: int = 0,
+        knowledge_base_id: UUID | None = None,
+        source_id: UUID | None = None,
     ) -> list[Document]:
         """
         Return all documents belonging to a tenant, across every
         knowledge base it owns — unlike `list_by_knowledge_base`, which
         only existed for the ingestion pipeline's own per-KB needs.
+        Optionally narrowed to one knowledge base.
         """
-        stmt = (
-            select(Document)
-            .where(Document.tenant_id == tenant_id)
-            .order_by(desc(Document.created_at))
-            .offset(offset)
-            .limit(limit)
-        )
+        stmt = select(Document).where(Document.tenant_id == tenant_id)
+        if knowledge_base_id is not None:
+            stmt = stmt.where(Document.knowledge_base_id == knowledge_base_id)
+        if source_id is not None:
+            stmt = stmt.where(Document.source_id == source_id)
+        stmt = stmt.order_by(desc(Document.created_at)).offset(offset).limit(limit)
 
         return await self.scalars(stmt)
 
     async def count_by_tenant(
         self,
         tenant_id: UUID,
+        knowledge_base_id: UUID | None = None,
+        source_id: UUID | None = None,
     ) -> int:
-        """Count documents belonging to a tenant, across every knowledge base."""
+        """Count documents belonging to a tenant, across every knowledge base (or one)."""
         stmt = (
             select(func.count())
             .select_from(Document)
             .where(Document.tenant_id == tenant_id)
         )
+        if knowledge_base_id is not None:
+            stmt = stmt.where(Document.knowledge_base_id == knowledge_base_id)
+        if source_id is not None:
+            stmt = stmt.where(Document.source_id == source_id)
 
         return int(await self.session.scalar(stmt) or 0)
 

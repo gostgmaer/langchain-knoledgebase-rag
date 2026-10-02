@@ -36,6 +36,25 @@ class SplitterFactory:
         self._markdown = markdown_splitter
         self._semantic = semantic_splitter
 
+    @staticmethod
+    def resolve(
+        *,
+        strategy: ChunkingStrategy = "auto",
+        file_extension: str = "",
+    ) -> ChunkingStrategy:
+        """
+        The strategy that will actually run: what "auto" turns into for this file type,
+        or the explicit choice unchanged. Recorded on the document and on every chunk so
+        the UI can show which method produced them.
+        """
+        if strategy != "auto":
+            return strategy
+
+        if file_extension.lower() in _MARKDOWN_EXTENSIONS:
+            return "markdown"
+
+        return "recursive"
+
     def create(
         self,
         *,
@@ -43,17 +62,12 @@ class SplitterFactory:
         file_extension: str = "",
     ) -> BaseSplitter:
 
-        if strategy == "recursive":
-            return self._recursive
+        effective = self.resolve(strategy=strategy, file_extension=file_extension)
 
-        if strategy == "markdown":
+        if effective == "markdown":
             return self._markdown
 
-        if strategy == "semantic":
+        if effective == "semantic":
             return self._semantic
-
-        # "auto"
-        if file_extension.lower() in _MARKDOWN_EXTENSIONS:
-            return self._markdown
 
         return self._recursive

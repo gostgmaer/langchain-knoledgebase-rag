@@ -55,3 +55,20 @@ def test_a_provider_client_error_is_not_masked_as_an_outage():
     resp = _client(_fake_error("google.genai.errors", "ClientError", code=400)).get("/boom")
 
     assert resp.status_code == 500
+
+
+def test_a_cyclic_exception_group_does_not_recurse_forever():
+    from packages.api.exception_handlers import _is_provider_outage
+
+    inner = ValueError("inner")
+    group = ExceptionGroup("group", [inner])
+    inner.__context__ = group  # the cycle seen in production (task group and its member)
+
+    assert _is_provider_outage(group) is False
+
+
+def test_a_connector_circuit_is_not_mistaken_for_an_ai_provider_outage():
+    from packages.api.exception_handlers import _is_provider_outage
+    from packages.connectors.http import HostCircuitOpen
+
+    assert _is_provider_outage(HostCircuitOpen("paused")) is False

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 
 import { UploadDropzone } from "@/components/documents/upload-dropzone";
+import { ChunkingBadge } from "@/components/documents/chunking-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -51,6 +52,8 @@ export function DocumentsView({ basePath }: { basePath: string }) {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Chunking</TableHead>
+              <TableHead>Chunks</TableHead>
               <TableHead>Version</TableHead>
               <TableHead>Size</TableHead>
               <TableHead>Uploaded</TableHead>
@@ -64,10 +67,27 @@ export function DocumentsView({ basePath }: { basePath: string }) {
                   <Link href={`${basePath}/${doc.id}`} className="font-medium hover:underline">
                     {doc.file_name}
                   </Link>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {doc.source_id && doc.source_type !== "upload" && (
+                      <Link href={`/${basePath.split("/")[1]}/knowledge-sources/${doc.source_id}`}>
+                        <Badge variant="outline">{doc.source_name ?? doc.source_type}</Badge>
+                      </Link>
+                    )}
+                    {doc.visibility === "restricted" && <Badge variant="outline">admins only</Badge>}
+                    {doc.document_type && <Badge variant="secondary">{doc.document_type}</Badge>}
+                    {doc.category && <Badge variant="secondary">{doc.category}</Badge>}
+                    {(doc.tags ?? []).map((tag) => (
+                      <Badge key={tag} variant="outline">#{tag}</Badge>
+                    ))}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <StatusBadge status={doc.status} />
                 </TableCell>
+                <TableCell>
+                  <ChunkingBadge chunking={doc.chunking} />
+                </TableCell>
+                <TableCell className="text-neutral-500">{doc.chunk_count}</TableCell>
                 <TableCell>
                   {doc.is_current ? (
                     <Badge variant="success">current</Badge>

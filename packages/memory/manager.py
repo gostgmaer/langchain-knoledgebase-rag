@@ -24,12 +24,12 @@ This class does NOT know anything about:
 
 from __future__ import annotations
 
-import asyncio
-from collections import defaultdict
 from uuid import UUID
 
 from langchain_core.messages import BaseMessage
+from redis.asyncio import Redis
 
+from packages.config.loader import settings
 from packages.memory.extractor import MemoryExtractor
 from packages.memory.retrieval import MemoryRetriever
 from packages.memory.schemas import (
@@ -44,18 +44,31 @@ from packages.memory.store import MemoryStore
 from packages.memory.summarizer import MemorySummarizer
 
 # `MemoryManager` is a per-call `providers.Factory` (see
-# packages/infrastructure/container/graph.py's own comment on why), so
-# a lock stored as an instance attribute wouldn't serialize anything —
-# a fresh instance, and a fresh lock, is constructed every call. This
-# is process-wide on purpose: summarize()'s check-then-act (below)
-# raced for real once memory extraction moved out of the blocking
-# graph path into a background task (packages/api/routers/chat.py) —
-# two turns close together in the same conversation could both see "no
-# summary yet" and both INSERT one, corrupting the one-summary-per-
-# conversation invariant permanently (every later fetch then raises
-# `MultipleResultsFound`). Keyed by conversation_id so unrelated
-# conversations still summarize fully in parallel.
-_summary_locks: dict[UUID, asyncio.Lock] = defaultdict(asyncio.Lock)
+# packages/infrastructure/container/graph.py's own comment on why), so a
+# lock stored as an instance attribute wouldn't serialize anything — a
+# fresh instance is constructed every call. summarize()'s check-then-act
+# (below) raced for real once memory extraction moved out of the blocking
+# graph path into a background task (packages/api/routers/chat.py) — two
+# turns close together in the same conversation could both see "no summary
+# yet" and both INSERT one, corrupting the one-summary-per-conversation
+# invariant permanently (every later fetch then raises
+# `MultipleResultsFound`).
+#
+# Backed by Redis (docs/BUGS.md item 2), not an in-process `asyncio.Lock` —
+# the previous `dict[UUID, asyncio.Lock]` only serialized turns handled by
+# the *same* API replica; under >1 replica, two turns racing on different
+# processes each got their own, unrelated lock object and the race this
+# was built to close reopened silently. `Redis.lock()` is a real
+# distributed lock (SET NX PX + a token, so only the holder can release
+# it), shared by every replica. Module-level, same idiom as
+# packages/api/middleware/rate_limit.py's Redis client.
+_redis = Redis.from_url(str(settings.redis.url), encoding="utf-8", decode_responses=True)
+
+
+async def close_memory_lock_redis() -> None:
+    """Closes the module-level Redis client — call from lifespan's shutdown."""
+
+    await _redis.aclose()
 
 
 class MemoryManager:
@@ -167,7 +180,7 @@ class MemoryManager:
             messages=messages,
         )
 
-        async with _summary_locks[conversation_id]:
+        async with _redis.lock(f"summary_lock:{conversation_id}", timeout=30):
             existing = await self._store.get_by_conversation_and_type(
                 conversation_id,
                 MemoryType.SUMMARY,

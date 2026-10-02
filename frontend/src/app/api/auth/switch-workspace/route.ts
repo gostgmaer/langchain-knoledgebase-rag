@@ -1,9 +1,10 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { ACCESS_COOKIE, setAuthCookies } from "@/lib/auth/cookies";
+import { ACCESS_COOKIE, DISPLAY_NAME_COOKIE, setAuthCookies, setDisplayNameCookie } from "@/lib/auth/cookies";
 import {
   decodeAccessToken,
+  fetchDisplayName,
   GatewayError,
   gatewayJson,
   sessionFromClaims,
@@ -38,7 +39,18 @@ export async function POST(request: Request) {
     }
 
     setAuthCookies(cookieStore, tokens);
-    return NextResponse.json({ user: sessionFromClaims(decodeAccessToken(tokens.accessToken)) });
+
+    const session = sessionFromClaims(decodeAccessToken(tokens.accessToken));
+    // Same person, just a different tenant-scoped token — their name didn't change, so reuse the
+    // already-cached cookie rather than paying for another /auth/me round trip.
+    const cachedDisplayName = cookieStore.get(DISPLAY_NAME_COOKIE)?.value;
+    const displayName = cachedDisplayName ?? (await fetchDisplayName(tokens.accessToken));
+    if (displayName) {
+      session.displayName = displayName;
+      if (!cachedDisplayName) setDisplayNameCookie(cookieStore, displayName, tokens.accessExpiresIn ?? 15 * 60);
+    }
+
+    return NextResponse.json({ user: session });
   } catch (error) {
     const status = error instanceof GatewayError ? error.status : 502;
     const message = error instanceof GatewayError ? error.message : "Could not switch workspace.";

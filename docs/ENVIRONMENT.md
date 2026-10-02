@@ -144,6 +144,17 @@ The API verifies each request by sending the caller's bearer token to IAM (`GET 
 | `RAG_MIN_RELEVANCE_SCORE` | `0.0` | Cutoff on the reranker's raw score (can be negative). The top chunk is always kept so answers are never left without a citation; lower-ranked chunks below the cutoff are dropped. |
 | `REINDEX_STALE_AFTER_DAYS` | `90` | The weekly job re-embeds current documents not indexed in this many days. |
 
+### 3.4a Knowledge sources (external connectors)
+
+| Variable | Default | Description |
+|---|---|---|
+| `CONNECTOR_CREDENTIAL_KEYS` | unset | **Required to store any credential.** Fernet key(s), comma separated; the first encrypts, every key decrypts. Generate one: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Rotate by putting a new key first, then re-saving or rotating credentials, then removing the old key. Losing every key makes stored credentials unreadable (they must be re-entered). Never commit it. |
+| `CONNECTOR_ALLOW_PRIVATE_HOSTS` | `false` | Lets connectors call private-network addresses (an intranet Confluence, a docs site on your network). **Off by default: it is the guard against a source URL reaching the platform's own network or cloud metadata (SSRF).** Turn on only if your sources genuinely live on a private network. |
+| `CONNECTOR_SYNC_CONCURRENCY` | `4` | Documents processed in parallel within one sync (1-16). Each runs in its own transaction. |
+| `CONNECTOR_MAX_ERROR_DETAILS` | `100` | Failed documents listed in a sync run's error detail (counts are always exact). |
+| `CONNECTOR_RENDER_URL` | unset | Base URL of a headless-rendering service (Browserless-compatible `/content` endpoint) used when a web source has "Render JavaScript" turned on. Unset means that option is rejected at save time. See `docs/KNOWLEDGE_SOURCES.md`, "JavaScript-rendered pages". |
+| `CONNECTOR_RENDER_TOKEN` | unset | Bearer token sent to `CONNECTOR_RENDER_URL`, if the rendering service requires one. |
+
 ### 3.5 LLM and embeddings
 
 | Variable | Default | Description |

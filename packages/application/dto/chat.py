@@ -1,6 +1,7 @@
 # Empty file
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -24,6 +25,14 @@ class CitationDTO(BaseModel):
     chunk_id: UUID
     chunk_index: int
     score: float
+    label: str | None = None
+    document_name: str | None = None
+    page_number: int | None = None
+    section: str | None = None
+    source_type: str | None = None
+    source_name: str | None = None
+    url: str | None = None
+    updated_at: datetime | None = None
 
 
 class PendingToolCallDTO(BaseModel):

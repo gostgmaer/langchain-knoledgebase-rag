@@ -4,8 +4,8 @@ packages/graph/nodes/writer.py
 
 from __future__ import annotations
 
-from packages.chat.chat_service import ChatService
-from packages.chat.request import ChatRequest
+from packages.chat.chat_service import LLMChatService
+from packages.chat.request import LLMChatRequest
 from packages.graph.state import GraphState
 from packages.prompts.builder import PromptBuilder
 from packages.shared.messages import normalize_message_content, sanitize_tool_call_args
@@ -28,7 +28,7 @@ class WriterNode:
 
     def __init__(
         self,
-        chat_service: ChatService,
+        chat_service: LLMChatService,
         prompt_builder: PromptBuilder,
     ) -> None:
         self._chat = chat_service
@@ -62,7 +62,7 @@ class WriterNode:
             messages=state["messages"],
         )
 
-        request = ChatRequest(
+        request = LLMChatRequest(
             conversation_id=state["conversation_id"],
             messages=prompt,
             tools=[],

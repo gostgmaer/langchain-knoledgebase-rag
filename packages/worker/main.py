@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from arq import cron, run_worker
+from arq import cron, func, run_worker
 from arq.connections import RedisSettings as ArqRedisSettings
 
 from packages.config.loader import settings
@@ -14,8 +14,12 @@ from packages.worker.jobs import (
     cleanup_stale_upload_jobs_job,
     expire_stale_conversations_job,
     ingest_document_job,
+    purge_expired_logs_job,
     recover_stuck_conversations_job,
+    reindex_document_job,
     reindex_stale_documents_job,
+    schedule_source_syncs_job,
+    source_sync_job,
 )
 
 logger = get_logger(__name__)
@@ -71,6 +75,11 @@ class WorkerSettings:
         cleanup_stale_upload_jobs_job,
         reindex_stale_documents_job,
         recover_stuck_conversations_job,
+        purge_expired_logs_job,
+        reindex_document_job,
+        # A sync can legitimately run for a long time and handles its own per-document retries, so it gets a long
+        # timeout and a single arq attempt; a crashed run is failed by the scheduler's reaper and re-queued.
+        func(source_sync_job, timeout=6 * 3600, max_tries=1),
     ]
 
     cron_jobs = [
@@ -86,6 +95,10 @@ class WorkerSettings:
         # Scheduled Re-indexing (docs/mvpRAG.md v1.1) — weekly, Sunday
         # (weekday=6) at 4am, well clear of the daily sweeps above.
         cron(reindex_stale_documents_job, weekday=6, hour=4, minute=0),
+        # Retention: drop retrieval logs / audit events past their configured window.
+        cron(purge_expired_logs_job, hour=5, minute=0),
+        # Knowledge sources: queue due scheduled syncs every minute.
+        cron(schedule_source_syncs_job, minute=set(range(60)), run_at_startup=False),
         # Durable Execution (docs/mvpRAG.md v2.0) — every 5 minutes,
         # not daily like the sweeps above: this is about detecting a
         # crashed turn promptly, not a nightly cleanup. arq's cron has
@@ -101,6 +114,17 @@ class WorkerSettings:
 
     max_jobs = settings.queue.concurrency
     max_tries = settings.queue.max_retries
+
+    # arq's own built-in mechanism (a Redis key it refreshes on every
+    # poll cycle) for `docker/Dockerfile.worker`'s HEALTHCHECK
+    # (`arq packages.worker.main.WorkerSettings --check`, docs/BUGS.md
+    # item 21) — 60s rather than arq's 3600s default, so a hung (not
+    # crashed) worker is detected on a timescale Docker's own
+    # healthcheck polling can actually act on. A fully crashed process
+    # already triggers `restart: unless-stopped` on its own (this
+    # container's only process is the worker, PID 1) — this specifically
+    # catches "still running, silently stuck."
+    health_check_interval = 60
 
     on_startup = _on_startup
     on_shutdown = _on_shutdown

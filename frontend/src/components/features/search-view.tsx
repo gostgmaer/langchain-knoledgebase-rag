@@ -14,12 +14,28 @@ import { useSearch } from "@/hooks/use-api";
 
 export function SearchView() {
   const [query, setQuery] = useState("");
+  const [documentType, setDocumentType] = useState("");
+  const [category, setCategory] = useState("");
+  const [tags, setTags] = useState("");
+  const [sources, setSources] = useState("");
   const runSearch = useSearch();
+
+  function request() {
+    const list = (value: string) => value.split(",").map((s) => s.trim()).filter(Boolean);
+    return {
+      query: query.trim(),
+      limit: 10,
+      document_types: list(documentType),
+      categories: list(category),
+      tags: list(tags),
+      sources: list(sources),
+    };
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
-    runSearch.mutate({ query: query.trim(), limit: 10 });
+    runSearch.mutate(request());
   }
 
   return (
@@ -41,11 +57,20 @@ export function SearchView() {
         </Button>
       </form>
 
+      <div className="mb-6 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+        <span>Filter by</span>
+        <Input className="h-8 w-36 text-xs" placeholder="type, e.g. policy" value={documentType} onChange={(e) => setDocumentType(e.target.value)} />
+        <Input className="h-8 w-36 text-xs" placeholder="category, e.g. hr" value={category} onChange={(e) => setCategory(e.target.value)} />
+        <Input className="h-8 w-40 text-xs" placeholder="tags (all required)" value={tags} onChange={(e) => setTags(e.target.value)} />
+        <Input className="h-8 w-48 text-xs" placeholder="sources: confluence, web, upload" value={sources} onChange={(e) => setSources(e.target.value)} />
+        <span className="text-neutral-400">Comma-separated. Applied inside the search, not afterwards.</span>
+      </div>
+
       {runSearch.isError && (
         <QueryError
           error={runSearch.error}
           message="The search failed."
-          onRetry={() => runSearch.mutate({ query: query.trim(), limit: 10 })}
+          onRetry={() => runSearch.mutate(request())}
         />
       )}
 
@@ -58,8 +83,11 @@ export function SearchView() {
           <Card key={`${result.chunk_id}-${i}`}>
             <CardContent className="pt-5">
               <div className="mb-2 flex items-center justify-between">
-                <Badge variant="secondary">score {result.score.toFixed(3)}</Badge>
-                <span className="text-xs text-neutral-400">chunk #{result.chunk_index}</span>
+                <span className="text-sm font-medium">{result.document_name}</span>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">score {result.score.toFixed(3)}</Badge>
+                  <span className="text-xs text-neutral-400">chunk #{result.chunk_index}</span>
+                </div>
               </div>
               <p className="text-sm text-neutral-700 dark:text-neutral-300">{result.content}</p>
             </CardContent>

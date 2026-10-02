@@ -4,15 +4,18 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, select
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
+    conversation_visible_to,
     DEFAULT_USER_ID,
     get_scoped_container,
     require_uuid_header,
 )
 from packages.api.responses import ApiResponse
 from packages.api.schemas.conversation import (
+    MessageSourceSchema,
     ConversationCreateSchema,
     ConversationHistoryResponseSchema,
     ConversationResponseSchema,
@@ -24,6 +27,9 @@ from packages.conversation.bootstrap import (
 )
 from packages.domain.enums.conversation_status import ConversationStatus
 from packages.domain.models.conversation import Conversation
+from packages.domain.models.document import Document
+from packages.domain.models.document_chunk import DocumentChunk
+from packages.domain.models.message_citation import MessageCitation
 from packages.infrastructure.container import ApplicationContainer
 
 router = APIRouter(
@@ -93,7 +99,9 @@ async def get_conversation(
 
     conversation = await conversations.get(conversation_id)
 
-    if conversation is None or conversation.tenant_id != tenant_id:
+    if conversation is None or not conversation_visible_to(
+        conversation, tenant_id, getattr(request.state, "current_user", None)
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found.",
@@ -103,6 +111,47 @@ async def get_conversation(
         message="Conversation retrieved.",
         data=ConversationResponseSchema.model_validate(conversation),
     )
+
+
+async def _with_sources(container: ApplicationContainer, history) -> list[MessageResponseSchema]:
+    """Messages plus the customer-visible sources (label, document, page, section) of each answer."""
+    ids = [m.id for m in history]
+    by_message: dict[UUID, list[MessageSourceSchema]] = {}
+
+    if ids:
+        rows = (
+            await container.database.session().execute(
+                select(
+                    MessageCitation.message_id,
+                    MessageCitation.rank,
+                    func.coalesce(MessageCitation.document_name, Document.file_name),
+                    func.coalesce(MessageCitation.page_number, DocumentChunk.page_number),
+                    func.coalesce(MessageCitation.section, DocumentChunk.section),
+                    MessageCitation.source_type,
+                    MessageCitation.source_name,
+                    MessageCitation.canonical_url,
+                    MessageCitation.external_updated_at,
+                )
+                .join(Document, Document.id == MessageCitation.document_id, isouter=True)
+                .join(DocumentChunk, DocumentChunk.id == MessageCitation.chunk_id, isouter=True)
+                .where(MessageCitation.message_id.in_(ids))
+                .order_by(MessageCitation.rank)
+            )
+        ).all()
+        for message_id, rank, name, page, section, source_type, source_name, url, updated in rows:
+            by_message.setdefault(message_id, []).append(
+                MessageSourceSchema(
+                    label=f"[{rank}]", document_name=name, page_number=page, section=section,
+                    source_type=source_type, source_name=source_name, url=url, updated_at=updated,
+                )
+            )
+
+    out = []
+    for message in history:
+        schema = MessageResponseSchema.model_validate(message)
+        schema.sources = by_message.get(message.id, [])
+        out.append(schema)
+    return out
 
 
 @router.get(
@@ -142,7 +191,9 @@ async def get_conversation_history(
     # leak whether a given conversation_id is real to a caller who doesn't
     # own it, and auto-creating under an ID someone else already has isn't
     # possible anyway.
-    if conversation is not None and conversation.tenant_id != tenant_id:
+    if conversation is not None and not conversation_visible_to(
+        conversation, tenant_id, getattr(request.state, "current_user", None)
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found.",
@@ -182,9 +233,6 @@ async def get_conversation_history(
             total=total,
             limit=limit,
             offset=offset,
-            messages=[
-                MessageResponseSchema.model_validate(message)
-                for message in history
-            ],
+            messages=await _with_sources(container, history),
         ),
     )

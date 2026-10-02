@@ -12,15 +12,25 @@ import {
   feedback,
   health,
   knowledgeBases,
+  knowledgeSources,
   modelProfiles,
+  observability,
   prompts,
+  retrievalLogs,
+  retrievalSettings,
   search,
+  tenants,
   tools,
   uploadJobs,
   usage,
 } from "@/lib/api/resources";
 import type {
-  ChunkingStrategy,
+  CreateSourceRequest,
+  DocumentUpdate,
+  IdentityMapping,
+  UpdateSourceRequest,
+  RetrievalSettingsUpdate,
+  DocumentUploadOptions,
   CreateAgentRequest,
   CreateFeatureFlagRequest,
   CreateKnowledgeBaseRequest,
@@ -49,6 +59,30 @@ export function useHealth() {
     queryFn: () => health.get(identity!),
     enabled: !!identity,
     refetchInterval: 30_000,
+  });
+}
+
+// ---------------------------------------------------------------
+// Tenants
+// ---------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolves a tenant's real name/slug from IAM. `tenantId` is independent of
+ * the caller's own session tenant (e.g. an admin previewing a different
+ * tenant before switching to it) — only gated on looking like a real UUID,
+ * so it doesn't fire on every keystroke while one's being typed/edited.
+ */
+export function useTenant(tenantId: string | null | undefined) {
+  const identity = useIdentity();
+  const valid = !!tenantId && UUID_RE.test(tenantId);
+  return useQuery({
+    queryKey: ["tenant", tenantId],
+    queryFn: () => tenants.get(identity!, tenantId!),
+    enabled: !!identity && valid,
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 }
 
@@ -90,12 +124,22 @@ export function useSendChat() {
 // Documents
 // ---------------------------------------------------------------
 
-export function useDocuments() {
+export function useDocuments(knowledgeBaseId?: string) {
   const identity = useIdentity();
   return useQuery({
-    queryKey: ["documents", identity?.tenantId],
-    queryFn: () => documents.list(identity!),
+    queryKey: ["documents", identity?.tenantId, knowledgeBaseId ?? null],
+    queryFn: () => documents.list(identity!, knowledgeBaseId),
     enabled: !!identity,
+  });
+}
+
+export function useDocumentChunks(id: string | null, limit: number, offset: number) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["document-chunks", identity?.tenantId, id, limit, offset],
+    queryFn: () => documents.chunks(identity!, id!, limit, offset),
+    enabled: !!identity && !!id,
+    placeholderData: (previous) => previous,
   });
 }
 
@@ -121,9 +165,61 @@ export function useUploadDocument() {
   const identity = useIdentity();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ file, chunkingStrategy }: { file: File; chunkingStrategy?: ChunkingStrategy }) =>
-      documents.upload(identity!, file, chunkingStrategy),
+    mutationFn: ({ file, options }: { file: File; options?: DocumentUploadOptions }) =>
+      documents.upload(identity!, file, options),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["documents", identity?.tenantId] }),
+  });
+}
+
+export function useReindexDocument(id: string) {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => documents.reindex(identity!, id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["document", identity?.tenantId, id] }),
+  });
+}
+
+export function useReindexOutdated() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => documents.reindexOutdated(identity!),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["documents", identity?.tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["observability-summary", identity?.tenantId] });
+    },
+  });
+}
+
+export function useRetrievalSettings() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["retrieval-settings", identity?.tenantId],
+    queryFn: () => retrievalSettings.get(identity!),
+    enabled: !!identity,
+  });
+}
+
+export function useSaveRetrievalSettings() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RetrievalSettingsUpdate) => retrievalSettings.save(identity!, body),
+    onSuccess: (data) => queryClient.setQueryData(["retrieval-settings", identity?.tenantId], data),
+  });
+}
+
+export function useUpdateDocument(id: string) {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: DocumentUpdate) => documents.update(identity!, id, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["documents", identity?.tenantId] });
+      void queryClient.invalidateQueries({ queryKey: ["document", identity?.tenantId, id] });
+      void queryClient.invalidateQueries({ queryKey: ["observability-audit", identity?.tenantId] });
+    },
   });
 }
 
@@ -393,5 +489,250 @@ export function useToggleFeatureFlag() {
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
       featureFlags.toggle(identity!, id, enabled),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["feature-flags", identity?.tenantId] }),
+  });
+}
+
+// ---------------------------------------------------------------
+// Retrieval logs & observability
+// ---------------------------------------------------------------
+
+export function useRetrievalLogs(limit: number, offset: number) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["retrieval-logs", identity?.tenantId, limit, offset],
+    queryFn: () => retrievalLogs.list(identity!, limit, offset),
+    enabled: !!identity,
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useRetrievalLog(id: string | null) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["retrieval-log", identity?.tenantId, id],
+    queryFn: () => retrievalLogs.get(identity!, id!),
+    enabled: !!identity && !!id,
+  });
+}
+
+export function useObservabilitySummary(days: number) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["observability-summary", identity?.tenantId, days],
+    queryFn: () => observability.summary(identity!, days),
+    enabled: !!identity,
+  });
+}
+
+export function useTopDocuments(days: number) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["observability-top-documents", identity?.tenantId, days],
+    queryFn: () => observability.topDocuments(identity!, days),
+    enabled: !!identity,
+  });
+}
+
+export function useAuditEvents(limit: number, offset: number) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["observability-audit", identity?.tenantId, limit, offset],
+    queryFn: () => observability.audit(identity!, limit, offset),
+    enabled: !!identity,
+    placeholderData: (previous) => previous,
+  });
+}
+
+// ---------------------------------------------------------------
+// Knowledge sources
+// ---------------------------------------------------------------
+
+/** Sources being synced refresh themselves; everything else is fetched on demand. */
+const SOURCE_POLL_MS = 4000;
+
+export function useSourceTypes() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["source-types", identity?.tenantId],
+    queryFn: () => knowledgeSources.types(identity!),
+    enabled: !!identity,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useSourcesSummary() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["sources-summary", identity?.tenantId],
+    queryFn: () => knowledgeSources.summary(identity!),
+    enabled: !!identity,
+    refetchInterval: SOURCE_POLL_MS * 3,
+  });
+}
+
+export function useKnowledgeSources() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["knowledge-sources", identity?.tenantId],
+    queryFn: () => knowledgeSources.list(identity!),
+    enabled: !!identity,
+    refetchInterval: SOURCE_POLL_MS * 2,
+  });
+}
+
+export function useKnowledgeSource(id: string | null) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["knowledge-source", identity?.tenantId, id],
+    queryFn: () => knowledgeSources.get(identity!, id!),
+    enabled: !!identity && !!id,
+    refetchInterval: SOURCE_POLL_MS * 2,
+  });
+}
+
+export function useSourceRuns(id: string, limit: number, offset: number) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["source-runs", identity?.tenantId, id, limit, offset],
+    queryFn: () => knowledgeSources.runs(identity!, id, limit, offset),
+    enabled: !!identity,
+    placeholderData: (previous) => previous,
+    // Poll while anything is still running so progress shows without a manual refresh.
+    refetchInterval: (query) =>
+      query.state.data?.runs.some((r) => r.status === "queued" || r.status === "running") ? SOURCE_POLL_MS : false,
+  });
+}
+
+export function useSourceRun(id: string, runId: string | null) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["source-run", identity?.tenantId, id, runId],
+    queryFn: () => knowledgeSources.run(identity!, id, runId!),
+    enabled: !!identity && !!runId,
+    refetchInterval: (query) =>
+      query.state.data && (query.state.data.status === "queued" || query.state.data.status === "running") ? SOURCE_POLL_MS : false,
+  });
+}
+
+export function useSourceDocuments(id: string, limit: number, offset: number, status: string, q: string) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["source-documents", identity?.tenantId, id, limit, offset, status, q],
+    queryFn: () => knowledgeSources.documents(identity!, id, limit, offset, status, q),
+    enabled: !!identity,
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useSourceHealth(id: string) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["source-health", identity?.tenantId, id],
+    queryFn: () => knowledgeSources.health(identity!, id),
+    enabled: !!identity,
+    refetchInterval: SOURCE_POLL_MS * 3,
+  });
+}
+
+export function useSourcePermissions(id: string) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["source-permissions", identity?.tenantId, id],
+    queryFn: () => knowledgeSources.permissions(identity!, id),
+    enabled: !!identity,
+  });
+}
+
+export function useIdentityMappings(provider: string) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["identity-mappings", identity?.tenantId, provider],
+    queryFn: () => knowledgeSources.mappings(identity!, provider),
+    enabled: !!identity,
+  });
+}
+
+function useSourceInvalidation() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return () => {
+    for (const key of ["knowledge-sources", "knowledge-source", "sources-summary", "source-runs", "source-run", "source-documents", "source-health", "source-permissions", "documents"]) {
+      void queryClient.invalidateQueries({ queryKey: [key, identity?.tenantId] });
+    }
+  };
+}
+
+export function useCreateSource() {
+  const identity = useIdentity();
+  const invalidate = useSourceInvalidation();
+  return useMutation({
+    mutationFn: (body: CreateSourceRequest) => knowledgeSources.create(identity!, body),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateSource(id: string) {
+  const identity = useIdentity();
+  const invalidate = useSourceInvalidation();
+  return useMutation({
+    mutationFn: (body: UpdateSourceRequest) => knowledgeSources.update(identity!, id, body),
+    onSuccess: invalidate,
+  });
+}
+
+/** Actions on one source that change what the pages show. */
+export function useSourceAction(id: string) {
+  const identity = useIdentity();
+  const invalidate = useSourceInvalidation();
+  const run = (fn: () => Promise<unknown>) => async () => {
+    const result = await fn();
+    invalidate();
+    return result;
+  };
+  return {
+    sync: useMutation({ mutationFn: (activate: boolean) => knowledgeSources.sync(identity!, id, activate), onSuccess: invalidate }),
+    cancel: useMutation({ mutationFn: run(() => knowledgeSources.cancel(identity!, id)) }),
+    pause: useMutation({ mutationFn: run(() => knowledgeSources.pause(identity!, id)) }),
+    resume: useMutation({ mutationFn: run(() => knowledgeSources.resume(identity!, id)) }),
+    remove: useMutation({ mutationFn: run(() => knowledgeSources.remove(identity!, id)) }),
+    testSaved: useMutation({ mutationFn: () => knowledgeSources.testSaved(identity!, id), onSuccess: invalidate }),
+    preview: useMutation({ mutationFn: (limit: number) => knowledgeSources.preview(identity!, id, limit) }),
+    setCredentials: useMutation({ mutationFn: (credentials: Record<string, unknown>) => knowledgeSources.setCredentials(identity!, id, credentials), onSuccess: invalidate }),
+    revokeCredentials: useMutation({ mutationFn: () => knowledgeSources.revokeCredentials(identity!, id), onSuccess: invalidate }),
+    retryDocument: useMutation({ mutationFn: (recordId: string) => knowledgeSources.retryDocument(identity!, id, recordId), onSuccess: invalidate }),
+  };
+}
+
+export function useTestUnsavedSource() {
+  const identity = useIdentity();
+  return useMutation({
+    mutationFn: (body: { type: string; configuration: Record<string, unknown>; credentials?: Record<string, unknown> | null }) =>
+      knowledgeSources.testUnsaved(identity!, body),
+  });
+}
+
+export function useSaveMapping() {
+  const identity = useIdentity();
+  const invalidate = useSourceInvalidation();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: IdentityMapping) => knowledgeSources.saveMapping(identity!, body),
+    onSuccess: () => {
+      invalidate();
+      void queryClient.invalidateQueries({ queryKey: ["identity-mappings", identity?.tenantId] });
+    },
+  });
+}
+
+export function useDeleteMapping() {
+  const identity = useIdentity();
+  const invalidate = useSourceInvalidation();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => knowledgeSources.deleteMapping(identity!, id),
+    onSuccess: () => {
+      invalidate();
+      void queryClient.invalidateQueries({ queryKey: ["identity-mappings", identity?.tenantId] });
+    },
   });
 }

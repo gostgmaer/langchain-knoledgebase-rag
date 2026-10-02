@@ -81,7 +81,7 @@ if [ -n "$UTOK" ]; then
   MA="Authorization: Bearer $UTOK"
   chk "member cannot create a feature flag" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/feature-flags -H "$MA" -H 'Content-Type: application/json' -d '{"key":"e2e_probe","enabled":false}')" 403
   chk "member cannot create a knowledge base" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/knowledge-bases -H "$MA" -H 'Content-Type: application/json' -d '{"name":"e2e-probe"}')" 403
-  for ep in feature-flags analytics/summary usage feedback model-profiles documents agents; do
+  for ep in feature-flags analytics/summary usage feedback model-profiles documents agents knowledge-sources knowledge-sources/types knowledge-sources/summary retrieval-settings; do
     chk "member cannot read /$ep" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/$ep -H "$MA")" 403
   done
   T=$(tenant_of_conversation "$UTOK" "$SPOOF")
@@ -111,6 +111,83 @@ echo; echo "== 5b. Chat answers from the uploaded document, with citations"
 CR=$(curl -s -m 170 -X POST $RAG/chat -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"message":"What is the secret launch code for test document '$TS'?","stream":false}')
 echo "$CR" | grep -q "BLUE-HERON-$TS" && ok "answer contains the code from the document" || bad "answer did not contain BLUE-HERON-$TS (LLM overloaded? $(echo "$CR" | head -c 120))"
 NC=$(echo "$CR" | J "x=d.get('data') or d; print(len(x.get('citations') or x.get('sources') or []))"); [ "${NC:-0}" -ge 1 ] && ok "answer has $NC citation(s)" || bad "no citations"
+
+echo; echo "== 5c. Provenance, retrieval log and observability"
+DOCID=$(curl -s "$RAG/documents?limit=200" -H "Authorization: Bearer $ATOK" | J "print(next((x['id'] for x in (d.get('data') or {}).get('documents',[]) if x['file_name']=='e2e_doc_$TS.txt'),''))")
+if [ -n "$DOCID" ]; then
+  CH=$(curl -s "$RAG/documents/$DOCID/chunks?limit=5" -H "Authorization: Bearer $ATOK")
+  echo "$CH" | J "c=[x for x in (d.get('data') or {}).get('chunks',[]) if x['kind']=='chunk']; print('yes' if c and c[0]['content_hash'] and c[0]['embedding_model'] and c[0]['pipeline_version'] and c[0]['indexed_at'] else 'no')" | grep -q yes && ok "chunks carry hash, embedding model, pipeline version and index time" || bad "chunk provenance missing"
+  curl -s "$RAG/documents/$DOCID" -H "Authorization: Bearer $ATOK" | J "x=d.get('data') or {}; print('yes' if x.get('processing_stage')=='completed' and x.get('uploaded_by') and x.get('chunking') else 'no')" | grep -q yes && ok "document records uploader, stage and chunking" || bad "document provenance missing"
+else bad "could not find the uploaded document"; fi
+RID=$(curl -s "$RAG/retrieval-logs?limit=1" -H "Authorization: Bearer $ATOK" | J "r=(d.get('data') or {}).get('retrievals',[]); print(r[0]['retrieval_id'] if r else '')")
+if [ -n "$RID" ]; then
+  ok "retrieval was logged ($RID)"
+  curl -s "$RAG/retrieval-logs/$RID" -H "Authorization: Bearer $ATOK" | J "x=d.get('data') or {}; r=x.get('results',[]); print('yes' if r and any(i['selected_for_context'] for i in r) and x.get('query_hash') and 'query' not in x else 'no')" | grep -q yes && ok "retrieval log explains candidates and stores a query hash, not the query" || bad "retrieval log incomplete"
+else bad "no retrieval was logged"; fi
+chk "observability summary" "$(curl -s -o /dev/null -w '%{http_code}' "$RAG/observability/summary" -H "Authorization: Bearer $ATOK")" 200
+chk "audit trail" "$(curl -s -o /dev/null -w '%{http_code}' "$RAG/observability/audit" -H "Authorization: Bearer $ATOK")" 200
+if [ -n "${MA:-}" ]; then
+  for ep in retrieval-logs observability/summary observability/audit; do
+    chk "member cannot read /$ep" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/$ep -H "$MA")" 403
+  done
+fi
+
+echo; echo "== 5d. Access control: restricted documents, metadata filters, conversation ownership"
+RF="$TMPD/e2e_restricted_$TS.txt"
+printf 'Restricted memo %s. The board acquisition codename is PURPLE-OTTER-%s and must stay confidential.\n' "$TS" "$TS" > "$RF"
+RJ=$(curl -s -m 60 -X POST "$RAG/documents?visibility=restricted&document_type=memo&category=board&tags=confidential,q3" -H "Authorization: Bearer $ATOK" -F "file=@$RF;type=text/plain" | J "print((d.get('data') or {}).get('upload_job_id',''))")
+if [ -n "$RJ" ]; then
+  S=""; for i in $(seq 1 40); do S=$(curl -s $RAG/upload-jobs/$RJ -H "Authorization: Bearer $ATOK" | J "print((d.get('data') or {}).get('status',''))"); case "$S" in SUCCEEDED|FAILED) break;; esac; sleep 5; done
+  [ "$S" = SUCCEEDED ] && ok "restricted document ingested" || bad "restricted document ingestion ended as '$S'"
+fi
+RDID=$(curl -s "$RAG/documents?limit=200" -H "Authorization: Bearer $ATOK" | J "print(next((x['id'] for x in (d.get('data') or {}).get('documents',[]) if x['file_name']=='e2e_restricted_$TS.txt'),''))")
+Q="{\"query\":\"board acquisition codename PURPLE-OTTER-$TS\",\"limit\":10"
+found(){ curl -s -m 90 -X POST $RAG/search -H "$1" -H 'Content-Type: application/json' -d "$2" | J "print('yes' if any(r['document_id']=='$RDID' for r in (d.get('data') or {}).get('results',[])) else 'no')"; }
+chk "admin retrieves the restricted document" "$(found "Authorization: Bearer $ATOK" "$Q}")" yes
+if [ -n "${MA:-}" ]; then
+  chk "member does NOT retrieve the restricted document" "$(found "$MA" "$Q}")" no
+  chk "member cannot read its chunks" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/documents/$RDID/chunks -H "$MA")" 403
+fi
+chk "metadata filter: matching type finds it" "$(found "Authorization: Bearer $ATOK" "$Q,\"document_types\":[\"memo\"],\"tags\":[\"confidential\"]}")" yes
+chk "metadata filter: other type excludes it" "$(found "Authorization: Bearer $ATOK" "$Q,\"document_types\":[\"policy\"]}")" no
+chk "metadata filter: missing tag excludes it" "$(found "Authorization: Bearer $ATOK" "$Q,\"tags\":[\"confidential\",\"nope\"]}")" no
+chk "admin opens the document to all members" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $RAG/documents/$RDID -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"visibility":"tenant"}')" 200
+[ -n "${MA:-}" ] && chk "member now retrieves it" "$(found "$MA" "$Q}")" yes
+chk "access change is audited" "$(curl -s "$RAG/observability/audit?action=document.access_changed" -H "Authorization: Bearer $ATOK" | J "print('yes' if (d.get('data') or {}).get('events') else 'no')")" yes
+
+CID=$(python -c "import uuid;print(uuid.uuid4())")
+chk "admin starts a conversation" "$(curl -s -o /dev/null -m 120 -w '%{http_code}' -X POST $RAG/chat -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d "{\"message\":\"hello\",\"conversation_id\":\"$CID\",\"stream\":false}")" 200
+if [ -n "${MA:-}" ]; then
+  chk "member cannot read another user's conversation" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/conversations/$CID/messages -H "$MA")" 404
+  chk "member cannot post into another user's conversation" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/chat -H "$MA" -H 'Content-Type: application/json' -d "{\"message\":\"hi\",\"conversation_id\":\"$CID\",\"stream\":false}")" 404
+fi
+chk "owner still reads their conversation" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/conversations/$CID/messages -H "Authorization: Bearer $ATOK")" 200
+
+echo; echo "== 5e. Role grants, retrieval settings, re-index, chat filters"
+if [ -n "${RDID:-}" ]; then
+  chk "restrict the document again" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $RAG/documents/$RDID -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"visibility":"restricted","allowed_roles":[]}')" 200
+  [ -n "${MA:-}" ] && chk "member is locked out again" "$(found "$MA" "$Q}")" no
+  chk "grant the member role" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH $RAG/documents/$RDID -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"allowed_roles":["member"]}')" 200
+  [ -n "${MA:-}" ] && chk "member retrieves it through the role grant" "$(found "$MA" "$Q}")" yes
+  chk "re-index one document is accepted" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/documents/$RDID/reindex -H "Authorization: Bearer $ATOK")" 202
+  sleep 20
+  curl -s "$RAG/documents/$RDID" -H "Authorization: Bearer $ATOK" | J "x=d.get('data') or {}; print('yes' if x.get('processing_stage')=='completed' and x.get('status')=='READY' and x.get('visibility')=='restricted' else 'no')" | grep -q yes && ok "re-indexed document is READY and keeps its access settings" || bad "document not READY after re-index"
+  chk "re-index of the current version is audited" "$(curl -s "$RAG/observability/audit?action=document.reindexed" -H "Authorization: Bearer $ATOK" | J "print('yes' if (d.get('data') or {}).get('events') else 'no')")" yes
+fi
+chk "bulk re-index of outdated documents is accepted" "$(curl -s -o /dev/null -w '%{http_code}' -X POST $RAG/documents/reindex-outdated -H "Authorization: Bearer $ATOK")" 202
+chk "read retrieval settings" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/retrieval-settings -H "Authorization: Bearer $ATOK")" 200
+chk "reject an out-of-range setting" "$(curl -s -o /dev/null -w '%{http_code}' -X PUT $RAG/retrieval-settings -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"max_results":99}')" 422
+chk "save settings (3 results, reranking off)" "$(curl -s -o /dev/null -w '%{http_code}' -X PUT $RAG/retrieval-settings -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"max_results":3,"reranking_enabled":false}')" 200
+[ -n "${MA:-}" ] && chk "member cannot read retrieval settings" "$(curl -s -o /dev/null -w '%{http_code}' $RAG/retrieval-settings -H "$MA")" 403
+sleep 1
+CID2=$(python -c "import uuid;print(uuid.uuid4())")
+curl -s -o /dev/null -m 150 -X POST $RAG/chat -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d "{\"message\":\"What is the secret launch code for test document $TS?\",\"conversation_id\":\"$CID2\",\"stream\":false,\"filters\":{\"document_types\":[\"memo\"]}}"
+curl -s "$RAG/retrieval-logs?limit=1&conversation_id=$CID2" -H "Authorization: Bearer $ATOK" | J "r=(d.get('data') or {}).get('retrievals',[]); print('yes' if r and r[0]['reranking_enabled'] is False and r[0]['top_k']==3 and r[0]['selected_count']<=3 else 'no')" | grep -q yes && ok "chat used the workspace settings (top_k 3, no reranker)" || bad "chat ignored the retrieval settings"
+curl -s "$RAG/retrieval-logs?limit=1&conversation_id=$CID2" -H "Authorization: Bearer $ATOK" | J "r=(d.get('data') or {}).get('retrievals',[]); print(r[0]['retrieval_id'] if r else '')" > "$TMPD/e2e_rid.txt"
+RID2=$(tr -d '\r' < "$TMPD/e2e_rid.txt")
+curl -s "$RAG/retrieval-logs/$RID2" -H "Authorization: Bearer $ATOK" | J "x=d.get('data') or {}; print('yes' if x.get('results') and all(r['chunking_strategy'] is None or True for r in x['results']) and x.get('reranker_model') is None else 'no')" | grep -q yes && ok "retrieval log records that no reranker ran" || bad "retrieval log still lists a reranker"
+chk "reset settings to the defaults" "$(curl -s -o /dev/null -w '%{http_code}' -X PUT $RAG/retrieval-settings -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{}')" 200
+chk "settings changes are audited" "$(curl -s "$RAG/observability/audit?action=retrieval_settings.changed" -H "Authorization: Bearer $ATOK" | J "print('yes' if (d.get('data') or {}).get('events') else 'no')")" yes
 
 echo; echo "== 6. Connected accounts API"
 chk "list connected accounts" "$(curl -s -o /dev/null -w '%{http_code}' $GW/api/auth/social/accounts -H "Authorization: Bearer $ATOK" -H "$O")" 200

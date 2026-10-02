@@ -3,7 +3,7 @@ WriterNode (packages/graph/nodes/writer.py) — output must satisfy the
 same messages/usage/citations contract LLMNode already guarantees, so
 ChatService._finalize_or_pause needs no changes to persist it. Real
 PromptBuilder (pure, deterministic, no external deps); a fake inner
-ChatService in place of a real LLM call.
+LLMChatService in place of a real LLM call.
 """
 
 from __future__ import annotations
@@ -13,15 +13,15 @@ from uuid import uuid4
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from packages.chat.response import ChatResponse
+from packages.chat.response import LLMChatResponse
 from packages.graph.nodes.writer import WriterNode
 from packages.graph.schemas import ResearchFinding
 from packages.knowledge.schemas import Citation
 from packages.prompts.builder import PromptBuilder
 
 
-class _FakeChatService:
-    def __init__(self, response: ChatResponse) -> None:
+class _FakeLLMChatService:
+    def __init__(self, response: LLMChatResponse) -> None:
         self._response = response
         self.received_requests: list = []
 
@@ -56,11 +56,11 @@ def _state() -> dict:
 
 @pytest.mark.asyncio
 async def test_output_satisfies_the_messages_usage_citations_contract():
-    response = ChatResponse(
+    response = LLMChatResponse(
         message=AIMessage(content="A says X is fast; B says X is reliable."),
         usage={"input_tokens": 10, "output_tokens": 5},
     )
-    chat_service = _FakeChatService(response)
+    chat_service = _FakeLLMChatService(response)
     node = WriterNode(chat_service, PromptBuilder())
 
     result = await node(_state())
@@ -72,8 +72,8 @@ async def test_output_satisfies_the_messages_usage_citations_contract():
 
 @pytest.mark.asyncio
 async def test_no_tools_are_bound_for_pure_synthesis():
-    response = ChatResponse(message=AIMessage(content="synthesized"))
-    chat_service = _FakeChatService(response)
+    response = LLMChatResponse(message=AIMessage(content="synthesized"))
+    chat_service = _FakeLLMChatService(response)
     node = WriterNode(chat_service, PromptBuilder())
 
     await node(_state())
@@ -83,8 +83,8 @@ async def test_no_tools_are_bound_for_pure_synthesis():
 
 @pytest.mark.asyncio
 async def test_citations_are_flattened_across_every_finding():
-    response = ChatResponse(message=AIMessage(content="synthesized"))
-    chat_service = _FakeChatService(response)
+    response = LLMChatResponse(message=AIMessage(content="synthesized"))
+    chat_service = _FakeLLMChatService(response)
     node = WriterNode(chat_service, PromptBuilder())
 
     findings = _findings()
@@ -123,8 +123,8 @@ async def test_the_same_chunk_cited_by_two_sub_questions_is_deduped_keeping_the_
         ),
     ]
 
-    response = ChatResponse(message=AIMessage(content="synthesized"))
-    chat_service = _FakeChatService(response)
+    response = LLMChatResponse(message=AIMessage(content="synthesized"))
+    chat_service = _FakeLLMChatService(response)
     node = WriterNode(chat_service, PromptBuilder())
 
     state = _state()

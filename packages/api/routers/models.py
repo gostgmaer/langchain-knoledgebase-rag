@@ -5,7 +5,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from packages.api.dependencies import get_scoped_container, require_admin
+from packages.api.dependencies import get_scoped_container, require_admin, require_permission
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.model_profile import (
     CreateModelProfileRequestSchema,
@@ -28,6 +29,7 @@ router = APIRouter(
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=ApiResponse[ModelProfileResponseSchema],
+    dependencies=[Depends(require_permission(Permission.MODELS_WRITE))],
     summary="Create a model profile",
     description=(
         "Creates a reusable LLM configuration that agents can reference. "
@@ -83,6 +85,7 @@ async def create_model_profile(
     "",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[ModelProfileListResponseSchema],
+    dependencies=[Depends(require_permission(Permission.MODELS_READ))],
     summary="List model profiles",
     description="Lists all model profiles.",
 )
@@ -111,6 +114,7 @@ async def list_model_profiles(
     "/{model_profile_id}",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[ModelProfileResponseSchema],
+    dependencies=[Depends(require_permission(Permission.MODELS_READ))],
     summary="Fetch a model profile",
     description="Fetches a single model profile by ID.",
 )

@@ -18,18 +18,165 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "5"
 
+# The real production secrets mechanism (docs/BUGS.md item 26, secrets/README.md) — each file is
+# one secret's raw value, mounted at /run/secrets/<name> in whichever services list it below;
+# scripts/docker_secrets_entrypoint.sh (each service's entrypoint:) turns every mounted file into
+# a real environment variable before running the service's actual command, so the application
+# code itself needs zero changes. Real values go in secrets/<name>.txt (gitignored) — this repo
+# only ever tracks the *.txt.example placeholders.
+x-app-secrets: &app-secrets
+  - database_url
+  - migration_database_url
+  - app_db_password
+  - redis_url
+  - jwt_secret
+  - iam_client_secret
+  - iam_introspection_api_key
+  - file_upload_hmac_secret
+  - connector_credential_keys
+  - connector_render_token
+  - google_api_key
+  - openai_api_key
+  - anthropic_api_key
+  - groq_api_key
+  - serper_api_key
+  - tavily_api_key
+  - openweather_api_key
+  - newsapi_api_key
+  - upload_service_api_key
+  - langchain_api_key
+
+secrets:
+  database_url:
+    file: ./secrets/database_url.txt
+  migration_database_url:
+    file: ./secrets/migration_database_url.txt
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  app_db_password:
+    file: ./secrets/app_db_password.txt
+  redis_url:
+    file: ./secrets/redis_url.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  iam_client_secret:
+    file: ./secrets/iam_client_secret.txt
+  iam_introspection_api_key:
+    file: ./secrets/iam_introspection_api_key.txt
+  file_upload_hmac_secret:
+    file: ./secrets/file_upload_hmac_secret.txt
+  connector_credential_keys:
+    file: ./secrets/connector_credential_keys.txt
+  connector_render_token:
+    file: ./secrets/connector_render_token.txt
+  google_api_key:
+    file: ./secrets/google_api_key.txt
+  openai_api_key:
+    file: ./secrets/openai_api_key.txt
+  anthropic_api_key:
+    file: ./secrets/anthropic_api_key.txt
+  groq_api_key:
+    file: ./secrets/groq_api_key.txt
+  serper_api_key:
+    file: ./secrets/serper_api_key.txt
+  tavily_api_key:
+    file: ./secrets/tavily_api_key.txt
+  openweather_api_key:
+    file: ./secrets/openweather_api_key.txt
+  newsapi_api_key:
+    file: ./secrets/newsapi_api_key.txt
+  upload_service_api_key:
+    file: ./secrets/upload_service_api_key.txt
+  langchain_api_key:
+    file: ./secrets/langchain_api_key.txt
+
 services:
 
-  api:
+  # One-shot: runs the real Alembic migrations as the table owner, then
+  # creates/updates the restricted `rag_app` role RLS depends on
+  # (docs/DEPLOYMENT.md §4, docs/BUGS.md item 1) — both via
+  # MIGRATION_DATABASE_URL, since `rag_app` itself can't run schema DDL
+  # or create its own role. `api`/`worker` only start once this exits 0,
+  # so a production `docker compose up` enforces RLS by default instead
+  # of it being a manual step someone has to remember to run first.
+  migrate:
     image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
+
+    entrypoint: ["sh", "scripts/docker_secrets_entrypoint.sh"]
+    command: ["sh", "-c", "alembic upgrade head && PYTHONPATH=. python scripts/create_app_role.py"]
+
+    restart: "no"
+
+    env_file:
+      - .env
+
+    secrets: *app-secrets
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    logging: *default-logging
+
+    networks:
+      - backend
+
+  # Zero-downtime deploys (docs/BUGS.md item 9) — Traefik is the only public entrypoint now
+  # (`api_blue`/`api_green` below no longer publish a host port at all), discovering backends via
+  # the Docker provider and routing only to containers whose Docker HEALTHCHECK reports healthy
+  # (built into docker/Dockerfile already, no extra Traefik config needed for that part). Deploy
+  # with `scripts/deploy_blue_green.sh`, not a raw `docker compose up -d` — see that script and
+  # docs/DEPLOYMENT.md §7 for the real mechanism (start the idle color, wait for it to go healthy
+  # so both run briefly side by side, then drain and stop the old one).
+  traefik:
+    image: traefik:v3.2
+
+    restart: always
+
+    command:
+      - --providers.docker=true
+      # Opt-in only (`traefik.enable=true`) — without this, Traefik would also try to route to
+      # postgres/redis/worker/backup/migrate, none of which speak HTTP.
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:8000
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      # Read-only: Traefik only needs to list/inspect containers to discover backends and their
+      # health status, never to create/exec/modify them.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    logging: *default-logging
+
+    networks:
+      - backend
+
+  # api_blue / api_green: two identical replicas of the same logical Traefik service (same
+  # `traefik.http.services.api...` labels on both — Traefik load-balances across every *running*
+  # container that advertises it, which is what makes the brief both-running window during a
+  # deploy work at all). Only one is normally running at a time; scripts/deploy_blue_green.sh
+  # controls which. Neither publishes a host port directly — Traefik is the only public entrypoint.
+  api_blue:
+    image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
+
+    # No command: override — Docker passes the image's own default CMD (uvicorn ...) through as
+    # this entrypoint's args, same as api_blue/api_green always ran, just via the secrets wrapper.
+    entrypoint: ["sh", "scripts/docker_secrets_entrypoint.sh"]
 
     restart: always
 
     env_file:
       - .env
 
-    ports:
-      - "8000:8000"
+    secrets: *app-secrets
+
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.api.rule: "PathPrefix(`/`)"
+      traefik.http.routers.api.entrypoints: "web"
+      traefik.http.services.api.loadbalancer.server.port: "8000"
 
     depends_on:
       postgres:
@@ -37,6 +184,51 @@ services:
 
       redis:
         condition: service_healthy
+
+      migrate:
+        condition: service_completed_successfully
+
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+
+    logging: *default-logging
+
+    networks:
+      - backend
+
+  api_green:
+    image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
+
+    entrypoint: ["sh", "scripts/docker_secrets_entrypoint.sh"]
+
+    restart: always
+
+    env_file:
+      - .env
+
+    secrets: *app-secrets
+
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.api.rule: "PathPrefix(`/`)"
+      traefik.http.routers.api.entrypoints: "web"
+      traefik.http.services.api.loadbalancer.server.port: "8000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
+
+      migrate:
+        condition: service_completed_successfully
 
     deploy:
       resources:
@@ -55,12 +247,18 @@ services:
   worker:
     image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
 
-    command: python -m packages.worker.main
+    entrypoint: ["sh", "scripts/docker_secrets_entrypoint.sh"]
+    # Exec form, not the previous shell-form string — unambiguous once entrypoint: is also set
+    # (Compose would otherwise wrap a shell-form command as its own `/bin/sh -c "..."`, needing a
+    # second shell layer the exec-form array skips entirely).
+    command: ["python", "-m", "packages.worker.main"]
 
     restart: always
 
     env_file:
       - .env
+
+    secrets: *app-secrets
 
     depends_on:
       postgres:
@@ -68,6 +266,9 @@ services:
 
       redis:
         condition: service_healthy
+
+      migrate:
+        condition: service_completed_successfully
 
     deploy:
       resources:
@@ -91,6 +292,14 @@ services:
     env_file:
       - .env
 
+    # The official postgres image natively supports the *_FILE convention — no need for this
+    # service to go through scripts/docker_secrets_entrypoint.sh at all.
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+
+    secrets:
+      - postgres_password
+
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
@@ -111,6 +320,50 @@ services:
     networks:
       - backend
 
+  # Runs scripts/backup_db_scheduled.sh on a real interval (docs/BUGS.md item 3: the scripts
+  # existed and were proven but nothing scheduled them). Same image as `postgres` so the bundled
+  # pg_dump always matches the server's major version exactly, connecting directly over the
+  # `backend` network rather than via a docker-socket mount (pg_dump is read-only; no reason to
+  # hand a backup sidecar that much privilege). Dumps land in the `backups-data` volume — still
+  # on the same host as `postgres-data`, so this does not by itself survive that host's disk
+  # failing; shipping dumps off-host is a separate, real operational decision for wherever this
+  # deploys (docs/DEPLOYMENT.md §5), not something to guess at from this repo alone.
+  backup:
+    image: pgvector/pgvector:pg17
+
+    restart: always
+
+    # backup_db_scheduled.sh reads $POSTGRES_PASSWORD as a plain env var (PGPASSWORD=$POSTGRES_PASSWORD) —
+    # unlike `postgres` above, this image has no native *_FILE support for that, so it goes
+    # through the same secrets wrapper the app-process services use.
+    entrypoint: ["sh", "/scripts/docker_secrets_entrypoint.sh"]
+    command: ["sh", "/scripts/backup_db_scheduled.sh"]
+
+    env_file:
+      - .env
+
+    environment:
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      PGHOST: postgres
+
+    secrets:
+      - postgres_password
+
+    volumes:
+      - ./scripts/backup_db_scheduled.sh:/scripts/backup_db_scheduled.sh:ro
+      - ./scripts/docker_secrets_entrypoint.sh:/scripts/docker_secrets_entrypoint.sh:ro
+      - backups-data:/backups
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    logging: *default-logging
+
+    networks:
+      - backend
+
   redis:
     image: redis:8-alpine
 
@@ -123,6 +376,12 @@ services:
 
     volumes:
       - redis-data:/data
+
+    healthcheck:
+      # api/worker both declare `redis: condition: service_healthy` above —
+      # without this, that dependency condition could never be reported and
+      # `docker compose -f docker-compose.prod.yml up` would fail outright.
+      test: ["CMD", "redis-cli", "ping"]
 
     deploy:
       resources:
@@ -144,3 +403,4 @@ networks:
 volumes:
   postgres-data:
   redis-data:
+  backups-data:

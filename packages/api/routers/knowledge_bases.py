@@ -11,7 +11,9 @@ from packages.api.dependencies import (
     get_scoped_container,
     require_uuid_header,
     require_admin,
+    require_permission,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.kb import (
     CreateKnowledgeBaseRequestSchema,
@@ -46,6 +48,7 @@ async def _to_response(container: ApplicationContainer, kb: KnowledgeBase) -> Kn
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=ApiResponse[KnowledgeBaseResponseSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_BASES_WRITE))],
     summary="Create a knowledge base",
     description=(
         "Creates a new knowledge base for the calling tenant. Embedding/chunking "
@@ -95,6 +98,7 @@ async def create_knowledge_base(
     "",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[KnowledgeBaseListResponseSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_BASES_READ))],
     summary="List knowledge bases",
     description="Lists the calling tenant's knowledge bases, any status.",
 )
@@ -126,6 +130,7 @@ async def list_knowledge_bases(
     "/{knowledge_base_id}",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[KnowledgeBaseResponseSchema],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_BASES_READ))],
     summary="Fetch a knowledge base",
     description="Fetches a single knowledge base's metadata by ID.",
 )
@@ -155,6 +160,7 @@ async def get_knowledge_base(
     "/{knowledge_base_id}",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[None],
+    dependencies=[Depends(require_permission(Permission.KNOWLEDGE_BASES_DELETE))],
     summary="Delete a knowledge base",
     description=(
         "Deletes an EMPTY knowledge base of the calling tenant. One that still has documents "

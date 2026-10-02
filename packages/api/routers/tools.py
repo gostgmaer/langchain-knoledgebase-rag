@@ -10,8 +10,10 @@ from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
     get_scoped_container,
     require_admin,
+    require_permission,
     require_uuid_header,
 )
+from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.tool import (
     CreateToolRequestSchema,
@@ -38,7 +40,7 @@ def _slugify(name: str) -> str:
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=ApiResponse[ToolResponseSchema],
-    dependencies=[Depends(require_admin())],
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.TOOLS_WRITE))],
     summary="Register a tool definition",
     description=(
         "Creates a new tool definition's metadata for the calling tenant. "
@@ -91,6 +93,7 @@ async def create_tool(
     "",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[ToolListResponseSchema],
+    dependencies=[Depends(require_permission(Permission.TOOLS_READ))],
     summary="List tool definitions",
     description="Lists the calling tenant's tool definitions, any status.",
 )
@@ -122,6 +125,7 @@ async def list_tools(
     "/{tool_id}",
     status_code=status.HTTP_200_OK,
     response_model=ApiResponse[ToolResponseSchema],
+    dependencies=[Depends(require_permission(Permission.TOOLS_READ))],
     summary="Fetch a tool definition",
     description="Fetches a single tool definition's metadata by ID.",
 )

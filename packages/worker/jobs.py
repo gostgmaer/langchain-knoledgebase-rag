@@ -10,6 +10,7 @@ from uuid import UUID
 from dependency_injector import providers
 
 from packages.api.dependencies import request_scoped_session
+from packages.application.services.ingestion_audit import audit_ingestion
 from packages.config.loader import settings
 from packages.domain.enums.conversation_status import ConversationStatus
 from packages.infrastructure.container import ApplicationContainer
@@ -112,6 +113,8 @@ async def ingest_document_job(
             if upload_job is not None:
                 await upload_jobs.mark_succeeded(upload_job, response.document_id)
 
+            await audit_ingestion(container.audit(), ingestion_request, response)
+
             return {
                 "document_id": str(response.document_id),
                 "skipped": response.skipped,
@@ -124,13 +127,17 @@ async def ingest_document_job(
             document_name=ingestion_request.document_name,
             error=str(exc),
         )
+        await audit_ingestion(container.audit(), ingestion_request, error=exc)
 
         try:
             async with request_scoped_session(container):
                 upload_jobs = container.repositories.upload_job()
                 upload_job = await upload_jobs.get(job_uuid)
                 if upload_job is not None:
-                    await upload_jobs.mark_failed(upload_job, str(exc))
+                    await upload_jobs.mark_failed(
+                    upload_job,
+                    f"[{getattr(exc, 'ingestion_stage', 'unknown')}] {exc}",
+                )
         except Exception:
             logger.exception("Could not record upload job failure")
 
@@ -138,6 +145,48 @@ async def ingest_document_job(
 
     finally:
         path.unlink(missing_ok=True)
+
+
+async def reindex_document_job(ctx: dict[str, Any], document_id: str, actor_id: str | None = None) -> bool:
+    """Re-embeds one document on request (see POST /documents/{id}/reindex)."""
+    from uuid import UUID
+
+    from packages.application.services.reindex import run_reindex
+
+    container: ApplicationContainer = ctx["container"]
+    return await run_reindex(container, UUID(document_id), UUID(actor_id) if actor_id else None)
+
+
+async def source_sync_job(ctx: dict[str, Any], source_id: str, run_id: str) -> str:
+    """Runs one queued knowledge-source sync. The engine records its own failures; this only raises on infrastructure errors."""
+    from uuid import UUID
+
+    from packages.connectors.sync import SyncEngine
+
+    container: ApplicationContainer = ctx["container"]
+    return await SyncEngine(container).run(UUID(source_id), UUID(run_id))
+
+
+async def schedule_source_syncs_job(ctx: dict[str, Any]) -> int:
+    """Every minute: queue a sync for each scheduled source that is due, and fail runs of crashed workers."""
+    from packages.connectors.scheduling import schedule_due
+
+    container: ApplicationContainer = ctx["container"]
+
+    async def enqueue(source_id, run_id) -> None:
+        await ctx["redis"].enqueue_job("source_sync_job", str(source_id), str(run_id))
+
+    return await schedule_due(container, enqueue)
+
+
+async def purge_expired_logs_job(ctx: dict[str, Any]) -> dict[str, int]:
+    """Daily retention sweep: deletes retrieval logs and audit events past their retention window."""
+    from packages.application.services.retention_service import purge_expired
+
+    container: ApplicationContainer = ctx["container"]
+    result = await purge_expired(container.database.session_factory())
+    logger.info("Retention purge finished", **result)
+    return result
 
 
 async def reindex_stale_documents_job(ctx: dict[str, Any]) -> dict[str, int]:
@@ -166,6 +215,13 @@ async def reindex_stale_documents_job(ctx: dict[str, Any]) -> dict[str, int]:
         for document in stale:
             try:
                 await pipeline.reindex_document(document.id)
+                await container.audit().record(
+                    tenant_id=document.tenant_id,
+                    action="document.reindexed",
+                    resource_type="document",
+                    resource_id=document.id,
+                    detail={"file_name": document.file_name, "trigger": "scheduled"},
+                )
                 reindexed += 1
                 logger.info("Reindexed stale document", document_id=str(document.id))
             except Exception as exc:

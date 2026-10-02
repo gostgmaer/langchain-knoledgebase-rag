@@ -28,6 +28,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from typing_extensions import TypedDict
 
+from packages.application.services.retrieval_settings_service import (
+    RetrievalSettingsService,
+    platform_defaults,
+)
 from packages.config.loader import settings
 from packages.infrastructure.ai.manager import LLMManager
 from packages.knowledge.manager import KnowledgeManager
@@ -37,6 +41,7 @@ from packages.knowledge.reranking.cross_encoder import (
 )
 from packages.knowledge.schemas import Citation
 from packages.knowledge.vectorstores.schema import SearchFilter, SearchOptions
+from packages.shared.access import retrieval_filters
 from packages.shared.messages import normalize_message_content
 
 
@@ -62,17 +67,26 @@ class ResearchRetrieveNode:
         self,
         knowledge_manager: KnowledgeManager,
         reranker: CrossEncoderReranker,
+        retrieval_settings: RetrievalSettingsService | None = None,
     ) -> None:
         self._knowledge = knowledge_manager
         self._reranker = reranker
+        self._retrieval_settings = retrieval_settings
 
     async def __call__(self, state: ResearchState) -> ResearchState:
 
         query = state["sub_question"]
 
+        config = (
+            await self._retrieval_settings.get_effective(state["tenant_id"])
+            if self._retrieval_settings is not None
+            else platform_defaults()
+        )
+
         filters = SearchFilter(
             tenant_id=state["tenant_id"],
             model_profile_id=state["model_profile_id"],
+            **retrieval_filters(),
         )
 
         results = await self._knowledge.search(
@@ -81,10 +95,12 @@ class ResearchRetrieveNode:
             options=SearchOptions(limit=10),
         )
 
-        top_k = settings.rag.max_results
-        reranked = await self._reranker.rerank(query, results, top_k=top_k)
-
-        reranked = apply_relevance_floor(reranked, settings.rag.min_relevance_score)
+        top_k = config.max_results
+        if config.reranking_enabled:
+            reranked = await self._reranker.rerank(query, results, top_k=top_k)
+            reranked = apply_relevance_floor(reranked, config.min_relevance_score)
+        else:
+            reranked = sorted(results, key=lambda r: r.score, reverse=True)[:top_k]
 
         state["context"] = [result.chunk.content for result in reranked]
         state["citations"] = [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -22,7 +23,25 @@ class IngestionRequest:
     document_name: str
 
     file_id: str | None = None
-    chunking_strategy: ChunkingStrategy = "auto"
+    chunking_strategy: ChunkingStrategy = "recursive"
+    uploaded_by: UUID | None = None
+    document_type: str | None = None
+    category: str | None = None
+    tags: list[str] | None = None
+    visibility: str = "tenant"
+
+    # External source context (None for uploads). The pipeline only records it; it never branches on the source type.
+    source_id: UUID | None = None
+    source_type: str | None = None
+    external_id: str | None = None
+    canonical_url: str | None = None
+    external_version: str | None = None
+    external_updated_at: datetime | None = None
+    sync_id: UUID | None = None
+    source_metadata: dict[str, object] = field(default_factory=dict)
+    """Small, non-secret facts (space, channel, folder ...) stamped on every chunk for provenance and citations."""
+    allowed_roles: list[str] | None = None
+    allowed_users: list[str] | None = None
 
     metadata: dict[str, object] = field(default_factory=dict)
 
@@ -33,6 +52,8 @@ class IngestionResponse:
     chunk_count: int
     embedding_count: int
     skipped: bool = False
+    superseded_document_id: UUID | None = None
+    """Set when this ingestion created a new version of an existing document."""
 
 
 # ============================================================

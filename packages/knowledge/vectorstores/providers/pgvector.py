@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy.dialects.postgresql import array as pg_array
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from packages.domain.enums.document_status import DocumentStatus
+from packages.domain.models.document import Document
+from packages.domain.models.document_chunk import DocumentChunk
 from packages.domain.models.embedding import Embedding
 from packages.knowledge.vectorstores.base import BaseVectorStore
 from packages.knowledge.vectorstores.schema import (
@@ -13,6 +17,62 @@ from packages.knowledge.vectorstores.schema import (
     SearchOptions,
     SearchResult,
 )
+
+
+def _retrievable_chunk(filters: SearchFilter):
+    """
+    Only chunks of a live, fully ingested document may be returned by retrieval: not a superseded
+    version, not a document still processing or failed, not a deleted one - and only documents the
+    caller may see (restricted ones need clearance) that match the requested metadata filters.
+    Applied inside the search query itself so excluded content never leaves the database.
+    """
+    conditions = [
+        Document.is_current.is_(True),
+        Document.status == DocumentStatus.READY,
+        Document.is_deleted.is_(False),
+    ]
+
+    if not filters.include_restricted:
+        # Open documents, plus restricted ones this caller was let into by role or by user id.
+        grants = []
+        if filters.user_roles:
+            grants.append(Document.allowed_roles.has_any(pg_array(list(filters.user_roles))))
+        if filters.user_id:
+            grants.append(Document.allowed_users.contains([filters.user_id]))
+        conditions.append(
+            or_(Document.visibility.is_(None), Document.visibility == "tenant", *grants)
+        )
+    if filters.knowledge_base_id is not None:
+        conditions.append(Document.knowledge_base_id == filters.knowledge_base_id)
+    if filters.document_ids:
+        conditions.append(Document.id.in_(filters.document_ids))
+    if filters.document_types:
+        conditions.append(Document.document_type.in_(filters.document_types))
+    if filters.categories:
+        conditions.append(Document.category.in_(filters.categories))
+    if filters.language:
+        conditions.append(Document.language == filters.language)
+    if filters.tags:
+        conditions.append(Document.tags.contains(filters.tags))
+    if filters.source_types:
+        # Documents ingested before sources existed are uploads.
+        conditions.append(func.coalesce(Document.source_type, "upload").in_(filters.source_types))
+    if filters.source_ids:
+        conditions.append(Document.source_id.in_(filters.source_ids))
+
+    return Embedding.chunk.has(DocumentChunk.document.has(and_(*conditions)))
+
+
+async def _scope_session_to_tenant(session: AsyncSession, tenant_id: UUID) -> None:
+    """
+    Tells Postgres which tenant this transaction serves (`app.tenant_id`, transaction-local).
+    Row-level-security policies on the tenant tables then enforce it in the database even if a
+    query were ever written without its tenant filter (see infrastructure/database/upgrades.py).
+    """
+    await session.execute(
+        text("SELECT set_config('app.tenant_id', :tenant, true)"),
+        {"tenant": str(tenant_id)},
+    )
 
 
 class PostgresVectorStore(BaseVectorStore):
@@ -39,6 +99,8 @@ class PostgresVectorStore(BaseVectorStore):
 
         options = options or SearchOptions()
 
+        await _scope_session_to_tenant(self.session, filters.tenant_id)
+
         stmt = (
             select(
                 Embedding,
@@ -53,6 +115,7 @@ class PostgresVectorStore(BaseVectorStore):
             .where(
                 Embedding.tenant_id == filters.tenant_id,
                 Embedding.model_profile_id == filters.model_profile_id,
+                _retrievable_chunk(filters),
             )
         )
 
@@ -120,6 +183,8 @@ class PostgresVectorStore(BaseVectorStore):
         Bounded, unranked candidate pool for keyword (BM25) scoring.
         """
 
+        await _scope_session_to_tenant(self.session, filters.tenant_id)
+
         stmt = (
             select(Embedding)
             .options(
@@ -129,6 +194,7 @@ class PostgresVectorStore(BaseVectorStore):
             .where(
                 Embedding.tenant_id == filters.tenant_id,
                 Embedding.model_profile_id == filters.model_profile_id,
+                _retrievable_chunk(filters),
             )
         )
 
@@ -215,6 +281,19 @@ class PostgresVectorStore(BaseVectorStore):
         )
 
         result = await self.session.execute(stmt)
+
+        # The chunk rows go too. Leaving them behind (as this once did) orphaned them, and made a
+        # re-index collide with its own old chunks on (document_id, chunk_index).
+        await self.session.execute(
+            delete(DocumentChunk)
+            .where(
+                DocumentChunk.tenant_id == tenant_id,
+                DocumentChunk.document_id == document_id,
+            )
+            # Drops the deleted rows from the session's identity map without expiring unrelated
+            # objects (an expire here made the re-index's own Document lazy-load and fail).
+            .execution_options(synchronize_session="fetch")
+        )
 
         return result.rowcount or 0
 
