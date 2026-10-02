@@ -490,20 +490,35 @@ the two in production.
 - **Fixed:** `docker-compose.prod.yml` now has a real Docker-secrets mechanism (file-based `secrets:`,
   works with a plain `docker compose up`, no Swarm required) covering 20 genuinely sensitive values —
   database/cache credentials, auth/crypto secrets, and every LLM-provider/tool-integration API key.
-  `scripts/docker_secrets_entrypoint.sh` (new, generic — adding a secret later means adding it to the
-  compose file's `secrets:` list, not touching this script) turns each mounted `/run/secrets/<name>`
-  file into a real environment variable before exec'ing the service's actual command, so
-  `packages/config/*.py` needed zero changes. `postgres` uses the official image's native
-  `POSTGRES_PASSWORD_FILE` support directly instead. Full mechanism and setup steps in
-  `secrets/README.md` and `docs/DEPLOYMENT.md` §8; `secrets/*.txt.example` placeholders are tracked,
-  real `secrets/*.txt` values are gitignored.
-- **Verified live**, inside the real application image against a disposable scratch Postgres: mounted
-  fake secret files (one containing special characters, to rule out a quoting bug) alongside a
-  deliberately-wrong `-e DATABASE_URL=...`/`-e MIGRATION_DATABASE_URL=...` override on the container
-  itself, and confirmed the resolved environment used the secret-file value, not the wrong `-e`
-  override — i.e. the mechanism genuinely takes precedence rather than merely being present.
-  `alembic upgrade head` and `scripts/create_app_role.py` (item 1) both then ran successfully using
-  that resolved value. `docker compose -f docker-compose.prod.yml config` also resolves cleanly with
+  Consolidated into **one** `KEY=value` file (`secrets/app.env`, mounted as a single Docker secret)
+  rather than one file per key — nothing in Compose's `secrets:` mechanism requires a 1:1 split, and
+  one file is meaningfully less setup friction than twenty. `scripts/docker_secrets_entrypoint.sh`
+  (new) parses that file line-by-line with `read` (not `.`/`source` — see the bug below) before
+  exec'ing the service's actual command, so `packages/config/*.py` needed zero changes.
+  `postgres_password` stays a separate single-value secret (the official postgres image's native
+  `POSTGRES_PASSWORD_FILE` support expects a raw value, not `KEY=value` lines); `postgres` mounts it
+  directly, `backup` reads the same password back out of `app.env` via the wrapper. Full mechanism
+  and setup steps in `secrets/README.md` and `docs/DEPLOYMENT.md` §8; `secrets/app.env.example` and
+  `secrets/postgres_password.txt.example` are tracked, the real `secrets/app.env` and
+  `secrets/postgres_password.txt` are gitignored.
+- **A real bug found and fixed while consolidating to one file**: the first version of
+  `docker_secrets_entrypoint.sh` loaded `app.env` by sourcing it (`. /run/secrets/app_env`), which
+  runs each line as a shell assignment — a value containing `$` gets misparsed as a variable
+  reference (confirmed: a password like `p@ss$w0rd` crashed with `w0rd: unbound variable`), and a
+  value containing backticks or `$(...)` would execute arbitrary commands as the container's entrypoint,
+  not just fail. Fixed by parsing line-by-line with `read` instead, which treats each line as inert
+  text; confirmed via standalone shell tests that `$`, backticks, and `$(...)` inside a secret value
+  now all come through completely literally.
+- **Verified live** (original per-file design), inside the real application image against a
+  disposable scratch Postgres: mounted fake secret files (one containing special characters, to rule
+  out a quoting bug) alongside a deliberately-wrong `-e DATABASE_URL=...`/
+  `-e MIGRATION_DATABASE_URL=...` override on the container itself, and confirmed the resolved
+  environment used the secret-file value, not the wrong `-e` override — i.e. the mechanism genuinely
+  takes precedence rather than merely being present. `alembic upgrade head` and
+  `scripts/create_app_role.py` (item 1) both then ran successfully using that resolved value. The
+  consolidated single-file version's parsing logic was re-verified via standalone shell tests only
+  (Docker Desktop was down this pass) — a fresh full-container re-run is still worth doing before a
+  real production deploy. `docker compose -f docker-compose.prod.yml config` also resolves cleanly with
   no real `*.txt` files present.
 
 ---

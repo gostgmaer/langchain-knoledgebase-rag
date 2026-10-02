@@ -240,40 +240,57 @@ sensitive values (API keys, passwords, connection strings). `docker-compose.prod
 alternative for production: Docker Compose's file-based `secrets:` mechanism, which works with a plain
 `docker compose up` (no Swarm needed).
 
-Each secret is one file under `secrets/` holding that secret's **raw value** (not a `KEY=value` line
-like `.env` — just the literal value, e.g. `openai_api_key.txt` contains exactly `sk-...`). The
-top-level `secrets:` block in `docker-compose.prod.yml` maps each file to a name; the services that
-need it mount it read-only at `/run/secrets/<name>`. Every app-process service (`migrate`, `api_blue`,
+Two secrets exist, not one per key. `secrets/app.env` is an ordinary `KEY=value` file (same shape as
+`.env`) holding every secret-managed value except the Postgres superuser password, mounted as a
+single Docker secret at `/run/secrets/app_env`. Every app-process service (`migrate`, `api_blue`,
 `api_green`, `worker`, `backup`) runs `scripts/docker_secrets_entrypoint.sh` as its `entrypoint:`,
-which reads every file under `/run/secrets/`, exports it as an environment variable named after the
-file (uppercased — `openai_api_key` → `OPENAI_API_KEY`), then execs the service's real command. The
-application code itself needed zero changes — `packages/config/*.py` (pydantic-settings) already just
-reads plain environment variables, exactly as it does today from `.env`. `postgres` is the one
-exception: the official Postgres image natively supports a `POSTGRES_PASSWORD_FILE` convention, so it
-mounts `postgres_password` directly with no wrapper script involved.
+which sources that file directly (`set -a; . /run/secrets/app_env; set +a`) before exec'ing the
+service's real command. The application code itself needed zero changes — `packages/config/*.py`
+(pydantic-settings) already just reads plain environment variables, exactly as it does today from
+`.env`. `postgres_password` is kept as its own, separate single-value secret: the official Postgres
+image natively supports a `POSTGRES_PASSWORD_FILE` convention, which expects a file containing only
+the raw value, not `KEY=value` lines — `postgres` mounts it directly with no wrapper script involved,
+and `backup` reads the same password back out of `app.env`'s own `POSTGRES_PASSWORD=` line (via the
+wrapper) since its image has no native `_FILE` support.
 
-20 secrets are covered this way: database/cache (`database_url`, `migration_database_url`,
-`postgres_password`, `app_db_password`, `redis_url`), auth/crypto (`jwt_secret`, `iam_client_secret`,
-`iam_introspection_api_key`, `file_upload_hmac_secret`, `connector_credential_keys`,
-`connector_render_token`), LLM providers (`google_api_key`, `openai_api_key`, `anthropic_api_key`,
-`groq_api_key`), and tool/integration keys (`serper_api_key`, `tavily_api_key`,
-`openweather_api_key`, `newsapi_api_key`, `upload_service_api_key`, `langchain_api_key`). Plain
-endpoints/URLs with no embedded credential and ordinary non-sensitive config (timeouts, feature
-flags, model names) deliberately stay in `.env` via `env_file`, same as always — see
-`secrets/README.md` for the full breakdown and setup steps (create each real `secrets/<name>.txt`
-from its tracked `*.txt.example` placeholder; the real files are gitignored via `secrets/*.txt`).
-Production's real `.env` should omit every one of the 20 keys above entirely — if both `.env` and a
-secret file set the same variable, the secret file wins (the entrypoint's `export` runs after
+One file for everything else, not twenty, is a deliberate choice: Compose's `secrets:` mechanism only
+requires each secret be *a* file — nothing requires a 1:1 split per key, and the per-service wiring
+(`entrypoint:` + `secrets: *app-secrets`) is identical either way. A single `KEY=value` file is less
+setup friction (one file to fill in, not twenty) and the entrypoint script no longer needs a
+filename-to-env-var-name convention, just a plain `source`.
+
+`app.env` covers database/cache credentials (`DATABASE_URL`, `MIGRATION_DATABASE_URL`,
+`POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `REDIS_URL`), auth/crypto secrets (`JWT_SECRET`,
+`IAM_CLIENT_SECRET`, `IAM_INTROSPECTION_API_KEY`, `FILE_UPLOAD_HMAC_SECRET`,
+`CONNECTOR_CREDENTIAL_KEYS`, `CONNECTOR_RENDER_TOKEN`), LLM-provider keys (`GOOGLE_API_KEY`,
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`), and tool/integration keys (`SERPER_API_KEY`,
+`TAVILY_API_KEY`, `OPENWEATHER_API_KEY`, `NEWSAPI_API_KEY`, `UPLOAD_SERVICE_API_KEY`,
+`LANGCHAIN_API_KEY`). Plain endpoints/URLs with no embedded credential and ordinary non-sensitive
+config (timeouts, feature flags, model names) deliberately stay in `.env` via `env_file`, same as
+always — see `secrets/README.md` and `secrets/app.env.example` for the full, current breakdown and
+setup steps (copy `app.env.example`/`postgres_password.txt.example` to their real, gitignored
+counterparts). Production's real `.env` should omit every key in `app.env.example` entirely — if both
+`.env` and `app.env` set the same variable, `app.env` wins (the entrypoint's `export` runs after
 `env_file` is already loaded), but leaving it out of `.env` for real avoids two sources of truth for
 one value.
 
-**Verified live**, inside the real application image (`langchain-knoledgebase-rag-api:latest`), not
-just via `docker compose config`: mounted a disposable set of fake secret files (including a
-`database_url` containing special characters and a deliberately-wrong `-e DATABASE_URL=...` /
-`-e MIGRATION_DATABASE_URL=...` override on the container itself, to prove the secret file genuinely
-wins rather than merely being present) and ran the container against a disposable scratch Postgres.
-The resolved environment inside the container showed the secret-file value, not the deliberately-wrong
-`-e` override; `alembic upgrade head` and `scripts/create_app_role.py` both then ran successfully
-against the scratch database using that resolved value. `docker compose -f docker-compose.prod.yml
-config` also resolves cleanly with the full 20-secret block and no real `*.txt` files present (Compose
-only needs them to exist at `up` time, not at `config` time).
+**Verified in two passes.** The original per-key-file design was verified live inside the real
+application image (`langchain-knoledgebase-rag-api:latest`): mounted a disposable set of fake secret
+files, ran the container against a disposable scratch Postgres with a deliberately-wrong
+`-e DATABASE_URL=...`/`-e MIGRATION_DATABASE_URL=...` override, and confirmed the secret-file value
+won; `alembic upgrade head` and `scripts/create_app_role.py` both then succeeded against it.
+
+Consolidating to a single `app.env` file changed how that file is loaded — from reading each
+raw-value file with `cat` to parsing one `KEY=value` file — which is a real behavior change worth
+re-verifying on its own: **sourcing** a `KEY=value` file with `.`/`source` (the first version of this
+change) was tried and found to be a genuine bug, not just a style choice — it runs each line as a
+shell assignment, so a value containing `$` is misparsed (confirmed: `p@ss$w0rd` failed with
+`w0rd: unbound variable`) and a value containing backticks or `$(...)` would execute arbitrary
+commands. Fixed by parsing the file line-by-line with `read` instead (inert text, no shell
+expansion) — confirmed via standalone shell tests that `$`, `` ` ``, and `$(...)` inside a value all
+now come through completely literally. A fresh full-container re-run of the live Postgres test above
+against this exact parsing logic hasn't been repeated this pass (Docker Desktop was down in this
+environment) — the standalone shell-level verification covers the part that actually changed.
+`docker compose -f docker-compose.prod.yml config` resolves cleanly with the consolidated two-secret
+block and no real `app.env`/`postgres_password.txt` present (Compose only needs them to exist at `up`
+time, not at `config` time).
