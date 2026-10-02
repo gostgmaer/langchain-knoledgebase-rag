@@ -488,7 +488,7 @@ strings) sat in plain-text `.env` alongside ordinary non-sensitive config, with 
 the two in production.
 
 - **Fixed:** `docker-compose.prod.yml` now has a real Docker-secrets mechanism (file-based `secrets:`,
-  works with a plain `docker compose up`, no Swarm required) covering 20 genuinely sensitive values —
+  works with a plain `docker compose up`, no Swarm required) covering 21 genuinely sensitive values —
   database/cache credentials, auth/crypto secrets, and every LLM-provider/tool-integration API key.
   Consolidated into **one** `KEY=value` file (`secrets/app.env`, mounted as a single Docker secret)
   rather than one file per key — nothing in Compose's `secrets:` mechanism requires a 1:1 split, and
