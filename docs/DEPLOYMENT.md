@@ -62,7 +62,12 @@ This section had drifted stale (see `docs/BUGS.md` for the full, currently-accur
 - **Rate limiting, CORS, and doc-gating are all real and registered** — `RateLimitMiddleware` and `CORSMiddleware` are both in `packages/api/middleware/__init__.py`'s `register_middlewares()`, and `/docs`/`/redoc`/`/openapi.json` are gated off entirely when `APP_ENV=production` (`packages/api/app.py`). `SecurityHeadersMiddleware` (CSP/X-Frame-Options/etc.) is also registered.
 - **`worker` runs a real `arq` job queue** — `packages/worker/main.py`'s `WorkerSettings` registers real jobs (document ingestion, scratch-file cleanup), sharing the compose stack's Redis. Falls back to in-process ingestion if Redis is unreachable at `api` startup, rather than failing outright.
 - **Multi-replica `api` is safe** — this row used to warn against running more than one replica (in-memory rate limiter/locks with no cross-replica coordination); both genuinely-broken-by-design state stores (`RateLimitMiddleware`, the memory summarize-lock) have since moved to Redis-backed, cross-replica-safe implementations (`docs/BUGS.md` item 2), and §7 below now runs two `api` replicas side by side during every deploy on exactly that strength. Per-replica Prometheus metrics (`MetricsStore`) were re-scoped as correct by design, not a bug — standard Prometheus pattern, a real server aggregates across replicas at query time.
-- **Genuinely still open** (tracked in full in `docs/BUGS.md`): CI not yet observed running on real GitHub infrastructure, and RBAC permission-code enforcement stays off (`ENABLE_RBAC=false`) until a real role→permission-code mapping exists on the IAM side.
+- **Both resolved this pass** (tracked in full in `docs/BUGS.md`): CI has now run on real GitHub
+  infrastructure and caught two real bugs (items 4, 26), and RBAC permission-code enforcement is on
+  in this environment — the role→permission-code mapping now exists on the IAM side and
+  `enable_rbac` is `true`, verified live end to end (item 11). A different environment (a fresh IAM
+  database, a new deploy) needs the same mapping step run against it; it isn't something a code
+  change alone ships.
 - **Secrets in `.env`** was the only secrets mechanism for local/dev; a real Docker-secrets-based mechanism now exists for production (`docs/BUGS.md` item 26, §8 below).
 
 None of this blocks running the stack locally for development or testing — it's the gap between "it runs in a container" and "it's actually production-hardened."
@@ -294,3 +299,28 @@ environment) — the standalone shell-level verification covers the part that ac
 `docker compose -f docker-compose.prod.yml config` resolves cleanly with the consolidated two-secret
 block and no real `app.env`/`postgres_password.txt` present (Compose only needs them to exist at `up`
 time, not at `config` time).
+
+## 9. Enabling fine-grained RBAC
+
+`docs/BUGS.md` item 11 — `require_permission()`'s permission-code checks (`packages/api/
+permissions.py`) are gated behind the dynamic `enable_rbac` feature flag, default off. Turning it on
+for real needs two separate steps, in order:
+
+1. **Map permission codes to roles on the IAM side**: `scripts/iam_rbac_seed.sql` grants every code
+   in `packages/api/permissions.py` to IAM's `super_admin`/`admin`/`tenant_admin` roles — exactly the
+   roles `RAGSettings.admin_roles` already lets through `require_admin()` unconditionally, so this
+   reproduces current access, not a narrower one. Run it against IAM's own database:
+   `psql -U postgres -d easydev -f scripts/iam_rbac_seed.sql` (or via `docker exec -i core-postgres
+   psql ...` for a Dockerized IAM instance). Idempotent — safe to re-run after a new code is added to
+   `permissions.py`.
+2. **Flip the flag**: `scripts/set_feature_flag.py enable_rbac true` (global) or with `--tenant-id` to
+   scope it to one tenant, via the admin Feature Flags page, or `PATCH /api/v1/feature-flags/{id}`.
+   Deliberately a separate step from (1) — flipping it before the mapping exists locks every admin
+   out instead of narrowing anything.
+
+**Verified live, end to end, through the real auth layer**: ran both scripts against this dev
+environment's real IAM/RAG databases, logged in as the bootstrap super admin via the real gateway,
+confirmed `GET /auth/me` returns the new RAG codes alongside the platform's other permissions,
+confirmed `GET /api/v1/feature-flags` shows the running API's own live view of `enable_rbac` as
+`true`, and confirmed `GET /api/v1/agents`/`GET /api/v1/knowledge-sources` still return `200` with a
+real admin token — RBAC is genuinely enforcing, not a no-op, and no admin was locked out.

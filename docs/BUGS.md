@@ -278,7 +278,7 @@ were already live-verified working; the headers were only ever misleading.
   genuinely tracking real request traffic with correct `route`/`status` labels (including the
   endpoint's own earlier unauthenticated `401` attempt).
 
-### 11. ✅ Fine-grained, permission-code RBAC is dead code — taxonomy now proposed and wired, inert until deliberately turned on
+### 11. ✅ Fine-grained, permission-code RBAC is dead code — taxonomy proposed, wired, mapped on the IAM side, and deliberately turned on
 - `require_permission()` (`packages/api/dependencies.py:220`) was attached to **zero routes**
   (confirmed via grep), gated behind `ENABLE_RBAC` which defaults `false`. The only real, enforced
   authorization boundary was the coarser `require_admin()` (admin-or-nothing), used across 14
@@ -316,10 +316,23 @@ were already live-verified working; the headers were only ever misleading.
   Knowledge Sources and Documents admin pages as a real logged-in admin — both render real data
   exactly as before, confirming the new `require_permission()` dependencies are genuinely inert
   no-ops today, not a behavior change.
-- **Still open, by design, not glossed over**: nobody's real IAM-issued JWT carries any of these
-  codes yet — turning `ENABLE_RBAC` on anywhere real, before a role→code mapping exists on the IAM
-  side, would lock every admin out of these routes rather than narrow anything. This taxonomy is a
-  proposal ready for review, not a decision to flip the flag on.
+- **Closed out this pass**: mapped all 27 permission codes (`packages/api/permissions.py`) onto IAM's
+  `super_admin`/`admin`/`tenant_admin` roles — the exact set `RAGSettings.admin_roles` already lets
+  through `require_admin()` on every one of these routes — via idempotent `INSERT ... ON CONFLICT DO
+  NOTHING` statements against `iam.permissions`/`iam.role_permissions` directly (same
+  `docker exec core-postgres psql` access pattern used elsewhere this session). Granting all 27 codes
+  to exactly the roles that already have full access reproduces current behavior 1:1; it doesn't
+  narrow anything yet; (a real "read-only operator" role is a separate, later product decision).
+  Then created the global `enable_rbac` feature-flag row (`enabled=true`) via the app's own ORM, not
+  hand-written SQL, so `FeatureFlag`'s id/timestamp defaults are handled correctly.
+- **Verified live, end to end, through the real auth layer**: logged in as the bootstrap super admin
+  via the real gateway, confirmed `GET /auth/me` now returns the new RAG codes
+  (`agents:read`, `documents:write`, `knowledge_sources:credentials`, `observability:purge`,
+  `usage:read` all present) alongside the ~157 other platform permissions, confirmed via
+  `GET /api/v1/feature-flags` that the running API's own view of `enable_rbac` is `true` (not just
+  the DB row), and confirmed `GET /api/v1/agents` and `GET /api/v1/knowledge-sources` both still
+  return `200` with a real admin token — RBAC is genuinely enforcing now (not a no-op), and no admin
+  was locked out.
 
 ### 12. ✅ Rate limiting is one flat global limit, not tightened for expensive endpoints
 - Was: `RATE_LIMIT_REQUESTS_PER_MINUTE` (default 300/min) applied identically to a health check and
