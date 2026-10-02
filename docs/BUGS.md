@@ -141,22 +141,37 @@ were already live-verified working; the headers were only ever misleading.
   host's disk failing." Shipping dumps off-host (S3, a remote volume, an rsync step) needs a real
   target, which only whoever operates the actual deployment can specify.
 
-### 4. 🟡 No CI pipeline — now added (`.github/workflows/ci.yml`), not yet observed running on real GitHub infrastructure
+### 4. ✅ No CI pipeline — now added and observed running on real GitHub infrastructure, which caught two real bugs the local-only verification missed
 - **Where:** was confirmed via `git ls-files` — zero `.github/workflows/`, no CI config of any kind.
 - **Why it matters:** every one of the 382 passing tests and 144 e2e checks this project has has been
   run manually, locally. Nothing gated a merge or a deploy — a regression could ship silently.
-- **Fixed this pass:** `.github/workflows/ci.yml` runs `tests/unit` + `tests/integration` (382 tests)
-  against real `pgvector/pgvector:pg17` and `redis:7-alpine` service containers on every push/PR, using
-  `uv` for dependency install. No real secrets needed — the test environment is built from
+- **Fixed:** `.github/workflows/ci.yml` runs `tests/unit` + `tests/integration` (382 tests) against
+  real `pgvector/pgvector:pg17` and `redis:7-alpine` service containers on every push/PR, using `uv`
+  for dependency install. No real secrets needed — the test environment is built from
   `.env.example`'s placeholder values plus connection overrides, since the default `pytest` marker
   filter (`-m "not live"`) already excludes the handful of tests needing a real LLM provider key.
-- **Verified as thoroughly as possible without triggering real GitHub infrastructure from here**: the
-  exact recipe the workflow uses was run locally first — both suites pass 334/334 and 48/48 using only
-  `.env.example` values (via a subprocess with its own environment, never touching the real `.env`
-  file), and the YAML was parsed to confirm it's syntactically valid and structured as intended. What
-  this could **not** verify locally: the real GitHub-hosted runner environment, the service-container
-  networking specifics, and whether `uv sync --frozen` succeeds against `uv.lock` on a clean `ubuntu-latest`
-  image. Push this and watch the first real run before trusting it fully.
+- **First real run (PR #3) failed, and correctly so** — the "verified locally" claim below turned out
+  to be a genuine false positive, for the same category of mistake as item 26's `/tmp`-mount bug:
+  looked solid against an environment that wasn't actually a clean slate.
+  - **`dependency-audit` failed**: `pip-audit` found real, unignored CVEs — `urllib3` 2.7.0
+    (PYSEC-2026-4175/4176/4177, fixed in 2.8.0) and `virtualenv` 21.6.1 (PYSEC-2026-4011/4012/4013/
+    4014, fixed in 21.7.x+). Both are transitive, not direct `pyproject.toml` pins. Fixed by
+    `uv lock --upgrade-package urllib3 --upgrade-package virtualenv` (urllib3 → 2.8.0, virtualenv →
+    21.14.5); `pip-audit` with the same ignore list now reports zero vulnerabilities, verified
+    locally.
+  - **`test` failed**: `asyncpg.exceptions.UndefinedTableError: relation "knowledge_sources" does not
+    exist` in `tests/integration/test_source_sync.py`. Root cause: nothing in the CI job ever created
+    the schema. `tests/conftest.py`'s fixtures deliberately skip the app's `lifespan()` (and therefore
+    its `create_all()`/`apply_schema_upgrades()` auto-provisioning) — correct for route tests, but it
+    means the schema has to already exist. On every local dev machine it already does (from a prior
+    `docker compose up`); on CI's brand-new ephemeral Postgres container it never did. The local
+    "verified" run below was against a dev Postgres with leftover schema from normal day-to-day use,
+    not a genuinely empty one — the same trap, just in CI config instead of a shell script. Fixed by
+    adding a `uv run alembic upgrade head` step (the same command `docker-compose.prod.yml`'s
+    `migrate` service runs, §4 above) before the test steps. **Verified live**: reproduced the exact
+    failure first (disposable scratch Postgres, confirmed zero tables, confirmed the same
+    `UndefinedTableError`), then ran the new migration step against it (confirmed `knowledge_sources`
+    now exists) and re-ran the previously-failing test file, which passed.
 - The `144 e2e checks` (`scripts/e2e_local.sh`/`e2e_sources.sh`) are **not** in this workflow yet — they
   need a running API+worker+frontend stack (`docker compose up`), a heavier CI job than the plain
   pytest suites. Worth a follow-up job, not bundled into this one.
