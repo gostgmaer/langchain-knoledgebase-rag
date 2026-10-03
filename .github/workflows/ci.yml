@@ -5,9 +5,12 @@ name: CI
 # (382 tests) against real Postgres/Redis service containers on every push and pull request.
 #
 # The exact recipe below (build the test environment from .env.example plus connection overrides,
-# no real secrets needed) was verified locally before being written here: both suites pass 334/334
-# and 48/48 using only .env.example's placeholder values, since `pytest.ini`'s default
-# `-m "not live"` already excludes the handful of tests that need a real LLM provider key.
+# no real secrets needed) was verified locally before being written here against a Postgres
+# container that, in hindsight, already had the schema from a previous `docker compose up` run
+# (`pytest.ini`'s default `-m "not live"` already excludes the handful of tests that need a real
+# LLM provider key). The first real run of this workflow on GitHub's own infrastructure caught
+# the gap that "verified locally" missed: a genuinely empty Postgres container has no schema until
+# something creates it, and nothing here did - see the "Run database migrations" step below.
 
 on:
   push:
@@ -101,6 +104,18 @@ jobs:
       - name: Create the vector extension
         run: |
           PGPASSWORD=my_secure_password psql -h localhost -U my_db_user -d my_database_name -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      # Real bug found via this workflow's own first observed run (docs/BUGS.md item 26): nothing
+      # here ever created the schema. tests/conftest.py's fixtures deliberately skip the app's
+      # lifespan (and therefore its create_all()/apply_schema_upgrades() auto-provisioning) on
+      # purpose, assuming the schema already exists — true on every local dev machine (which has
+      # run `docker compose up` at least once) but never true for this job's brand-new ephemeral
+      # Postgres service container. Integration tests failed with
+      # `relation "knowledge_sources" does not exist` as a direct result. `alembic upgrade head`
+      # is the same command docker-compose.prod.yml's `migrate` service runs (docs/DEPLOYMENT.md
+      # §4) - this also gives the migrations themselves real CI coverage for the first time.
+      - name: Run database migrations
+        run: uv run alembic upgrade head
 
       - name: Run unit tests
         run: uv run pytest tests/unit -q

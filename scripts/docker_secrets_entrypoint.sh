@@ -1,29 +1,35 @@
 #!/bin/sh
-# Loads Docker Compose secrets (docker-compose.prod.yml's `secrets:` — docs/DEPLOYMENT.md §8) into
-# real environment variables before running the actual command, so the app itself needs zero
-# changes: packages/config/*.py (pydantic-settings) already reads plain env vars, same as it
-# always has for a local .env — this just gets the sensitive subset there from a file instead of
-# the generic `env_file: .env` env_file (which production's own .env should NOT contain the
-# secret-mounted keys at all — see .env.example's note on each one).
+# Loads the production secrets file (docker-compose.prod.yml's `secrets: app_env` —
+# docs/DEPLOYMENT.md §8) into real environment variables before running the actual command, so the
+# app itself needs zero changes: packages/config/*.py (pydantic-settings) already reads plain env
+# vars, same as it always has for a local .env — this just gets the sensitive subset there from a
+# file Docker mounts at /run/secrets/app_env instead of the generic `env_file: .env` (which
+# production's own .env should NOT contain these keys at all — see secrets/app.env.example).
 #
-# Generic by design, not one `export X=$(cat ...)` line per secret: every file under
-# /run/secrets/ becomes an env var named after the file, uppercased (Compose's own
-# `secrets: - name` convention already names each file after its real env var, lowercased —
-# matching that back is the only naming rule this script assumes). Adding a new secret later
-# means adding it to docker-compose.prod.yml's `secrets:` list, not touching this script.
+# One file, not one Docker secret per key: Compose's secrets mechanism only cares that each secret
+# is a file mounted under /run/secrets/ — nothing requires a 1:1 split. secrets/app.env is an
+# ordinary KEY=value file (same shape as .env).
+#
+# Parsed line-by-line with `read`, NOT sourced with `.`/`source` — sourcing runs each line as a
+# shell assignment, so a value containing `$` would be (mis)parsed as a variable reference, and a
+# value containing backticks or `$(...)` would execute arbitrary commands. `read` treats each line
+# as inert text, so a secret value can contain any character without special-casing it.
 set -eu
 
-if [ -d /run/secrets ]; then
-    for secret_file in /run/secrets/*; do
-        [ -f "$secret_file" ] || continue
-        name=$(basename "$secret_file")
-        # Upper-cases via tr (POSIX sh has no ${var^^}) — e.g. openai_api_key -> OPENAI_API_KEY.
-        var_name=$(echo "$name" | tr '[:lower:]' '[:upper:]')
-        # $() strips a trailing newline, which text-editor-saved secret files commonly have;
-        # Docker's own secret files never add one, so this is a safety net, not a real case split.
-        value=$(cat "$secret_file")
-        export "$var_name=$value"
-    done
+secrets_file=/run/secrets/app_env
+if [ -f "$secrets_file" ]; then
+    # POSIX sh has no $'\r' — carry a literal CR in a variable to strip CRLF line endings from
+    # editor-saved files; Docker's own secret files never add one, so this is a safety net.
+    cr=$(printf '\r')
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=${line%"$cr"}
+        case "$line" in
+            ''|'#'*) continue ;;
+        esac
+        key=${line%%=*}
+        value=${line#*=}
+        export "$key=$value"
+    done < "$secrets_file"
 fi
 
 exec "$@"

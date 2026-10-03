@@ -141,22 +141,37 @@ were already live-verified working; the headers were only ever misleading.
   host's disk failing." Shipping dumps off-host (S3, a remote volume, an rsync step) needs a real
   target, which only whoever operates the actual deployment can specify.
 
-### 4. 🟡 No CI pipeline — now added (`.github/workflows/ci.yml`), not yet observed running on real GitHub infrastructure
+### 4. ✅ No CI pipeline — now added and observed running on real GitHub infrastructure, which caught two real bugs the local-only verification missed
 - **Where:** was confirmed via `git ls-files` — zero `.github/workflows/`, no CI config of any kind.
 - **Why it matters:** every one of the 382 passing tests and 144 e2e checks this project has has been
   run manually, locally. Nothing gated a merge or a deploy — a regression could ship silently.
-- **Fixed this pass:** `.github/workflows/ci.yml` runs `tests/unit` + `tests/integration` (382 tests)
-  against real `pgvector/pgvector:pg17` and `redis:7-alpine` service containers on every push/PR, using
-  `uv` for dependency install. No real secrets needed — the test environment is built from
+- **Fixed:** `.github/workflows/ci.yml` runs `tests/unit` + `tests/integration` (382 tests) against
+  real `pgvector/pgvector:pg17` and `redis:7-alpine` service containers on every push/PR, using `uv`
+  for dependency install. No real secrets needed — the test environment is built from
   `.env.example`'s placeholder values plus connection overrides, since the default `pytest` marker
   filter (`-m "not live"`) already excludes the handful of tests needing a real LLM provider key.
-- **Verified as thoroughly as possible without triggering real GitHub infrastructure from here**: the
-  exact recipe the workflow uses was run locally first — both suites pass 334/334 and 48/48 using only
-  `.env.example` values (via a subprocess with its own environment, never touching the real `.env`
-  file), and the YAML was parsed to confirm it's syntactically valid and structured as intended. What
-  this could **not** verify locally: the real GitHub-hosted runner environment, the service-container
-  networking specifics, and whether `uv sync --frozen` succeeds against `uv.lock` on a clean `ubuntu-latest`
-  image. Push this and watch the first real run before trusting it fully.
+- **First real run (PR #3) failed, and correctly so** — the "verified locally" claim below turned out
+  to be a genuine false positive, for the same category of mistake as item 26's `/tmp`-mount bug:
+  looked solid against an environment that wasn't actually a clean slate.
+  - **`dependency-audit` failed**: `pip-audit` found real, unignored CVEs — `urllib3` 2.7.0
+    (PYSEC-2026-4175/4176/4177, fixed in 2.8.0) and `virtualenv` 21.6.1 (PYSEC-2026-4011/4012/4013/
+    4014, fixed in 21.7.x+). Both are transitive, not direct `pyproject.toml` pins. Fixed by
+    `uv lock --upgrade-package urllib3 --upgrade-package virtualenv` (urllib3 → 2.8.0, virtualenv →
+    21.14.5); `pip-audit` with the same ignore list now reports zero vulnerabilities, verified
+    locally.
+  - **`test` failed**: `asyncpg.exceptions.UndefinedTableError: relation "knowledge_sources" does not
+    exist` in `tests/integration/test_source_sync.py`. Root cause: nothing in the CI job ever created
+    the schema. `tests/conftest.py`'s fixtures deliberately skip the app's `lifespan()` (and therefore
+    its `create_all()`/`apply_schema_upgrades()` auto-provisioning) — correct for route tests, but it
+    means the schema has to already exist. On every local dev machine it already does (from a prior
+    `docker compose up`); on CI's brand-new ephemeral Postgres container it never did. The local
+    "verified" run below was against a dev Postgres with leftover schema from normal day-to-day use,
+    not a genuinely empty one — the same trap, just in CI config instead of a shell script. Fixed by
+    adding a `uv run alembic upgrade head` step (the same command `docker-compose.prod.yml`'s
+    `migrate` service runs, §4 above) before the test steps. **Verified live**: reproduced the exact
+    failure first (disposable scratch Postgres, confirmed zero tables, confirmed the same
+    `UndefinedTableError`), then ran the new migration step against it (confirmed `knowledge_sources`
+    now exists) and re-ran the previously-failing test file, which passed.
 - The `144 e2e checks` (`scripts/e2e_local.sh`/`e2e_sources.sh`) are **not** in this workflow yet — they
   need a running API+worker+frontend stack (`docker compose up`), a heavier CI job than the plain
   pytest suites. Worth a follow-up job, not bundled into this one.
@@ -263,7 +278,7 @@ were already live-verified working; the headers were only ever misleading.
   genuinely tracking real request traffic with correct `route`/`status` labels (including the
   endpoint's own earlier unauthenticated `401` attempt).
 
-### 11. ✅ Fine-grained, permission-code RBAC is dead code — taxonomy now proposed and wired, inert until deliberately turned on
+### 11. ✅ Fine-grained, permission-code RBAC is dead code — taxonomy proposed, wired, mapped on the IAM side, and deliberately turned on
 - `require_permission()` (`packages/api/dependencies.py:220`) was attached to **zero routes**
   (confirmed via grep), gated behind `ENABLE_RBAC` which defaults `false`. The only real, enforced
   authorization boundary was the coarser `require_admin()` (admin-or-nothing), used across 14
@@ -301,10 +316,23 @@ were already live-verified working; the headers were only ever misleading.
   Knowledge Sources and Documents admin pages as a real logged-in admin — both render real data
   exactly as before, confirming the new `require_permission()` dependencies are genuinely inert
   no-ops today, not a behavior change.
-- **Still open, by design, not glossed over**: nobody's real IAM-issued JWT carries any of these
-  codes yet — turning `ENABLE_RBAC` on anywhere real, before a role→code mapping exists on the IAM
-  side, would lock every admin out of these routes rather than narrow anything. This taxonomy is a
-  proposal ready for review, not a decision to flip the flag on.
+- **Closed out this pass**: mapped all 27 permission codes (`packages/api/permissions.py`) onto IAM's
+  `super_admin`/`admin`/`tenant_admin` roles — the exact set `RAGSettings.admin_roles` already lets
+  through `require_admin()` on every one of these routes — via idempotent `INSERT ... ON CONFLICT DO
+  NOTHING` statements against `iam.permissions`/`iam.role_permissions` directly (same
+  `docker exec core-postgres psql` access pattern used elsewhere this session). Granting all 27 codes
+  to exactly the roles that already have full access reproduces current behavior 1:1; it doesn't
+  narrow anything yet; (a real "read-only operator" role is a separate, later product decision).
+  Then created the global `enable_rbac` feature-flag row (`enabled=true`) via the app's own ORM, not
+  hand-written SQL, so `FeatureFlag`'s id/timestamp defaults are handled correctly.
+- **Verified live, end to end, through the real auth layer**: logged in as the bootstrap super admin
+  via the real gateway, confirmed `GET /auth/me` now returns the new RAG codes
+  (`agents:read`, `documents:write`, `knowledge_sources:credentials`, `observability:purge`,
+  `usage:read` all present) alongside the ~157 other platform permissions, confirmed via
+  `GET /api/v1/feature-flags` that the running API's own view of `enable_rbac` is `true` (not just
+  the DB row), and confirmed `GET /api/v1/agents` and `GET /api/v1/knowledge-sources` both still
+  return `200` with a real admin token — RBAC is genuinely enforcing now (not a no-op), and no admin
+  was locked out.
 
 ### 12. ✅ Rate limiting is one flat global limit, not tightened for expensive endpoints
 - Was: `RATE_LIMIT_REQUESTS_PER_MINUTE` (default 300/min) applied identically to a health check and
@@ -488,22 +516,37 @@ strings) sat in plain-text `.env` alongside ordinary non-sensitive config, with 
 the two in production.
 
 - **Fixed:** `docker-compose.prod.yml` now has a real Docker-secrets mechanism (file-based `secrets:`,
-  works with a plain `docker compose up`, no Swarm required) covering 20 genuinely sensitive values —
+  works with a plain `docker compose up`, no Swarm required) covering 21 genuinely sensitive values —
   database/cache credentials, auth/crypto secrets, and every LLM-provider/tool-integration API key.
-  `scripts/docker_secrets_entrypoint.sh` (new, generic — adding a secret later means adding it to the
-  compose file's `secrets:` list, not touching this script) turns each mounted `/run/secrets/<name>`
-  file into a real environment variable before exec'ing the service's actual command, so
-  `packages/config/*.py` needed zero changes. `postgres` uses the official image's native
-  `POSTGRES_PASSWORD_FILE` support directly instead. Full mechanism and setup steps in
-  `secrets/README.md` and `docs/DEPLOYMENT.md` §8; `secrets/*.txt.example` placeholders are tracked,
-  real `secrets/*.txt` values are gitignored.
-- **Verified live**, inside the real application image against a disposable scratch Postgres: mounted
-  fake secret files (one containing special characters, to rule out a quoting bug) alongside a
-  deliberately-wrong `-e DATABASE_URL=...`/`-e MIGRATION_DATABASE_URL=...` override on the container
-  itself, and confirmed the resolved environment used the secret-file value, not the wrong `-e`
-  override — i.e. the mechanism genuinely takes precedence rather than merely being present.
-  `alembic upgrade head` and `scripts/create_app_role.py` (item 1) both then ran successfully using
-  that resolved value. `docker compose -f docker-compose.prod.yml config` also resolves cleanly with
+  Consolidated into **one** `KEY=value` file (`secrets/app.env`, mounted as a single Docker secret)
+  rather than one file per key — nothing in Compose's `secrets:` mechanism requires a 1:1 split, and
+  one file is meaningfully less setup friction than twenty. `scripts/docker_secrets_entrypoint.sh`
+  (new) parses that file line-by-line with `read` (not `.`/`source` — see the bug below) before
+  exec'ing the service's actual command, so `packages/config/*.py` needed zero changes.
+  `postgres_password` stays a separate single-value secret (the official postgres image's native
+  `POSTGRES_PASSWORD_FILE` support expects a raw value, not `KEY=value` lines); `postgres` mounts it
+  directly, `backup` reads the same password back out of `app.env` via the wrapper. Full mechanism
+  and setup steps in `secrets/README.md` and `docs/DEPLOYMENT.md` §8; `secrets/app.env.example` and
+  `secrets/postgres_password.txt.example` are tracked, the real `secrets/app.env` and
+  `secrets/postgres_password.txt` are gitignored.
+- **A real bug found and fixed while consolidating to one file**: the first version of
+  `docker_secrets_entrypoint.sh` loaded `app.env` by sourcing it (`. /run/secrets/app_env`), which
+  runs each line as a shell assignment — a value containing `$` gets misparsed as a variable
+  reference (confirmed: a password like `p@ss$w0rd` crashed with `w0rd: unbound variable`), and a
+  value containing backticks or `$(...)` would execute arbitrary commands as the container's entrypoint,
+  not just fail. Fixed by parsing line-by-line with `read` instead, which treats each line as inert
+  text; confirmed via standalone shell tests that `$`, backticks, and `$(...)` inside a secret value
+  now all come through completely literally.
+- **Verified live** (original per-file design), inside the real application image against a
+  disposable scratch Postgres: mounted fake secret files (one containing special characters, to rule
+  out a quoting bug) alongside a deliberately-wrong `-e DATABASE_URL=...`/
+  `-e MIGRATION_DATABASE_URL=...` override on the container itself, and confirmed the resolved
+  environment used the secret-file value, not the wrong `-e` override — i.e. the mechanism genuinely
+  takes precedence rather than merely being present. `alembic upgrade head` and
+  `scripts/create_app_role.py` (item 1) both then ran successfully using that resolved value. The
+  consolidated single-file version's parsing logic was re-verified via standalone shell tests only
+  (Docker Desktop was down this pass) — a fresh full-container re-run is still worth doing before a
+  real production deploy. `docker compose -f docker-compose.prod.yml config` also resolves cleanly with
   no real `*.txt` files present.
 
 ---

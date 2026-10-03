@@ -62,7 +62,12 @@ This section had drifted stale (see `docs/BUGS.md` for the full, currently-accur
 - **Rate limiting, CORS, and doc-gating are all real and registered** — `RateLimitMiddleware` and `CORSMiddleware` are both in `packages/api/middleware/__init__.py`'s `register_middlewares()`, and `/docs`/`/redoc`/`/openapi.json` are gated off entirely when `APP_ENV=production` (`packages/api/app.py`). `SecurityHeadersMiddleware` (CSP/X-Frame-Options/etc.) is also registered.
 - **`worker` runs a real `arq` job queue** — `packages/worker/main.py`'s `WorkerSettings` registers real jobs (document ingestion, scratch-file cleanup), sharing the compose stack's Redis. Falls back to in-process ingestion if Redis is unreachable at `api` startup, rather than failing outright.
 - **Multi-replica `api` is safe** — this row used to warn against running more than one replica (in-memory rate limiter/locks with no cross-replica coordination); both genuinely-broken-by-design state stores (`RateLimitMiddleware`, the memory summarize-lock) have since moved to Redis-backed, cross-replica-safe implementations (`docs/BUGS.md` item 2), and §7 below now runs two `api` replicas side by side during every deploy on exactly that strength. Per-replica Prometheus metrics (`MetricsStore`) were re-scoped as correct by design, not a bug — standard Prometheus pattern, a real server aggregates across replicas at query time.
-- **Genuinely still open** (tracked in full in `docs/BUGS.md`): CI not yet observed running on real GitHub infrastructure, and RBAC permission-code enforcement stays off (`ENABLE_RBAC=false`) until a real role→permission-code mapping exists on the IAM side.
+- **Both resolved this pass** (tracked in full in `docs/BUGS.md`): CI has now run on real GitHub
+  infrastructure and caught two real bugs (items 4, 26), and RBAC permission-code enforcement is on
+  in this environment — the role→permission-code mapping now exists on the IAM side and
+  `enable_rbac` is `true`, verified live end to end (item 11). A different environment (a fresh IAM
+  database, a new deploy) needs the same mapping step run against it; it isn't something a code
+  change alone ships.
 - **Secrets in `.env`** was the only secrets mechanism for local/dev; a real Docker-secrets-based mechanism now exists for production (`docs/BUGS.md` item 26, §8 below).
 
 None of this blocks running the stack locally for development or testing — it's the gap between "it runs in a container" and "it's actually production-hardened."
@@ -240,40 +245,82 @@ sensitive values (API keys, passwords, connection strings). `docker-compose.prod
 alternative for production: Docker Compose's file-based `secrets:` mechanism, which works with a plain
 `docker compose up` (no Swarm needed).
 
-Each secret is one file under `secrets/` holding that secret's **raw value** (not a `KEY=value` line
-like `.env` — just the literal value, e.g. `openai_api_key.txt` contains exactly `sk-...`). The
-top-level `secrets:` block in `docker-compose.prod.yml` maps each file to a name; the services that
-need it mount it read-only at `/run/secrets/<name>`. Every app-process service (`migrate`, `api_blue`,
+Two secrets exist, not one per key. `secrets/app.env` is an ordinary `KEY=value` file (same shape as
+`.env`) holding every secret-managed value except the Postgres superuser password, mounted as a
+single Docker secret at `/run/secrets/app_env`. Every app-process service (`migrate`, `api_blue`,
 `api_green`, `worker`, `backup`) runs `scripts/docker_secrets_entrypoint.sh` as its `entrypoint:`,
-which reads every file under `/run/secrets/`, exports it as an environment variable named after the
-file (uppercased — `openai_api_key` → `OPENAI_API_KEY`), then execs the service's real command. The
-application code itself needed zero changes — `packages/config/*.py` (pydantic-settings) already just
-reads plain environment variables, exactly as it does today from `.env`. `postgres` is the one
-exception: the official Postgres image natively supports a `POSTGRES_PASSWORD_FILE` convention, so it
-mounts `postgres_password` directly with no wrapper script involved.
+which sources that file directly (`set -a; . /run/secrets/app_env; set +a`) before exec'ing the
+service's real command. The application code itself needed zero changes — `packages/config/*.py`
+(pydantic-settings) already just reads plain environment variables, exactly as it does today from
+`.env`. `postgres_password` is kept as its own, separate single-value secret: the official Postgres
+image natively supports a `POSTGRES_PASSWORD_FILE` convention, which expects a file containing only
+the raw value, not `KEY=value` lines — `postgres` mounts it directly with no wrapper script involved,
+and `backup` reads the same password back out of `app.env`'s own `POSTGRES_PASSWORD=` line (via the
+wrapper) since its image has no native `_FILE` support.
 
-20 secrets are covered this way: database/cache (`database_url`, `migration_database_url`,
-`postgres_password`, `app_db_password`, `redis_url`), auth/crypto (`jwt_secret`, `iam_client_secret`,
-`iam_introspection_api_key`, `file_upload_hmac_secret`, `connector_credential_keys`,
-`connector_render_token`), LLM providers (`google_api_key`, `openai_api_key`, `anthropic_api_key`,
-`groq_api_key`), and tool/integration keys (`serper_api_key`, `tavily_api_key`,
-`openweather_api_key`, `newsapi_api_key`, `upload_service_api_key`, `langchain_api_key`). Plain
-endpoints/URLs with no embedded credential and ordinary non-sensitive config (timeouts, feature
-flags, model names) deliberately stay in `.env` via `env_file`, same as always — see
-`secrets/README.md` for the full breakdown and setup steps (create each real `secrets/<name>.txt`
-from its tracked `*.txt.example` placeholder; the real files are gitignored via `secrets/*.txt`).
-Production's real `.env` should omit every one of the 20 keys above entirely — if both `.env` and a
-secret file set the same variable, the secret file wins (the entrypoint's `export` runs after
+One file for everything else, not twenty, is a deliberate choice: Compose's `secrets:` mechanism only
+requires each secret be *a* file — nothing requires a 1:1 split per key, and the per-service wiring
+(`entrypoint:` + `secrets: *app-secrets`) is identical either way. A single `KEY=value` file is less
+setup friction (one file to fill in, not twenty) and the entrypoint script no longer needs a
+filename-to-env-var-name convention, just a plain `source`.
+
+`app.env` covers database/cache credentials (`DATABASE_URL`, `MIGRATION_DATABASE_URL`,
+`POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `REDIS_URL`), auth/crypto secrets (`JWT_SECRET`,
+`IAM_CLIENT_SECRET`, `IAM_INTROSPECTION_API_KEY`, `FILE_UPLOAD_HMAC_SECRET`,
+`CONNECTOR_CREDENTIAL_KEYS`, `CONNECTOR_RENDER_TOKEN`), LLM-provider keys (`GOOGLE_API_KEY`,
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`), and tool/integration keys (`SERPER_API_KEY`,
+`TAVILY_API_KEY`, `OPENWEATHER_API_KEY`, `NEWSAPI_API_KEY`, `UPLOAD_SERVICE_API_KEY`,
+`LANGCHAIN_API_KEY`). Plain endpoints/URLs with no embedded credential and ordinary non-sensitive
+config (timeouts, feature flags, model names) deliberately stay in `.env` via `env_file`, same as
+always — see `secrets/README.md` and `secrets/app.env.example` for the full, current breakdown and
+setup steps (copy `app.env.example`/`postgres_password.txt.example` to their real, gitignored
+counterparts). Production's real `.env` should omit every key in `app.env.example` entirely — if both
+`.env` and `app.env` set the same variable, `app.env` wins (the entrypoint's `export` runs after
 `env_file` is already loaded), but leaving it out of `.env` for real avoids two sources of truth for
 one value.
 
-**Verified live**, inside the real application image (`langchain-knoledgebase-rag-api:latest`), not
-just via `docker compose config`: mounted a disposable set of fake secret files (including a
-`database_url` containing special characters and a deliberately-wrong `-e DATABASE_URL=...` /
-`-e MIGRATION_DATABASE_URL=...` override on the container itself, to prove the secret file genuinely
-wins rather than merely being present) and ran the container against a disposable scratch Postgres.
-The resolved environment inside the container showed the secret-file value, not the deliberately-wrong
-`-e` override; `alembic upgrade head` and `scripts/create_app_role.py` both then ran successfully
-against the scratch database using that resolved value. `docker compose -f docker-compose.prod.yml
-config` also resolves cleanly with the full 20-secret block and no real `*.txt` files present (Compose
-only needs them to exist at `up` time, not at `config` time).
+**Verified in two passes.** The original per-key-file design was verified live inside the real
+application image (`langchain-knoledgebase-rag-api:latest`): mounted a disposable set of fake secret
+files, ran the container against a disposable scratch Postgres with a deliberately-wrong
+`-e DATABASE_URL=...`/`-e MIGRATION_DATABASE_URL=...` override, and confirmed the secret-file value
+won; `alembic upgrade head` and `scripts/create_app_role.py` both then succeeded against it.
+
+Consolidating to a single `app.env` file changed how that file is loaded — from reading each
+raw-value file with `cat` to parsing one `KEY=value` file — which is a real behavior change worth
+re-verifying on its own: **sourcing** a `KEY=value` file with `.`/`source` (the first version of this
+change) was tried and found to be a genuine bug, not just a style choice — it runs each line as a
+shell assignment, so a value containing `$` is misparsed (confirmed: `p@ss$w0rd` failed with
+`w0rd: unbound variable`) and a value containing backticks or `$(...)` would execute arbitrary
+commands. Fixed by parsing the file line-by-line with `read` instead (inert text, no shell
+expansion) — confirmed via standalone shell tests that `$`, `` ` ``, and `$(...)` inside a value all
+now come through completely literally. A fresh full-container re-run of the live Postgres test above
+against this exact parsing logic hasn't been repeated this pass (Docker Desktop was down in this
+environment) — the standalone shell-level verification covers the part that actually changed.
+`docker compose -f docker-compose.prod.yml config` resolves cleanly with the consolidated two-secret
+block and no real `app.env`/`postgres_password.txt` present (Compose only needs them to exist at `up`
+time, not at `config` time).
+
+## 9. Enabling fine-grained RBAC
+
+`docs/BUGS.md` item 11 — `require_permission()`'s permission-code checks (`packages/api/
+permissions.py`) are gated behind the dynamic `enable_rbac` feature flag, default off. Turning it on
+for real needs two separate steps, in order:
+
+1. **Map permission codes to roles on the IAM side**: `scripts/iam_rbac_seed.sql` grants every code
+   in `packages/api/permissions.py` to IAM's `super_admin`/`admin`/`tenant_admin` roles — exactly the
+   roles `RAGSettings.admin_roles` already lets through `require_admin()` unconditionally, so this
+   reproduces current access, not a narrower one. Run it against IAM's own database:
+   `psql -U postgres -d easydev -f scripts/iam_rbac_seed.sql` (or via `docker exec -i core-postgres
+   psql ...` for a Dockerized IAM instance). Idempotent — safe to re-run after a new code is added to
+   `permissions.py`.
+2. **Flip the flag**: `scripts/set_feature_flag.py enable_rbac true` (global) or with `--tenant-id` to
+   scope it to one tenant, via the admin Feature Flags page, or `PATCH /api/v1/feature-flags/{id}`.
+   Deliberately a separate step from (1) — flipping it before the mapping exists locks every admin
+   out instead of narrowing anything.
+
+**Verified live, end to end, through the real auth layer**: ran both scripts against this dev
+environment's real IAM/RAG databases, logged in as the bootstrap super admin via the real gateway,
+confirmed `GET /auth/me` returns the new RAG codes alongside the platform's other permissions,
+confirmed `GET /api/v1/feature-flags` shows the running API's own live view of `enable_rbac` as
+`true`, and confirmed `GET /api/v1/agents`/`GET /api/v1/knowledge-sources` still return `200` with a
+real admin token — RBAC is genuinely enforcing, not a no-op, and no admin was locked out.

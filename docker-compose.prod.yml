@@ -18,77 +18,21 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "5"
 
-# The real production secrets mechanism (docs/BUGS.md item 26, secrets/README.md) — each file is
-# one secret's raw value, mounted at /run/secrets/<name> in whichever services list it below;
-# scripts/docker_secrets_entrypoint.sh (each service's entrypoint:) turns every mounted file into
-# a real environment variable before running the service's actual command, so the application
-# code itself needs zero changes. Real values go in secrets/<name>.txt (gitignored) — this repo
-# only ever tracks the *.txt.example placeholders.
+# The real production secrets mechanism (docs/BUGS.md item 26, secrets/README.md) — one file,
+# secrets/app.env (KEY=value, gitignored — this repo only tracks secrets/app.env.example), mounted
+# as a single Docker secret at /run/secrets/app_env. scripts/docker_secrets_entrypoint.sh (each
+# service's entrypoint:) sources it directly into real environment variables before running the
+# service's actual command, so the application code itself needs zero changes. `postgres_password`
+# stays a separate single-value secret — the official postgres image's own POSTGRES_PASSWORD_FILE
+# support expects a raw value, not a KEY=value file.
 x-app-secrets: &app-secrets
-  - database_url
-  - migration_database_url
-  - app_db_password
-  - redis_url
-  - jwt_secret
-  - iam_client_secret
-  - iam_introspection_api_key
-  - file_upload_hmac_secret
-  - connector_credential_keys
-  - connector_render_token
-  - google_api_key
-  - openai_api_key
-  - anthropic_api_key
-  - groq_api_key
-  - serper_api_key
-  - tavily_api_key
-  - openweather_api_key
-  - newsapi_api_key
-  - upload_service_api_key
-  - langchain_api_key
+  - app_env
 
 secrets:
-  database_url:
-    file: ./secrets/database_url.txt
-  migration_database_url:
-    file: ./secrets/migration_database_url.txt
+  app_env:
+    file: ./secrets/app.env
   postgres_password:
     file: ./secrets/postgres_password.txt
-  app_db_password:
-    file: ./secrets/app_db_password.txt
-  redis_url:
-    file: ./secrets/redis_url.txt
-  jwt_secret:
-    file: ./secrets/jwt_secret.txt
-  iam_client_secret:
-    file: ./secrets/iam_client_secret.txt
-  iam_introspection_api_key:
-    file: ./secrets/iam_introspection_api_key.txt
-  file_upload_hmac_secret:
-    file: ./secrets/file_upload_hmac_secret.txt
-  connector_credential_keys:
-    file: ./secrets/connector_credential_keys.txt
-  connector_render_token:
-    file: ./secrets/connector_render_token.txt
-  google_api_key:
-    file: ./secrets/google_api_key.txt
-  openai_api_key:
-    file: ./secrets/openai_api_key.txt
-  anthropic_api_key:
-    file: ./secrets/anthropic_api_key.txt
-  groq_api_key:
-    file: ./secrets/groq_api_key.txt
-  serper_api_key:
-    file: ./secrets/serper_api_key.txt
-  tavily_api_key:
-    file: ./secrets/tavily_api_key.txt
-  openweather_api_key:
-    file: ./secrets/openweather_api_key.txt
-  newsapi_api_key:
-    file: ./secrets/newsapi_api_key.txt
-  upload_service_api_key:
-    file: ./secrets/upload_service_api_key.txt
-  langchain_api_key:
-    file: ./secrets/langchain_api_key.txt
 
 services:
 
@@ -335,7 +279,8 @@ services:
 
     # backup_db_scheduled.sh reads $POSTGRES_PASSWORD as a plain env var (PGPASSWORD=$POSTGRES_PASSWORD) —
     # unlike `postgres` above, this image has no native *_FILE support for that, so it goes
-    # through the same secrets wrapper the app-process services use.
+    # through the same secrets wrapper the app-process services use (POSTGRES_PASSWORD lives in
+    # secrets/app.env, same file every other service sources).
     entrypoint: ["sh", "/scripts/docker_secrets_entrypoint.sh"]
     command: ["sh", "/scripts/backup_db_scheduled.sh"]
 
@@ -347,8 +292,7 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
       PGHOST: postgres
 
-    secrets:
-      - postgres_password
+    secrets: *app-secrets
 
     volumes:
       - ./scripts/backup_db_scheduled.sh:/scripts/backup_db_scheduled.sh:ro
