@@ -2,12 +2,14 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 const PROVIDERS = [
@@ -22,6 +24,14 @@ interface SocialAccount {
   createdAt: string;
 }
 
+interface Profile {
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+  phone: string | null;
+}
+
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   const body = await res.json().catch(() => null);
@@ -31,12 +41,18 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 
 // The IAM gateway wraps payloads as { success, data }, and the BFF wraps that
 // again as { data } - accept either shape.
-const asAccounts = (value: unknown): SocialAccount[] => {
+const unwrap = (value: unknown): unknown => {
   const inner = (value as { data?: unknown })?.data ?? value;
-  if (Array.isArray(inner)) return inner as SocialAccount[];
   const nested = (inner as { data?: unknown })?.data;
-  return Array.isArray(nested) ? (nested as SocialAccount[]) : [];
+  return nested !== undefined ? nested : inner;
 };
+
+const asAccounts = (value: unknown): SocialAccount[] => {
+  const inner = unwrap(value);
+  return Array.isArray(inner) ? (inner as SocialAccount[]) : [];
+};
+
+const asProfile = (value: unknown): Profile => unwrap(value) as Profile;
 
 function SettingsContent() {
   const search = useSearchParams();
@@ -53,6 +69,52 @@ function SettingsContent() {
   const accountsQuery = useQuery({
     queryKey: ["social-accounts"],
     queryFn: async () => asAccounts(await json<unknown>("/api/iam/auth/social/accounts")),
+  });
+
+  const profileQuery = useQuery({
+    queryKey: ["profile"],
+    queryFn: async () => asProfile(await json<unknown>("/api/iam/profile")),
+  });
+
+  const [profileDraft, setProfileDraft] = useState({ firstName: "", lastName: "", displayName: "", phone: "" });
+  useEffect(() => {
+    if (!profileQuery.data) return;
+    setProfileDraft({
+      firstName: profileQuery.data.firstName ?? "",
+      lastName: profileQuery.data.lastName ?? "",
+      displayName: profileQuery.data.displayName ?? "",
+      phone: profileQuery.data.phone ?? "",
+    });
+  }, [profileQuery.data]);
+
+  const updateProfile = useMutation({
+    mutationFn: (body: Partial<typeof profileDraft>) =>
+      json("/api/iam/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+    onSuccess: () => {
+      setError(null);
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const [passwordDraft, setPasswordDraft] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
+  const changePassword = useMutation({
+    mutationFn: (body: { currentPassword: string; newPassword: string }) =>
+      json("/api/iam/auth/password/change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      setError(null);
+      setPasswordSuccess(true);
+      setPasswordDraft({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    },
+    onError: (e: Error) => {
+      setPasswordSuccess(false);
+      setError(e.message);
+    },
   });
 
   const unlink = useMutation({
@@ -81,6 +143,117 @@ function SettingsContent() {
           {linkError ?? error}
         </p>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Profile</CardTitle>
+          <CardDescription>{profileQuery.data?.email}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form
+            className="grid gap-4 sm:grid-cols-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              updateProfile.mutate(profileDraft);
+            }}
+          >
+            <div className="grid gap-1.5">
+              <Label>First name</Label>
+              <Input
+                value={profileDraft.firstName}
+                onChange={(e) => setProfileDraft((d) => ({ ...d, firstName: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Last name</Label>
+              <Input
+                value={profileDraft.lastName}
+                onChange={(e) => setProfileDraft((d) => ({ ...d, lastName: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Display name</Label>
+              <Input
+                value={profileDraft.displayName}
+                onChange={(e) => setProfileDraft((d) => ({ ...d, displayName: e.target.value }))}
+                placeholder="Shown instead of your email where there's room"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Phone</Label>
+              <Input
+                value={profileDraft.phone}
+                onChange={(e) => setProfileDraft((d) => ({ ...d, phone: e.target.value }))}
+              />
+            </div>
+            <Button type="submit" loading={updateProfile.isPending} className="justify-self-start sm:col-span-2">
+              Save profile
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Password</CardTitle>
+          <CardDescription>Change the password you sign in with.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {passwordSuccess && (
+            <p className="mb-4 rounded-md border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm">
+              Password changed.
+            </p>
+          )}
+          <form
+            className="grid max-w-sm gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setPasswordSuccess(false);
+              if (passwordDraft.newPassword !== passwordDraft.confirmPassword) {
+                setError("New password and confirmation don't match.");
+                return;
+              }
+              changePassword.mutate({
+                currentPassword: passwordDraft.currentPassword,
+                newPassword: passwordDraft.newPassword,
+              });
+            }}
+          >
+            <div className="grid gap-1.5">
+              <Label>Current password</Label>
+              <Input
+                type="password"
+                value={passwordDraft.currentPassword}
+                onChange={(e) => setPasswordDraft((d) => ({ ...d, currentPassword: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>New password</Label>
+              <Input
+                type="password"
+                value={passwordDraft.newPassword}
+                onChange={(e) => setPasswordDraft((d) => ({ ...d, newPassword: e.target.value }))}
+                minLength={8}
+                required
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Confirm new password</Label>
+              <Input
+                type="password"
+                value={passwordDraft.confirmPassword}
+                onChange={(e) => setPasswordDraft((d) => ({ ...d, confirmPassword: e.target.value }))}
+                minLength={8}
+                required
+              />
+            </div>
+            <Button type="submit" loading={changePassword.isPending} className="justify-self-start">
+              Change password
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

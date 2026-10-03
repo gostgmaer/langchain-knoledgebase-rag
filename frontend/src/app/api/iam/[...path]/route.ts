@@ -28,6 +28,15 @@ const ROUTES: { method: string; pattern: RegExp }[] = [
   // login page offers.
   { method: "GET", pattern: /^auth\/social\/accounts$/ },
   { method: "DELETE", pattern: /^auth\/social\/unlink\/(google|microsoft|facebook)$/ },
+  // Platform-wide tenant directory (Tenants screen) — IAM itself enforces
+  // tenant:read_all (super_admin only today), this just makes the route
+  // reachable at all; a caller without it gets IAM's own 403, not a silent
+  // empty list.
+  { method: "GET", pattern: /^tenants$/ },
+  // The caller's own profile (Settings screen).
+  { method: "GET", pattern: /^profile$/ },
+  { method: "PATCH", pattern: /^profile$/ },
+  { method: "POST", pattern: /^auth\/password\/change$/ },
 ];
 
 async function handle(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
@@ -61,4 +70,4 @@ async function handle(request: Request, { params }: { params: Promise<{ path: st
   }
 }
 
-export { handle as GET, handle as POST, handle as DELETE };
+export { handle as GET, handle as POST, handle as PATCH, handle as DELETE };

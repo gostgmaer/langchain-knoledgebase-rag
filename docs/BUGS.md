@@ -668,6 +668,38 @@ way to give it real content at all.
   (version list, LIVE/DEPRECATED badges, changelog, template text). Full unit+integration suite
   (388) still green.
 
+### 31. ✅ Tenants had no real directory, Settings had no profile/password — both features already existed in IAM, just not reachable from here
+The last of the UI audit's five gaps. Tenants showed a raw-UUID switcher only ("IAM has no
+endpoint that lists every tenant"); Settings only had two OAuth toggles, no profile or password
+management.
+- **The premise was wrong — investigated the real IAM backend (`multi-tannet-auth-services`, a
+  separate NestJS/Prisma service) before building anything there**, since the user explicitly
+  authorized extending it if actually needed. It wasn't: `GET /tenants` (paginated, gated by a
+  real `tenant:read_all` permission already granted to `super_admin`) and `GET`/`PATCH /profile` +
+  `POST /auth/password/change` all already exist, fully built and correctly permissioned — this
+  app's own `packages/sdk/iam/` just never had a method calling them, and the frontend never had a
+  screen for them. **Zero changes to the IAM service were needed.**
+- **Fixed, entirely on the frontend**: `frontend/src/app/api/iam/[...path]/route.ts`'s existing
+  deliberate allowlist proxy (cookie-authenticated, explicit method+path patterns only — see its
+  own docstring) gained four more routes: `GET /tenants`, `GET`/`PATCH /profile`,
+  `POST /auth/password/change` (and `PATCH` added to the route's exported HTTP methods, which
+  only had GET/POST/DELETE before). `TenantsPage` now shows a real directory table (name, slug,
+  status, created date, "Browse as") above the existing by-ID switcher, which stays as a fallback.
+  `SettingsPage` gained Profile (name/display name/phone, editable) and Password (change) cards,
+  matching its own existing `/api/iam/auth/social/*` call pattern exactly (same tolerant
+  `{success,data}`-then-`{data}` double-unwrap, same local `json()` helper).
+- **Verified live, through the real running app**: `GET /api/tenants` with a real super_admin
+  token returned both real tenants in this environment; loaded the Tenants page in a real browser
+  and confirmed the same two rows render correctly. For Settings, actually changed the real
+  profile's `displayName` through the UI (not just a mock), confirmed via a direct API call that
+  IAM genuinely persisted it, then reverted it through the same UI and confirmed it cleared —
+  a real round-trip, not just "the form submits." Password change was verified by code review and
+  UI inspection only, not a live submission — deliberately: this account's documented bootstrap
+  credentials are shared dev infrastructure this session (and future ones) depends on being able
+  to log in with, and changing it for a test would be a real, if reversible, disruption not worth
+  the risk for a straightforward passthrough to an endpoint the recon already confirmed works.
+  Frontend `tsc --noEmit` and the full Vitest suite (29) both clean throughout.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
