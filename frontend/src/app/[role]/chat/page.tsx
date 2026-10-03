@@ -139,7 +139,9 @@ export default function ChatPage() {
       <div className="flex flex-1 flex-col pl-6">
         <div className="mb-3">
           <h1 className="text-xl font-semibold tracking-tight">Chat</h1>
-          <p className="text-sm text-neutral-500">Conversation {conversationId.slice(0, 8)}…</p>
+          <p className="truncate text-sm text-neutral-500">
+            {entries.find((e) => e.id === conversationId)?.preview ?? "New conversation"}
+          </p>
         </div>
 
         <div className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-lg border border-neutral-200 bg-neutral-50/50 p-4 dark:border-neutral-800 dark:bg-neutral-900/30">

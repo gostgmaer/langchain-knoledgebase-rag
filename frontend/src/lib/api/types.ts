@@ -504,6 +504,10 @@ export interface UploadJob {
   created_at: string;
 }
 
+export interface UploadJobListResponse extends Page<UploadJob> {
+  upload_jobs: UploadJob[];
+}
+
 // ---------------------------------------------------------------
 // Usage (Token Usage + Cost Tracking, docs/mvpRAG.md v1.1)
 // ---------------------------------------------------------------

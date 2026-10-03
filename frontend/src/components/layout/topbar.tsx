@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 import { useHealth, useTenant } from "@/hooks/use-api";
@@ -19,7 +20,17 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { data: currentTenant } = useTenant(session?.tenantId);
   const [tenantDraft, setTenantDraft] = useState(session?.tenantId ?? "");
 
-  if (!session) return null;
+  // The header bar itself always renders — only its session-dependent contents swap for a
+  // skeleton — so the topbar doesn't disappear and reflow on every hard navigation while the
+  // session resolves (see app-shell.tsx's own comment on the matching sidebar/shell fix).
+  if (!session) {
+    return (
+      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-neutral-200 bg-white px-3 sm:px-5 dark:border-neutral-800 dark:bg-neutral-950">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-6 w-24" />
+      </header>
+    );
+  }
 
   const healthy = health?.status === "healthy";
 

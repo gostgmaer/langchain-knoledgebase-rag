@@ -62,6 +62,7 @@ import type {
   ToolDefinition,
   ToolListResponse,
   UploadJob,
+  UploadJobListResponse,
   UsageResponse,
 } from "./types";
 
@@ -244,6 +245,8 @@ export const feedback = {
 // ---------------------------------------------------------------
 
 export const uploadJobs = {
+  list: (identity: Identity) =>
+    apiFetch<UploadJobListResponse>("/upload-jobs", identity, { query: PAGE }),
   get: (identity: Identity, id: string) => apiFetch<UploadJob>(`/upload-jobs/${id}`, identity),
 };
 

@@ -1,26 +1,39 @@
 "use client";
 
-import { Search } from "lucide-react";
+import { Search, UploadCloud } from "lucide-react";
 import { useState } from "react";
 
+import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
+import { QueryError } from "@/components/shared/query-error";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useUploadJob } from "@/hooks/use-api";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useUploadJob, useUploadJobs } from "@/hooks/use-api";
 import { formatDateTime } from "@/lib/utils";
 
 export function UploadJobsView() {
+  const { data, isLoading, isError, error, refetch } = useUploadJobs();
+
   const [draft, setDraft] = useState("");
   const [lookupId, setLookupId] = useState<string | null>(null);
-  const { data: job, isFetching, isError } = useUploadJob(lookupId, true);
+  const { data: lookedUpJob, isFetching: lookupFetching, isError: lookupFailed } = useUploadJob(lookupId, true);
 
   return (
     <div>
       <PageHeader
         title="Upload Jobs"
-        description="The backend has no list-all endpoint for these — paste the upload_job_id returned from a document upload to check its real pipeline progress."
+        description="Real-time pipeline progress (queued → running → succeeded/failed) for every document upload."
       />
 
       <form
@@ -33,29 +46,71 @@ export function UploadJobsView() {
         <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="upload_job_id (UUID)"
+          placeholder="Jump to a specific upload_job_id (UUID)…"
           className="font-mono"
         />
-        <Button type="submit" loading={isFetching}>
+        <Button type="submit" variant="outline" loading={lookupFetching}>
           <Search className="h-4 w-4" />
           Look up
         </Button>
       </form>
 
-      {isError && <p className="text-sm text-red-600">No upload job found with that ID.</p>}
-
-      {job && (
-        <Card>
-          <CardContent className="grid gap-2 pt-5 text-sm">
-            <Row label="File" value={job.file_name} />
-            <Row label="Status" value={<StatusBadge status={job.status} />} />
-            <Row label="Document ID" value={job.document_id ?? "—"} />
-            <Row label="Error" value={job.error ?? "—"} />
-            <Row label="Started" value={formatDateTime(job.started_at)} />
-            <Row label="Finished" value={formatDateTime(job.finished_at)} />
-            <Row label="Created" value={formatDateTime(job.created_at)} />
+      {lookupId && (lookedUpJob || lookupFailed) && (
+        <Card className="mb-6">
+          <CardContent className="pt-5 text-sm">
+            {lookupFailed ? (
+              <p className="text-red-600">No upload job found with that ID.</p>
+            ) : (
+              lookedUpJob && (
+                <div className="grid gap-2">
+                  <Row label="File" value={lookedUpJob.file_name} />
+                  <Row label="Status" value={<StatusBadge status={lookedUpJob.status} />} />
+                  <Row label="Document ID" value={lookedUpJob.document_id ?? "—"} />
+                  <Row label="Error" value={lookedUpJob.error ?? "—"} />
+                  <Row label="Started" value={formatDateTime(lookedUpJob.started_at)} />
+                  <Row label="Finished" value={formatDateTime(lookedUpJob.finished_at)} />
+                </div>
+              )
+            )}
           </CardContent>
         </Card>
+      )}
+
+      {isError ? (
+        <QueryError error={error} onRetry={() => void refetch()} />
+      ) : isLoading ? (
+        <Skeleton className="h-40 w-full" />
+      ) : !data || data.upload_jobs.length === 0 ? (
+        <EmptyState icon={UploadCloud} title="No upload jobs yet" description="Upload a document to see its pipeline progress here." />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>File</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Error</TableHead>
+              <TableHead>Started</TableHead>
+              <TableHead>Finished</TableHead>
+              <TableHead>Created</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.upload_jobs.map((job) => (
+              <TableRow key={job.id}>
+                <TableCell className="max-w-xs truncate font-medium">{job.file_name}</TableCell>
+                <TableCell>
+                  <StatusBadge status={job.status} />
+                </TableCell>
+                <TableCell className="max-w-xs truncate text-neutral-600 dark:text-neutral-400">
+                  {job.error ?? "—"}
+                </TableCell>
+                <TableCell className="text-neutral-500">{formatDateTime(job.started_at)}</TableCell>
+                <TableCell className="text-neutral-500">{formatDateTime(job.finished_at)}</TableCell>
+                <TableCell className="text-neutral-500">{formatDateTime(job.created_at)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </div>
   );

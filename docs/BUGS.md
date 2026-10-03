@@ -561,6 +561,47 @@ anywhere (`grep -rl "sdk.notification"` across `packages/`/`tests/`) before remo
 `docs/UNUSED_FILES.md` corrected alongside it (four other listed files turned out to already be
 gone too, from an earlier pass — that table just never got updated).
 
+### 27. ✅ Full-shell "Loading…" flash on every hard navigation — looked like 3 inconsistent pages, was actually one gate
+A full end-to-end UI audit (every admin page visited, console checked, one real action tried per
+page) found Documents/Analytics/Observability flashing a totally blank page — no sidebar, no
+topbar — while loading, when every other route kept the app shell and showed an in-content
+skeleton instead.
+- **Root cause**: `app-shell.tsx`'s session gate (`if (isLoading || !session || ...) return
+  <div>Loading…</div>`) blanks the *entire* shell, not just the content area, and runs on every
+  hard navigation (the audit used full browser navigations, not in-app `Link` clicks) — on *every*
+  page, not just these 3. It was only catchable on screen for pages slow enough to still be in
+  that state when a screenshot landed (Documents' heavier table, Analytics'/Observability's chart
+  rendering) — not a per-page inconsistency, the same gate everywhere, just differently visible.
+- **Fixed:** `Sidebar`/`Topbar` never actually depend on session data (`navItems`/`homeHref` come
+  from the `[role]` URL segment, not the session), so they now render immediately and
+  unconditionally; only the `<main>` content area swaps to a skeleton while the session resolves.
+  `topbar.tsx`'s own `if (!session) return null` had the same problem one level down (the header
+  bar itself would vanish and reflow back in) — now renders its `<header>` shell unconditionally
+  too, with a skeleton for the session-dependent parts only.
+- Also found during the same audit and fixed: Chat's conversation header showed a raw ID
+  (`Conversation 903fbec1…`) instead of a title, inconsistent with the history sidebar, which
+  already showed a readable preview for the same conversation (`useConversationHistory`'s local
+  index). The header now reads from the same `entries` list instead of the id.
+- **Verified live**: full-stack UI audit (22 pages, every console checked, one real action per
+  page — chat message, search query, connector wizard, etc.) found zero console errors/warnings
+  across the board; this fix and the Upload Jobs list below (item 28) were then re-verified live
+  individually — screenshot of Chat showing a real conversation's title, confirmed console clean.
+
+### 28. ✅ Upload Jobs had no list view — paste-an-ID lookup only
+The same UI audit: `UploadJobsView` was a bare "paste the upload_job_id" box with the page's own
+description admitting "the backend has no list-all endpoint for these."
+- **Not actually true** — `UploadJobRepository.list_by_tenant()`/`count_by_tenant()` already
+  existed, unused; only the router endpoint, schema, and frontend list view were missing.
+- **Fixed:** `GET /api/v1/upload-jobs` (paginated, tenant-scoped, most-recent-first) using the
+  existing repository methods; `UploadJobListResponseSchema` to match. Frontend: `useUploadJobs()`
+  hook (polls every 3s only while something in the page is still `QUEUED`/`RUNNING`, same idea as
+  the existing per-job poll), and `UploadJobsView` rewritten as a real table with the existing
+  `EmptyState`/`StatusBadge`/`QueryError` conventions — the ID-lookup box stays as a secondary
+  "jump to a specific job" affordance, not the only way in.
+- **Verified live**: `GET /api/v1/upload-jobs` with a real admin token returned all 74 real upload
+  jobs in this environment; loaded the page in a real browser, confirmed the table renders with
+  correct status badges and timestamps, confirmed zero console errors.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

@@ -250,6 +250,23 @@ export function useDeleteDocument() {
   });
 }
 
+export function useUploadJobs() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["upload-jobs", identity?.tenantId],
+    queryFn: () => uploadJobs.list(identity!),
+    enabled: !!identity,
+    // Jobs move through QUEUED/RUNNING on their own; a light poll keeps the list current without
+    // the caller having to know which rows are still in flight, same idea as useUploadJob's own
+    // per-job poll below, just scoped to "is anything in this page still moving".
+    refetchInterval: (query) => {
+      const jobs = query.state.data?.upload_jobs ?? [];
+      const anyPending = jobs.some((j) => j.status === "QUEUED" || j.status === "RUNNING");
+      return anyPending ? 3000 : false;
+    },
+  });
+}
+
 export function useUploadJob(id: string | null, pollWhilePending: boolean) {
   const identity = useIdentity();
   return useQuery({
