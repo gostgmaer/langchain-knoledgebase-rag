@@ -36,6 +36,7 @@ import type {
   CreateKnowledgeBaseRequest,
   CreateModelProfileRequest,
   CreatePromptRequest,
+  CreatePromptVersionRequest,
   CreateToolRequest,
   FeedbackRating,
   SearchRequest,
@@ -404,6 +405,39 @@ export function useCreatePrompt() {
   return useMutation({
     mutationFn: (body: CreatePromptRequest) => prompts.create(identity!, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["prompts", identity?.tenantId] }),
+  });
+}
+
+export function usePromptVersions(promptId: string | null) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["prompt-versions", identity?.tenantId, promptId],
+    queryFn: () => prompts.listVersions(identity!, promptId!),
+    enabled: !!identity && !!promptId,
+  });
+}
+
+export function useCreatePromptVersion(promptId: string) {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreatePromptVersionRequest) => prompts.createVersion(identity!, promptId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["prompt-versions", identity?.tenantId, promptId] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", identity?.tenantId] });
+    },
+  });
+}
+
+export function usePublishPromptVersion(promptId: string) {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (versionId: string) => prompts.publishVersion(identity!, promptId, versionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["prompt-versions", identity?.tenantId, promptId] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", identity?.tenantId] });
+    },
   });
 }
 

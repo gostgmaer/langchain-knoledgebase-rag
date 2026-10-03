@@ -17,6 +17,7 @@ from packages.infrastructure.repositories.memory import MemoryRepository
 from packages.infrastructure.repositories.message import MessageRepository
 from packages.infrastructure.repositories.model_profile import ModelProfileRepository
 from packages.infrastructure.repositories.prompt import PromptRepository
+from packages.infrastructure.repositories.prompt_version import PromptVersionRepository
 from packages.infrastructure.repositories.relationship import RelationshipRepository
 from packages.infrastructure.repositories.tool import ToolRepository
 from packages.infrastructure.repositories.upload_job import UploadJobRepository
@@ -62,6 +63,11 @@ class RepositoryContainer(
 
     prompt = providers.Factory(
         PromptRepository,
+        session=session,
+    )
+
+    prompt_version = providers.Factory(
+        PromptVersionRepository,
         session=session,
     )
 

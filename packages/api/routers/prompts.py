@@ -20,7 +20,13 @@ from packages.api.schemas.prompt import (
     PromptListResponseSchema,
     PromptResponseSchema,
 )
+from packages.api.schemas.prompt_version import (
+    CreatePromptVersionRequestSchema,
+    PromptVersionListResponseSchema,
+    PromptVersionResponseSchema,
+)
 from packages.domain.models.prompt import Prompt
+from packages.domain.models.prompt_version import PromptVersion
 from packages.infrastructure.container import ApplicationContainer
 
 router = APIRouter(
@@ -35,6 +41,30 @@ def _slugify(name: str) -> str:
     return slug or "prompt"
 
 
+async def _to_response(prompt: Prompt, container: ApplicationContainer) -> PromptResponseSchema:
+    prompt_versions = container.repositories.prompt_version()
+    published = await prompt_versions.get_published(prompt.id)
+    response = PromptResponseSchema.model_validate(prompt)
+    response.published_version = (
+        PromptVersionResponseSchema.model_validate(published) if published is not None else None
+    )
+    return response
+
+
+async def _get_owned_prompt(
+    prompt_id: UUID,
+    tenant_id: UUID,
+    container: ApplicationContainer,
+) -> Prompt:
+    prompt = await container.repositories.prompt().get(prompt_id)
+    if prompt is None or prompt.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prompt not found.",
+        )
+    return prompt
+
+
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
@@ -42,9 +72,8 @@ def _slugify(name: str) -> str:
     dependencies=[Depends(require_admin()), Depends(require_permission(Permission.PROMPTS_WRITE))],
     summary="Create a prompt",
     description=(
-        "Creates a new prompt's metadata for the calling tenant. Does not "
-        "create a PromptVersion (the actual prompt text) — that has no "
-        "repository/API surface yet."
+        "Creates a new prompt's metadata for the calling tenant. Add its actual text with "
+        "POST /prompts/{id}/versions."
     ),
 )
 async def create_prompt(
@@ -78,7 +107,7 @@ async def create_prompt(
 
     return ApiResponse(
         message="Prompt created.",
-        data=PromptResponseSchema.model_validate(created),
+        data=await _to_response(created, container),
     )
 
 
@@ -88,7 +117,7 @@ async def create_prompt(
     response_model=ApiResponse[PromptListResponseSchema],
     dependencies=[Depends(require_permission(Permission.PROMPTS_READ))],
     summary="List prompts",
-    description="Lists the calling tenant's prompts, any status.",
+    description="Lists the calling tenant's prompts, any status, each with its currently-published version if it has one.",
 )
 async def list_prompts(
     request: Request,
@@ -109,7 +138,7 @@ async def list_prompts(
             total=total,
             limit=limit,
             offset=offset,
-            prompts=[PromptResponseSchema.model_validate(p) for p in rows],
+            prompts=[await _to_response(p, container) for p in rows],
         ),
     )
 
@@ -120,7 +149,7 @@ async def list_prompts(
     response_model=ApiResponse[PromptResponseSchema],
     dependencies=[Depends(require_permission(Permission.PROMPTS_READ))],
     summary="Fetch a prompt",
-    description="Fetches a single prompt's metadata by ID.",
+    description="Fetches a single prompt's metadata by ID, with its currently-published version if it has one.",
 )
 async def get_prompt(
     prompt_id: UUID,
@@ -129,16 +158,118 @@ async def get_prompt(
 ):
     tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
 
-    prompts = container.repositories.prompt()
-    prompt = await prompts.get(prompt_id)
-
-    if prompt is None or prompt.tenant_id != tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Prompt not found.",
-        )
+    prompt = await _get_owned_prompt(prompt_id, tenant_id, container)
 
     return ApiResponse(
         message="Prompt retrieved.",
-        data=PromptResponseSchema.model_validate(prompt),
+        data=await _to_response(prompt, container),
+    )
+
+
+@router.get(
+    "/{prompt_id}/versions",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[PromptVersionListResponseSchema],
+    dependencies=[Depends(require_permission(Permission.PROMPTS_READ))],
+    summary="List a prompt's versions",
+    description="Every version of this prompt's template, most recent first — the full edit history.",
+)
+async def list_prompt_versions(
+    prompt_id: UUID,
+    request: Request,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    await _get_owned_prompt(prompt_id, tenant_id, container)
+
+    versions = await container.repositories.prompt_version().list_by_prompt(prompt_id)
+
+    return ApiResponse(
+        message="Prompt versions retrieved.",
+        data=PromptVersionListResponseSchema(
+            versions=[PromptVersionResponseSchema.model_validate(v) for v in versions],
+        ),
+    )
+
+
+@router.post(
+    "/{prompt_id}/versions",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ApiResponse[PromptVersionResponseSchema],
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.PROMPTS_WRITE))],
+    summary="Add a new draft version",
+    description=(
+        "Adds a new, numbered DRAFT version with real template text — publish it "
+        "(POST .../versions/{version_id}/publish) to make it the one live version chat actually "
+        "uses. Earlier versions are never overwritten, only superseded, so rolling back is just "
+        "publishing an older one again."
+    ),
+)
+async def create_prompt_version(
+    prompt_id: UUID,
+    payload: CreatePromptVersionRequestSchema,
+    request: Request,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    await _get_owned_prompt(prompt_id, tenant_id, container)
+
+    prompt_versions = container.repositories.prompt_version()
+    next_version = await prompt_versions.next_version_number(prompt_id)
+
+    version = PromptVersion(
+        prompt_id=prompt_id,
+        version=next_version,
+        template=payload.template,
+        variables=payload.variables,
+        examples=payload.examples,
+        changelog=payload.changelog,
+    )
+
+    created = await prompt_versions.create(version)
+
+    return ApiResponse(
+        message=f"Version {next_version} created.",
+        data=PromptVersionResponseSchema.model_validate(created),
+    )
+
+
+@router.post(
+    "/{prompt_id}/versions/{version_id}/publish",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[PromptVersionResponseSchema],
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.PROMPTS_WRITE))],
+    summary="Publish a version (or roll back to one)",
+    description=(
+        "Makes this version the one live version for the prompt, unpublishing whichever version "
+        "was live before. The same operation for the newest draft and a rollback — publishing an "
+        "older version again is how a rollback actually works here, nothing is deleted or rewritten."
+    ),
+)
+async def publish_prompt_version(
+    prompt_id: UUID,
+    version_id: UUID,
+    request: Request,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    await _get_owned_prompt(prompt_id, tenant_id, container)
+
+    prompt_versions = container.repositories.prompt_version()
+    version = await prompt_versions.get(version_id)
+
+    if version is None or version.prompt_id != prompt_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prompt version not found.",
+        )
+
+    published = await prompt_versions.publish(prompt_id, version)
+
+    return ApiResponse(
+        message=f"Version {published.version} is now published.",
+        data=PromptVersionResponseSchema.model_validate(published),
     )

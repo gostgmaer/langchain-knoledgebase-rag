@@ -395,6 +395,31 @@ export const PROMPT_CATEGORIES = [
 ] as const;
 export type PromptCategory = (typeof PROMPT_CATEGORIES)[number];
 
+export interface PromptVersion {
+  id: string;
+  prompt_id: string;
+  version: number;
+  status: string;
+  template: string;
+  variables: Record<string, unknown>;
+  examples: Record<string, unknown>[];
+  changelog: string | null;
+  is_published: boolean;
+  is_default: boolean;
+  created_at: string;
+}
+
+export interface PromptVersionListResponse {
+  versions: PromptVersion[];
+}
+
+export interface CreatePromptVersionRequest {
+  template: string;
+  variables?: Record<string, unknown>;
+  examples?: Record<string, unknown>[];
+  changelog?: string | null;
+}
+
 export interface Prompt {
   id: string;
   tenant_id: string;
@@ -403,6 +428,7 @@ export interface Prompt {
   description: string | null;
   category: string;
   is_active: boolean;
+  published_version: PromptVersion | null;
 }
 
 export interface PromptListResponse extends Page<Prompt> {

@@ -642,6 +642,32 @@ only ones chat could ever actually call.
   connectors already read) — production's default `false` blocks it the same way connectors are
   already blocked today. Full unit+integration suite (385) still green.
 
+### 30. ✅ Prompts had no text or version history UI — the data model was already there, unused
+The same UI audit: `PromptsView`'s own description admitted "actual prompt text/versioning has no
+UI yet." Creating a prompt only ever created metadata (name/category/description) — there was no
+way to give it real content at all.
+- **Not actually a missing data model** — `PromptVersion` (`packages/domain/models/prompt_version.py`)
+  already existed, fully designed: `template` (the real text), incrementing `version`, `status`
+  (DRAFT/PUBLISHED/DEPRECATED/ARCHIVED), `is_published`, `changelog`, `variables`, `examples`. It
+  just had zero repository methods, zero API routes, and zero frontend UI — the same
+  "already-built, never wired up" shape as item 28 (Upload Jobs).
+- **Fixed:** `PromptVersionRepository` (list/get-published/next-version-number/publish);
+  `GET /prompts/{id}/versions` (full history), `POST /prompts/{id}/versions` (new DRAFT),
+  `POST /prompts/{id}/versions/{version_id}/publish`. Publish is the one operation that does the
+  real work: it unpublishes whichever version was live (demoting its status to DEPRECATED) and
+  publishes the target — the exact same operation whether the target is the newest draft or an
+  older version, which is what makes "rollback" not a special case: it's just publishing an old
+  version again. Nothing is ever deleted or overwritten. `PromptResponseSchema` now carries
+  `published_version` inline so the list page shows current live content without a second request.
+  Frontend: a "Versions" panel per prompt with the full history, a new-draft form, and a Publish
+  button per non-live version.
+- **Verified live, the full cycle**: created a real prompt, created v1 and published it, created v2
+  and published it (confirmed v1 auto-demoted to DEPRECATED), then **rolled back** by publishing v1
+  again (confirmed v1 back to PUBLISHED/live, v2 untouched in history, nothing deleted) — all via
+  the real running API, then confirmed the same state rendering correctly in a real browser
+  (version list, LIVE/DEPRECATED badges, changelog, template text). Full unit+integration suite
+  (388) still green.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

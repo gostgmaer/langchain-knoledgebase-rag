@@ -10,6 +10,7 @@ import type {
   CreateKnowledgeBaseRequest,
   CreateModelProfileRequest,
   CreatePromptRequest,
+  CreatePromptVersionRequest,
   CreateToolRequest,
   AuditList,
   ConnectionTest,
@@ -55,6 +56,8 @@ import type {
   ModelProfileListResponse,
   Prompt,
   PromptListResponse,
+  PromptVersion,
+  PromptVersionListResponse,
   SearchRequest,
   SearchResponse,
   SubmitFeedbackRequest,
@@ -212,6 +215,14 @@ export const prompts = {
   get: (identity: Identity, id: string) => apiFetch<Prompt>(`/prompts/${id}`, identity),
   create: (identity: Identity, body: CreatePromptRequest) =>
     apiFetch<Prompt>("/prompts", identity, { method: "POST", body }),
+  listVersions: (identity: Identity, promptId: string) =>
+    apiFetch<PromptVersionListResponse>(`/prompts/${promptId}/versions`, identity),
+  createVersion: (identity: Identity, promptId: string, body: CreatePromptVersionRequest) =>
+    apiFetch<PromptVersion>(`/prompts/${promptId}/versions`, identity, { method: "POST", body }),
+  publishVersion: (identity: Identity, promptId: string, versionId: string) =>
+    apiFetch<PromptVersion>(`/prompts/${promptId}/versions/${versionId}/publish`, identity, {
+      method: "POST",
+    }),
 };
 
 // ---------------------------------------------------------------

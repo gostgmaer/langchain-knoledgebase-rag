@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from packages.api.schemas.prompt_version import PromptVersionResponseSchema
 from packages.domain.enums.prompt_category import PromptCategory
 
 
@@ -24,10 +25,12 @@ class CreatePromptRequestSchema(BaseModel):
 
 class PromptResponseSchema(BaseModel):
     """
-    A single prompt's metadata. The actual prompt text lives on
-    PromptVersion, not here (see packages/domain/models/prompt.py) —
-    versioning has no repository/API surface yet, a separate,
-    follow-up gap.
+    A single prompt's metadata. The actual prompt text lives on PromptVersion
+    (see packages/domain/models/prompt.py) — `published_version` is filled in by the router
+    (PromptVersion has no direct, reliably-ordered relationship load through this schema alone)
+    so a caller doesn't need a second request just to see what's actually live today.
+    `GET/POST /prompts/{id}/versions` is the full version history and version-create surface
+    (docs/BUGS.md item 30).
     """
 
     model_config = ConfigDict(
@@ -41,6 +44,7 @@ class PromptResponseSchema(BaseModel):
     description: str | None
     category: str
     is_active: bool
+    published_version: PromptVersionResponseSchema | None = None
 
 
 class PromptListResponseSchema(BaseModel):
