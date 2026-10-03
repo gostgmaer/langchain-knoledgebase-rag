@@ -602,6 +602,46 @@ description admitting "the backend has no list-all endpoint for these."
   jobs in this environment; loaded the page in a real browser, confirmed the table renders with
   correct status badges and timestamps, confirmed zero console errors.
 
+### 29. ✅ CUSTOM tool definitions were disconnected from the real tool registry — now real, callable webhook tools
+The same UI audit: `ToolsView`'s own description admitted a DB-backed `Tool` row was "distinct
+from the in-process registry that actually powers chat tool-calling" — creating one did nothing
+real; built-in tools (calculator, weather, search, knowledge-base search, IAM lookups) were the
+only ones chat could ever actually call.
+- **Scope, deliberately bounded** (user's own call, asked explicitly rather than invented): only
+  CUSTOM-category tools get real execution, as a generic HTTP webhook — the LLM's single text
+  input is sent to `configuration.url`. The other 8 categories (SEARCH, DATABASE, API, FILE, EMAIL,
+  NOTIFICATION, AI, UTILITY) already have fixed, code-defined implementations in
+  `packages/tools/builtin/`; a DB row in one of those stays descriptive metadata, same as before —
+  a generic per-category execution engine for all of them is a separate, much larger decision.
+- **Fixed:** `packages/tools/webhook.py`'s `make_webhook_tool()` builds a real LangChain
+  `StructuredTool` from a `Tool` row, reusing `packages/connectors/http.py`'s
+  `ResilientHttpClient` — the same SSRF-safe, retrying, circuit-broken client every knowledge
+  source connector already uses — rather than a second, weaker HTTP path. `CONNECTOR_ALLOW_PRIVATE_
+  HOSTS` governs both, so the policy is one setting, not two.
+- **A real architectural constraint surfaced and solved, not glossed over**: `ApplicationContainer`
+  is one shared, process-wide instance (not rebuilt per request), and the whole LangGraph graph —
+  nodes, LLM tool-binding, all of it — is built through a fully *synchronous*
+  `dependency-injector` provider chain (`packages/infrastructure/container/graph.py`). Registering
+  a tenant's custom tools needs an async DB query; making `init_tool_manager` itself async would
+  have forced every one of a dozen-plus providers up the chain (and every caller of
+  `container.graph.*` anywhere in the app) to become async too — a blast radius far bigger than
+  this feature. Fixed with a narrow `ContextVar` (`packages/tools/context.py`, same pattern
+  `current_session` already uses for the identical structural reason): the chat router does the
+  async DB fetch and builds the real tool objects up front (`load_custom_tools()`), drops them in
+  the context var, and the synchronous `init_tool_manager` just reads them back — zero async code
+  added anywhere in the DI chain.
+- **Verified live, fully end to end**, not just unit-level: created a real CUSTOM tool via
+  `POST /api/v1/tool-definitions` (`configuration: {"url": "https://httpbin.org/post"}`), sent a
+  real chat message asking the model to call it — the LLM genuinely recognized and chose to call
+  it (`pending_approval.tool_calls[0].name == "say-pong"`), approved the pending tool call via
+  `POST /chat/{id}/resume`, and the webhook actually executed and the model used the real response
+  ("PONG"). Separately confirmed the SSRF guard itself: `assert_public_url()` correctly blocked
+  `169.254.169.254` (cloud metadata), `127.0.0.1`, `localhost`, and `192.168.1.1` when called
+  directly; the live webhook call to a metadata-style address only timed out instead of being
+  blocked because this *dev* environment has `CONNECTOR_ALLOW_PRIVATE_HOSTS=true` (same setting
+  connectors already read) — production's default `false` blocks it the same way connectors are
+  already blocked today. Full unit+integration suite (385) still green.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

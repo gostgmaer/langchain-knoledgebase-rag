@@ -17,6 +17,7 @@ from packages.tools.builtin.knowledge_base import (
 from packages.tools.builtin.news import get_news
 from packages.tools.builtin.search import get_google_search
 from packages.tools.builtin.weather import get_weather
+from packages.tools.context import current_custom_tools
 from packages.tools.executor import ToolExecutor
 from packages.tools.manager import ToolManager
 from packages.tools.registry import ToolRegistry
@@ -37,6 +38,11 @@ def init_tool_manager(
     manager.register(make_document_search_tool(knowledge_manager))
     manager.register(make_iam_user_lookup_tool(iam_client))
     manager.register(make_iam_tenant_lookup_tool(iam_client))
+    # The tenant's CUSTOM webhook tools (docs/BUGS.md item 29) were already fetched from the DB
+    # and built by the chat router before the graph (and this factory) is ever constructed — this
+    # stays a plain sync function on purpose, see packages/tools/context.py for why.
+    for custom_tool in current_custom_tools():
+        manager.register(custom_tool)
     return manager
 
 

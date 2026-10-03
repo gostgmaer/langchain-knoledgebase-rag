@@ -11,11 +11,10 @@ from packages.domain.enums.tool_category import ToolCategory
 
 class CreateToolRequestSchema(BaseModel):
     """
-    Incoming request to register a tool definition. Distinct from
-    packages/tools/ — the in-process registry that actually powers
-    chat tool-calling (packages/tools/manager.py's ToolManager). This
-    is a separate, DB-backed record of tool metadata with no runtime
-    link to the registry yet.
+    Incoming request to register a tool definition. A CUSTOM-category row with
+    configuration.url becomes a real, callable webhook tool in chat
+    (packages/tools/webhook.py, docs/BUGS.md item 29) — every other category is metadata only,
+    since packages/tools/builtin/ already has fixed, code-defined implementations for those.
     """
 
     model_config = ConfigDict(
