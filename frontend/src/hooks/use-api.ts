@@ -21,6 +21,7 @@ import {
   search,
   tenants,
   users,
+  apiKeys,
   tools,
   uploadJobs,
   usage,
@@ -40,6 +41,7 @@ import type {
   UpdateModelProfileRequest,
   CreatePromptRequest,
   CreatePromptVersionRequest,
+  CreateApiKeyRequest,
   CreateToolRequest,
   FeedbackRating,
   SearchRequest,
@@ -110,6 +112,37 @@ export function useTenantUsers() {
     queryKey: ["tenant-users", identity?.tenantId],
     queryFn: () => users.list(identity!),
     enabled: !!identity,
+  });
+}
+
+// ---------------------------------------------------------------
+// API Keys
+// ---------------------------------------------------------------
+
+export function useApiKeys() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["api-keys", identity?.tenantId],
+    queryFn: () => apiKeys.list(identity!),
+    enabled: !!identity,
+  });
+}
+
+export function useCreateApiKey() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateApiKeyRequest) => apiKeys.create(identity!, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["api-keys", identity?.tenantId] }),
+  });
+}
+
+export function useRevokeApiKey() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiKeys.revoke(identity!, id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["api-keys", identity?.tenantId] }),
   });
 }
 

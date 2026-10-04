@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, FastAPI
 
 from packages.api.routers.agents import router as agent_router
+from packages.api.routers.api_keys import router as api_key_router
 from packages.api.routers.analytics import router as analytics_router
 from packages.api.routers.auth import router as auth_router
 from packages.api.routers.chat import router as chat_router
@@ -46,6 +47,7 @@ api_router.include_router(document_router)
 api_router.include_router(knowledge_base_router)
 api_router.include_router(search_router)
 api_router.include_router(agent_router)
+api_router.include_router(api_key_router)
 api_router.include_router(model_router)
 api_router.include_router(prompt_router)
 api_router.include_router(tool_router)

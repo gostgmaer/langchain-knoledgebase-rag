@@ -71,6 +71,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
 
     iam = providers.Container(
         IAMContainer,
+        database=database,
     )
 
     #

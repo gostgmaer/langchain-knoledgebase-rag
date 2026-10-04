@@ -676,6 +676,39 @@ export interface UserListResponse {
 }
 
 // ---------------------------------------------------------------
+// API Keys
+// ---------------------------------------------------------------
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  is_active: boolean;
+  created_by_email: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface ApiKeyListResponse {
+  api_keys: ApiKey[];
+}
+
+export interface CreateApiKeyRequest {
+  name: string;
+  expires_at?: string | null;
+}
+
+export interface CreateApiKeyResponse {
+  id: string;
+  name: string;
+  key: string;
+  key_prefix: string;
+  expires_at: string | null;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------
 // Retrieval logs & observability (admin)
 // ---------------------------------------------------------------
 

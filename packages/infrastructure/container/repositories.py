@@ -4,6 +4,7 @@ from dependency_injector import containers, providers
 
 from packages.infrastructure.repositories.agent import AgentRepository
 from packages.infrastructure.repositories.ai_response import AIResponseRepository
+from packages.infrastructure.repositories.api_key import ApiKeyRepository
 from packages.infrastructure.repositories.conversation import ConversationRepository
 from packages.infrastructure.repositories.document import DocumentRepository
 from packages.infrastructure.repositories.document_chunk import DocumentChunkRepository
@@ -83,6 +84,11 @@ class RepositoryContainer(
 
     agent = providers.Factory(
         AgentRepository,
+        session=session,
+    )
+
+    api_key = providers.Factory(
+        ApiKeyRepository,
         session=session,
     )
 

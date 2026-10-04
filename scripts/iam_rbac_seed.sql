@@ -26,6 +26,7 @@ SELECT gen_random_uuid()::text, code, 'RAG platform permission (langchain-knoled
        split_part(code, ':', 1), split_part(code, ':', 2), CURRENT_TIMESTAMP
 FROM unnest(ARRAY[
     'agents:read', 'agents:write',
+    'api_keys:read', 'api_keys:write',
     'analytics:read',
     'documents:read', 'documents:write', 'documents:delete',
     'feedback:read',
@@ -49,19 +50,20 @@ FROM iam.roles r
 CROSS JOIN iam.permissions p
 WHERE r.name IN ('super_admin', 'admin', 'tenant_admin')
   AND p.resource IN (
-      'agents', 'analytics', 'documents', 'feedback', 'knowledge_bases', 'knowledge_sources',
-      'models', 'observability', 'prompts', 'retrieval_logs', 'retrieval_settings', 'tools',
-      'upload_jobs', 'usage'
+      'agents', 'api_keys', 'analytics', 'documents', 'feedback', 'knowledge_bases',
+      'knowledge_sources', 'models', 'observability', 'prompts', 'retrieval_logs',
+      'retrieval_settings', 'tools', 'upload_jobs', 'usage'
   )
 ON CONFLICT ("roleId", "permissionId") DO NOTHING;
 
 COMMIT;
 
--- Verification: expect 3 roles * 27 permissions = 81 rows.
+-- Verification: expect 3 roles * (as many codes as packages/api/permissions.py currently
+-- defines) rows — re-run after adding a new code and this grows accordingly, by design.
 -- SELECT r.name, count(*) FROM iam.role_permissions rp
 --   JOIN iam.roles r ON r.id = rp."roleId"
 --   JOIN iam.permissions p ON p.id = rp."permissionId"
---   WHERE p.resource IN ('agents','analytics','documents','feedback','knowledge_bases',
---     'knowledge_sources','models','observability','prompts','retrieval_logs',
---     'retrieval_settings','tools','upload_jobs','usage')
+--   WHERE p.resource IN ('agents','api_keys','analytics','documents','feedback',
+--     'knowledge_bases','knowledge_sources','models','observability','prompts',
+--     'retrieval_logs','retrieval_settings','tools','upload_jobs','usage')
 --   GROUP BY r.name;

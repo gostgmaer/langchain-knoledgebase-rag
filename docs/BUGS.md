@@ -735,6 +735,45 @@ hadn't prioritized found four more real, consistent product gaps — not polish:
   instead verified at the real HTTP layer the UI calls, same backend the rest of this item's
   manual browser testing (item 31) used.
 
+### 33. ✅ No API key support at all — zero way to call this API outside a browser session
+A real, genuine enterprise-platform gap, found by auditing against standard SaaS capabilities
+rather than a UI sweep: this app had no concept of a programmatic credential anywhere —
+everything went through an IAM-issued browser session token. No CI pipeline, integration,
+or script could call this API at all without one.
+- **Design**: a tenant-scoped `ApiKey` (`packages/domain/models/api_key.py`) — raw value shown
+  exactly once at creation (`rag_live_<32 random url-safe chars>`), only its SHA-256 hash ever
+  stored, same handling a password gets. `AuthService.resolve()` (`packages/auth/service.py`)
+  now branches on the token's shape: `rag_live_` prefix goes to this app's own `api_keys` table
+  instead of an IAM round-trip, resolving to a synthetic `CurrentUser` with `roles=["admin"]` and
+  every permission code this app defines (`_ALL_PERMISSION_CODES`, collected from `Permission`
+  itself so it can't drift out of sync) — matching exactly what the real "admin" role already has
+  via `scripts/iam_rbac_seed.sql`, not a privilege escalation. Attributed back to whoever created
+  it (`created_by_user_id`/`email`) for audit purposes.
+- **A real architectural constraint hit and solved, the same shape as item 29's**: the auth
+  middleware runs before any route-level dependency establishes a DB session, so API-key lookup
+  needed its own path to the database. Wired `database.session_factory` directly into
+  `AuthService` (`packages/infrastructure/container/iam.py`) — a short-lived session opened and
+  closed entirely within one `resolve()` call, independent of the request-scoped session every
+  route handler shares.
+- New routes: `POST/GET /api-keys`, `DELETE /api-keys/{id}` (revoke — not a hard delete, the row
+  stays for the audit trail). New frontend "API Keys" page under Administration (both `admin` and
+  `tenant_admin` — a tenant-scoped credential, not a platform-wide one) with a one-time reveal
+  dialog and a copy button.
+- **Verified live, including the two properties that actually matter for something this
+  security-sensitive**: created a real key through the real API, then authenticated a real request
+  to `GET /agents` using *only* that raw key — no JWT anywhere — and it worked. Confirmed **tenant
+  isolation holds**: sent a deliberately spoofed `X-Tenant-ID` header for a different tenant
+  alongside the key, and the response still came from the key's own tenant, proving a key can't be
+  used to reach another tenant's data by changing a header (`require_uuid_header`'s existing
+  `can_override_tenant` check already requires `super_admin`, which API keys deliberately don't
+  get). Confirmed revocation is immediate (revoked key → 401 on the next call) and a garbage key is
+  rejected cleanly (401, no crash). Then did the same create → reveal → revoke cycle through the
+  real browser UI end to end (screenshots confirm the one-time-reveal dialog, the masked list, and
+  a real toast on revoke) once the Chrome extension reconnected mid-session.
+- New permission codes (`api_keys:read`/`write`) needed mapping on the IAM side the same way item
+  11's original taxonomy did — re-ran the updated `scripts/iam_rbac_seed.sql` (now 29 codes × 3
+  roles) against the real IAM database.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

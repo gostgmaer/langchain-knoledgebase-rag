@@ -66,6 +66,10 @@ import type {
   TenantResponse,
   UserListResponse,
   UserResponse,
+  ApiKey,
+  ApiKeyListResponse,
+  CreateApiKeyRequest,
+  CreateApiKeyResponse,
   ToolDefinition,
   ToolListResponse,
   UploadJob,
@@ -97,6 +101,15 @@ export const users = {
     apiFetch<UserResponse>(`/users/${userId}`, identity),
   list: (identity: Identity) =>
     apiFetch<UserListResponse>("/users", identity),
+};
+
+export const apiKeys = {
+  list: (identity: Identity) =>
+    apiFetch<ApiKeyListResponse>("/api-keys", identity),
+  create: (identity: Identity, body: CreateApiKeyRequest) =>
+    apiFetch<CreateApiKeyResponse>("/api-keys", identity, { method: "POST", body }),
+  revoke: (identity: Identity, id: string) =>
+    apiFetch<ApiKey>(`/api-keys/${id}`, identity, { method: "DELETE" }),
 };
 
 // ---------------------------------------------------------------

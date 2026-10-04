@@ -3,6 +3,7 @@ from .agent_knowledge_base import AgentKnowledgeBase
 from .agent_prompt import AgentPrompt
 from .agent_tool import AgentTool
 from .ai_response import AIResponse
+from .api_key import ApiKey
 from .base import BaseModel
 from .conversation import Conversation
 from .document import Document
@@ -42,6 +43,7 @@ __all__ = [
     "AgentPrompt",
     "AgentTool",
     "AIResponse",
+    "ApiKey",
     "Conversation",
     "Document",
     "DocumentChunk",

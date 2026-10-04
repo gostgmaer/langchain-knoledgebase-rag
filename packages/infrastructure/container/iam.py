@@ -18,6 +18,8 @@ class IAMContainer(
     packages/auth/service.py).
     """
 
+    database = providers.DependenciesContainer()
+
     http_client = providers.Singleton(
         create_http_client,
     )
@@ -31,4 +33,9 @@ class IAMContainer(
     auth_service = providers.Singleton(
         AuthService,
         client=client,
+        # Lets AuthService resolve this app's own API keys (docs/BUGS.md item 33) without going
+        # through the request-scoped session machinery — a short-lived session opened and closed
+        # entirely within AuthService, since the auth middleware runs before any route-level
+        # dependency establishes one.
+        api_key_session_factory=database.session_factory,
     )

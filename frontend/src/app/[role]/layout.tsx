@@ -11,6 +11,7 @@ import {
   FileText,
   Flag,
   Gauge,
+  Key,
   LayoutDashboard,
   Library,
   MessageSquare,
@@ -66,6 +67,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/tenant-admin/upload-jobs", label: "Upload Jobs", icon: UploadCloud, section: "Operations" },
 
     { href: "/tenant-admin/team", label: "Team", icon: Users, section: "Administration" },
+    { href: "/tenant-admin/api-keys", label: "API Keys", icon: Key, section: "Administration" },
     { href: "/tenant-admin/settings", label: "Settings", icon: Settings, section: "Administration" },
   ],
   admin: [
@@ -92,6 +94,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
 
     { href: "/admin/tenants", label: "Tenants", icon: ShieldCheck, section: "Administration" },
     { href: "/admin/team", label: "Team", icon: Users, section: "Administration" },
+    { href: "/admin/api-keys", label: "API Keys", icon: Key, section: "Administration" },
     { href: "/admin/feature-flags", label: "Feature Flags", icon: Flag, section: "Administration" },
     { href: "/admin/settings", label: "Settings", icon: Settings, section: "Administration" },
   ],
