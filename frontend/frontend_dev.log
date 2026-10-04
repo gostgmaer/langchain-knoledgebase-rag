@@ -1,0 +1,16 @@
+
+> frontend@0.1.0 dev C:\Users\kisho\WorkSpace\learning\ai\langchain-knoledgebase-rag\frontend
+> next dev
+
+▲ Next.js 16.3.7 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.1.4:3000
+- Environments: .env.local
+✓ Ready in 5.5s
+✓ Running next.config.ts took 559ms
+
+ GET / 200 in 2.4s (next.js: 727ms, proxy.ts: 1360ms, application-code: 308ms)
+Debugger listening on ws://127.0.0.1:5190/d4d0b96e-9ed0-448c-b05c-987e2c573251
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+ GET / 200 in 271ms (next.js: 161ms, proxy.ts: 17ms, application-code: 93ms)
