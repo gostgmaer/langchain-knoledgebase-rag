@@ -331,6 +331,19 @@ export interface CreateAgentRequest {
   max_tokens?: number;
 }
 
+export interface UpdateAgentRequest {
+  name?: string;
+  description?: string | null;
+  system_prompt?: string;
+  llm_provider?: string;
+  llm_model?: string;
+  model_profile_id?: string;
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  is_active?: boolean;
+}
+
 // ---------------------------------------------------------------
 // Model Profiles (global, not tenant-scoped)
 // ---------------------------------------------------------------
@@ -370,6 +383,26 @@ export interface CreateModelProfileRequest {
   top_k?: number | null;
   max_tokens?: number;
   context_window: number;
+  embedding_dimensions?: number;
+  supports_streaming?: boolean;
+  supports_tools?: boolean;
+  supports_reasoning?: boolean;
+  supports_images?: boolean;
+  supports_embeddings?: boolean;
+  is_default?: boolean;
+}
+
+export interface UpdateModelProfileRequest {
+  status?: string;
+  name?: string;
+  provider?: string;
+  model?: string;
+  description?: string | null;
+  temperature?: number;
+  top_p?: number;
+  top_k?: number | null;
+  max_tokens?: number;
+  context_window?: number;
   embedding_dimensions?: number;
   supports_streaming?: boolean;
   supports_tools?: boolean;
@@ -623,6 +656,23 @@ export interface TenantResponse {
   name: string;
   slug: string;
   is_active: boolean;
+}
+
+// ---------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------
+
+export interface UserResponse {
+  id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  display_name: string | null;
+  is_active: boolean;
+}
+
+export interface UserListResponse {
+  users: UserResponse[];
 }
 
 // ---------------------------------------------------------------

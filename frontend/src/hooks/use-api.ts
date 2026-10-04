@@ -20,6 +20,7 @@ import {
   retrievalSettings,
   search,
   tenants,
+  users,
   tools,
   uploadJobs,
   usage,
@@ -32,9 +33,11 @@ import type {
   RetrievalSettingsUpdate,
   DocumentUploadOptions,
   CreateAgentRequest,
+  UpdateAgentRequest,
   CreateFeatureFlagRequest,
   CreateKnowledgeBaseRequest,
   CreateModelProfileRequest,
+  UpdateModelProfileRequest,
   CreatePromptRequest,
   CreatePromptVersionRequest,
   CreateToolRequest,
@@ -84,6 +87,29 @@ export function useTenant(tenantId: string | null | undefined) {
     enabled: !!identity && valid,
     staleTime: 5 * 60_000,
     retry: false,
+  });
+}
+
+/** Resolves a user's real name/email from IAM — same idiom as useTenant above. */
+export function useUser(userId: string | null | undefined) {
+  const identity = useIdentity();
+  const valid = !!userId && UUID_RE.test(userId);
+  return useQuery({
+    queryKey: ["user", userId],
+    queryFn: () => users.get(identity!, userId!),
+    enabled: !!identity && valid,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
+/** Real members of the current tenant (docs/BUGS.md item 32), not just pending invitations. */
+export function useTenantUsers() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["tenant-users", identity?.tenantId],
+    queryFn: () => users.list(identity!),
+    enabled: !!identity,
   });
 }
 
@@ -355,6 +381,15 @@ export function useCreateAgent() {
   });
 }
 
+export function useUpdateAgent() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateAgentRequest }) => agents.update(identity!, id, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents", identity?.tenantId] }),
+  });
+}
+
 // ---------------------------------------------------------------
 // Model Profiles
 // ---------------------------------------------------------------
@@ -382,6 +417,16 @@ export function useCreateModelProfile() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: CreateModelProfileRequest) => modelProfiles.create(identity!, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["model-profiles"] }),
+  });
+}
+
+export function useUpdateModelProfile() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateModelProfileRequest }) =>
+      modelProfiles.update(identity!, id, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["model-profiles"] }),
   });
 }

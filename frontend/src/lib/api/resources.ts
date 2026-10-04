@@ -6,9 +6,11 @@ import type {
   ChatResponseData,
   Conversation,
   CreateAgentRequest,
+  UpdateAgentRequest,
   CreateFeatureFlagRequest,
   CreateKnowledgeBaseRequest,
   CreateModelProfileRequest,
+  UpdateModelProfileRequest,
   CreatePromptRequest,
   CreatePromptVersionRequest,
   CreateToolRequest,
@@ -62,6 +64,8 @@ import type {
   SearchResponse,
   SubmitFeedbackRequest,
   TenantResponse,
+  UserListResponse,
+  UserResponse,
   ToolDefinition,
   ToolListResponse,
   UploadJob,
@@ -86,6 +90,13 @@ export const health = {
 export const tenants = {
   get: (identity: Identity, tenantId: string) =>
     apiFetch<TenantResponse>(`/tenants/${tenantId}`, identity),
+};
+
+export const users = {
+  get: (identity: Identity, userId: string) =>
+    apiFetch<UserResponse>(`/users/${userId}`, identity),
+  list: (identity: Identity) =>
+    apiFetch<UserListResponse>("/users", identity),
 };
 
 // ---------------------------------------------------------------
@@ -188,6 +199,8 @@ export const agents = {
   get: (identity: Identity, id: string) => apiFetch<Agent>(`/agents/${id}`, identity),
   create: (identity: Identity, body: CreateAgentRequest) =>
     apiFetch<Agent>("/agents", identity, { method: "POST", body }),
+  update: (identity: Identity, id: string, body: UpdateAgentRequest) =>
+    apiFetch<Agent>(`/agents/${id}`, identity, { method: "PATCH", body }),
 };
 
 // ---------------------------------------------------------------
@@ -203,6 +216,8 @@ export const modelProfiles = {
     apiFetch<ModelProfile>(`/model-profiles/${id}`, identity),
   create: (identity: Identity, body: CreateModelProfileRequest) =>
     apiFetch<ModelProfile>("/model-profiles", identity, { method: "POST", body }),
+  update: (identity: Identity, id: string, body: UpdateModelProfileRequest) =>
+    apiFetch<ModelProfile>(`/model-profiles/${id}`, identity, { method: "PATCH", body }),
 };
 
 // ---------------------------------------------------------------

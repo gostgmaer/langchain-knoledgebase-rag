@@ -12,6 +12,7 @@ from packages.api.schemas.model_profile import (
     CreateModelProfileRequestSchema,
     ModelProfileListResponseSchema,
     ModelProfileResponseSchema,
+    UpdateModelProfileRequestSchema,
 )
 from packages.config.loader import settings
 from packages.domain.enums.model_status import ModelStatus
@@ -134,4 +135,47 @@ async def get_model_profile(
     return ApiResponse(
         message="Model profile retrieved.",
         data=ModelProfileResponseSchema.model_validate(model_profile),
+    )
+
+
+@router.patch(
+    "/{model_profile_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[ModelProfileResponseSchema],
+    dependencies=[Depends(require_permission(Permission.MODELS_WRITE))],
+    summary="Edit a model profile",
+    description="Partial update — only the fields sent are changed.",
+)
+async def update_model_profile(
+    model_profile_id: UUID,
+    payload: UpdateModelProfileRequestSchema,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    model_profiles = container.repositories.model_profile()
+    model_profile = await model_profiles.get(model_profile_id)
+
+    if model_profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Model profile not found.",
+        )
+
+    updates = payload.model_dump(exclude_unset=True)
+
+    if "name" in updates and updates["name"] != model_profile.name:
+        existing = await model_profiles.get_by_name(updates["name"])
+        if existing is not None and existing.id != model_profile.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A model profile named '{updates['name']}' already exists.",
+            )
+
+    for field, value in updates.items():
+        setattr(model_profile, field, value)
+
+    updated = await model_profiles.update(model_profile)
+
+    return ApiResponse(
+        message="Model profile updated.",
+        data=ModelProfileResponseSchema.model_validate(updated),
     )

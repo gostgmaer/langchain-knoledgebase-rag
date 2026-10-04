@@ -1,9 +1,19 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useUser } from "@/hooks/use-api";
 import type { DocumentRecord } from "@/lib/api/types";
 import { formatDateTime } from "@/lib/utils";
 
 const NOT_RECORDED = <span className="text-neutral-400">not recorded</span>;
+
+/** Resolves a user id to their real name, falling back to the raw id while loading or if
+ * IAM can't be reached for it — same idiom as the Tenants page's history pills. */
+function UploadedBy({ userId }: { userId: string }) {
+  const { data: user, isLoading } = useUser(userId);
+  if (isLoading) return <span className="text-neutral-400">resolving…</span>;
+  if (user) return <span>{[user.first_name, user.last_name].filter(Boolean).join(" ") || user.email}</span>;
+  return <code className="text-xs">{userId.slice(0, 8)}</code>;
+}
 
 /** Where a document came from and which pipeline/models processed it. */
 export function ProvenanceCard({ doc }: { doc: DocumentRecord }) {
@@ -14,7 +24,7 @@ export function ProvenanceCard({ doc }: { doc: DocumentRecord }) {
       </CardHeader>
       <CardContent className="grid gap-2 text-sm">
         <Row label="Source" value={doc.source_type ?? NOT_RECORDED} />
-        <Row label="Uploaded by" value={doc.uploaded_by ? <code className="text-xs">{doc.uploaded_by.slice(0, 8)}</code> : NOT_RECORDED} />
+        <Row label="Uploaded by" value={doc.uploaded_by ? <UploadedBy userId={doc.uploaded_by} /> : NOT_RECORDED} />
         <Row label="Content hash" value={doc.content_hash ? <code className="text-xs">{doc.content_hash.slice(0, 16)}…</code> : NOT_RECORDED} />
         <Row label="Parser" value={doc.parser_name ?? NOT_RECORDED} />
         <Row

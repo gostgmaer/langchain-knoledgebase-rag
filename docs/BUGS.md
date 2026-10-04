@@ -700,6 +700,41 @@ management.
   the risk for a straightforward passthrough to an endpoint the recon already confirmed works.
   Frontend `tsc --noEmit` and the full Vitest suite (29) both clean throughout.
 
+### 32. ✅ Agents/Model Profiles were create-only, Documents showed raw uploader IDs, Team had no real members list
+A second, deeper UI sweep (after item 31) specifically hunting for smaller gaps the first pass
+hadn't prioritized found four more real, consistent product gaps — not polish:
+- **Agents and Model Profiles had no edit or deactivate** — confirmed at the backend, not just the
+  UI: `packages/api/routers/{agents,models}.py` only ever had `POST`/`GET`, no `PATCH`. Both
+  `AGENTS_WRITE`/`MODELS_WRITE` permission codes already existed, implying "write" was meant to
+  cover more than create. **Fixed**: `PATCH /agents/{id}` and `PATCH /model-profiles/{id}`
+  (partial update, re-validates the name-uniqueness and model-profile-exists checks the create
+  path already had), plus an Edit dialog and an Activate/Deactivate button on both admin pages.
+- **Two real bugs found and fixed in the IAM SDK while building the "Uploaded by" name
+  resolution** (`packages/sdk/iam/user.py`, `models.py`) — both genuinely dead code until now,
+  confirmed live, not just by inspection:
+  1. `User.model_validate()`'s field names didn't match IAM's real response at all — expected a
+     required `tenantId` that doesn't exist (a user's tenant memberships are a many-to-many via
+     `user_tenant_roles`, not a field on the user — every real call would have failed validation),
+     `id` instead of the real `internalId`, `isVerified` instead of `isEmailVerified`.
+  2. `get_user()` sent no `Authorization` header at all; IAM correctly rejected every call with
+     401 "Access denied. No token provided." Fixed to forward the caller's bearer token, same
+     idiom as `get_tenant()`. New `GET /users/{id}` (RAG backend, mirrors `GET /tenants/{id}`
+     exactly) and `GET /users` (tenant-scoped list, new `list_users()` SDK method) now back a real
+     `useUser()`/`useTenantUsers()` hook pair. Documents' "Uploaded by" row resolves a real name
+     instead of a truncated UUID; Team gained a real Members table (name/email/status) above the
+     existing invitations list — honestly disclosed limit: IAM's list endpoint doesn't return a
+     member's specific role, only membership, so that column isn't there.
+- **Verified live**: `GET /api/v1/users/{id}` and `GET /api/v1/users` both confirmed against the
+  real running IAM through the RAG backend (5 real users returned for the real tenant, correct
+  names/emails); `PATCH /agents/{id}` and `PATCH /model-profiles/{id}` both confirmed — edited a
+  real field, confirmed via `GET`, reverted to the original value; both activate/deactivate
+  toggles confirmed round-trip (off then on). Full backend suite (391-392, one pre-existing flaky
+  integration test confirmed unrelated by re-running it alone — passes in isolation) and frontend
+  `tsc --noEmit`/Vitest (29) clean. Browser-level UI screenshots not captured this pass — the
+  Chrome extension disconnected after a Docker Desktop restart mid-session; every change here is
+  instead verified at the real HTTP layer the UI calls, same backend the rest of this item's
+  manual browser testing (item 31) used.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

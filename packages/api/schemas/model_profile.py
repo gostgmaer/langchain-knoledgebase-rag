@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from packages.domain.enums.model_status import ModelStatus
+
 
 class CreateModelProfileRequestSchema(BaseModel):
     """
@@ -50,6 +52,48 @@ class CreateModelProfileRequestSchema(BaseModel):
     supports_embeddings: bool = False
 
     is_default: bool = False
+
+
+class UpdateModelProfileRequestSchema(BaseModel):
+    """Incoming request to edit an existing model profile. Every field is optional."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+
+    provider: str | None = Field(default=None, min_length=1, max_length=50)
+
+    model: str | None = Field(default=None, min_length=1, max_length=150)
+
+    description: str | None = Field(default=None, max_length=2000)
+
+    temperature: float | None = Field(default=None, ge=0, le=2)
+
+    top_p: float | None = Field(default=None, gt=0, le=1)
+
+    top_k: int | None = None
+
+    max_tokens: int | None = Field(default=None, gt=0)
+
+    context_window: int | None = Field(default=None, gt=0)
+
+    embedding_dimensions: int | None = Field(default=None, ge=0)
+
+    supports_streaming: bool | None = None
+
+    supports_tools: bool | None = None
+
+    supports_reasoning: bool | None = None
+
+    supports_images: bool | None = None
+
+    supports_embeddings: bool | None = None
+
+    is_default: bool | None = None
+
+    status: ModelStatus | None = None
 
 
 class ModelProfileResponseSchema(BaseModel):
