@@ -796,6 +796,31 @@ of its real name, with no obvious reason the ID specifically was needed there.
   truncated UUID — screenshot confirmed. Opened the New Flag dialog and confirmed its Scope
   dropdown lists real tenant names (`["Global default", "E2E Switch 1790356435", "EasyDev"]`) via a
   direct DOM check. `tsc --noEmit` and the full Vitest suite (29) both clean.
+- **User correctly pushed back on the "Switch by ID" carve-out above** — the principle isn't "raw
+  IDs are fine for a power-user feature," it's that an ID is a developer concept and a user should
+  never need to see or type one unless there's genuinely no name to show instead. Fixed properly:
+  the topbar's admin cross-tenant switcher (previously a free-text box with placeholder "Switch to
+  a different tenant ID…") is now a `<select>` of real tenant names, same pattern as
+  `WorkspaceSwitcher`. The Tenants page's separate "Switch by ID" card is gone entirely — it was
+  fully redundant once the Directory table above it already has a name-based "Browse as" button on
+  every row — and "Recently viewed" now resolves purely against the already-fetched directory data
+  (by name), never rendering a raw id even as a fallback; an entry whose tenant no longer resolves
+  is silently dropped rather than shown as an orphaned UUID. The repeated `/api/iam/tenants` fetch
+  across three components (Tenants page, Feature Flags, topbar) was pulled into one shared
+  `useTenantDirectory()` hook (`frontend/src/hooks/use-tenant-directory.ts`) along the way, rather
+  than copy-pasting it a third time.
+- **Re-audited the rest of the app for the same `.slice(0, 8)`-style truncated-id pattern** to make
+  sure nothing else tenant-related was missed: every remaining instance (Retrieval Log's
+  retrieval/request/trace ids, Knowledge Sources' sync-run history, Feedback's message id,
+  Documents' sync id) is on an admin-only diagnostic view for something that has no "name" concept
+  at all — a sync run or a trace isn't a named entity the way a tenant/user/document is — or already
+  tries a real name first and only falls back to an id on genuine lookup failure (Documents'
+  "Uploaded by", Observability's/Retrieval Log's document references). None of those are the same
+  bug; left as-is.
+- **Verified live, again**: used the topbar's new dropdown to actually switch tenants (not just
+  render it) — confirmed "Viewing tenant: E2E Switch 1790356435" after selecting it, confirmed
+  switching back to "EasyDev" worked too, both via the real running app, console clean throughout.
+  `tsc --noEmit` and Vitest (29) clean.
 
 ---
 

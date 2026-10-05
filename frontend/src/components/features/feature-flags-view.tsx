@@ -1,6 +1,5 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { Flag, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -24,38 +23,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useCreateFeatureFlag, useDeleteFeatureFlag, useFeatureFlags, useTenant, useToggleFeatureFlag } from "@/hooks/use-api";
-
-interface DirectoryTenant {
-  internalId: string;
-  name: string;
-}
-
-async function json<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(body?.error ?? "Request failed.");
-  return body as T;
-}
-
-// Same tolerant unwrap as the Tenants/Settings pages: the IAM gateway wraps as { success, data },
-// the BFF wraps that again as { data }.
-function asTenants(value: unknown): DirectoryTenant[] {
-  const inner = (value as { data?: unknown })?.data ?? value;
-  if (Array.isArray(inner)) return inner as DirectoryTenant[];
-  const nested = (inner as { data?: unknown })?.data;
-  return Array.isArray(nested) ? (nested as DirectoryTenant[]) : [];
-}
-
-/** Lets an admin pick a tenant by name instead of pasting a raw UUID — reuses the same real
- * directory the Tenants page shows, rather than making this the one place that still needs one
- * typed in blind. */
-function useTenantDirectory() {
-  return useQuery({
-    queryKey: ["tenant-directory"],
-    queryFn: async () => asTenants(await json<unknown>("/api/iam/tenants?page=1&limit=100")),
-    retry: false,
-  });
-}
+import { useTenantDirectory } from "@/hooks/use-tenant-directory";
 
 /** Resolves a tenant id to its real name, falling back to a truncated id only while loading or
  * if IAM can't be reached for it — same idiom as Documents' "Uploaded by" and the Tenants page. */
