@@ -58,7 +58,7 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
           >
             <span className="shrink-0 text-xs text-neutral-500">Viewing tenant:</span>
             <span className="truncate text-xs font-medium text-neutral-700 dark:text-neutral-300">
-              {currentTenant?.name ?? session.tenantId}
+              {currentTenant?.name ?? "…"}
             </span>
             <Input
               value={tenantDraft}

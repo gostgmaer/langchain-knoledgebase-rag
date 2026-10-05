@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { Flag, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -21,10 +23,54 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useCreateFeatureFlag, useDeleteFeatureFlag, useFeatureFlags, useToggleFeatureFlag } from "@/hooks/use-api";
+import { useCreateFeatureFlag, useDeleteFeatureFlag, useFeatureFlags, useTenant, useToggleFeatureFlag } from "@/hooks/use-api";
+
+interface DirectoryTenant {
+  internalId: string;
+  name: string;
+}
+
+async function json<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.error ?? "Request failed.");
+  return body as T;
+}
+
+// Same tolerant unwrap as the Tenants/Settings pages: the IAM gateway wraps as { success, data },
+// the BFF wraps that again as { data }.
+function asTenants(value: unknown): DirectoryTenant[] {
+  const inner = (value as { data?: unknown })?.data ?? value;
+  if (Array.isArray(inner)) return inner as DirectoryTenant[];
+  const nested = (inner as { data?: unknown })?.data;
+  return Array.isArray(nested) ? (nested as DirectoryTenant[]) : [];
+}
+
+/** Lets an admin pick a tenant by name instead of pasting a raw UUID — reuses the same real
+ * directory the Tenants page shows, rather than making this the one place that still needs one
+ * typed in blind. */
+function useTenantDirectory() {
+  return useQuery({
+    queryKey: ["tenant-directory"],
+    queryFn: async () => asTenants(await json<unknown>("/api/iam/tenants?page=1&limit=100")),
+    retry: false,
+  });
+}
+
+/** Resolves a tenant id to its real name, falling back to a truncated id only while loading or
+ * if IAM can't be reached for it — same idiom as Documents' "Uploaded by" and the Tenants page. */
+function ScopeBadge({ tenantId }: { tenantId: string }) {
+  const { data: tenant, isLoading } = useTenant(tenantId);
+  return (
+    <Badge variant="outline">
+      {isLoading ? "…" : (tenant?.name ?? <code className="text-xs">{tenantId.slice(0, 8)}…</code>)}
+    </Badge>
+  );
+}
 
 export function FeatureFlagsView() {
   const { data, isLoading } = useFeatureFlags();
+  const directory = useTenantDirectory();
   const createFlag = useCreateFeatureFlag();
   const toggleFlag = useToggleFeatureFlag();
   const deleteFlag = useDeleteFeatureFlag();
@@ -89,9 +135,7 @@ export function FeatureFlagsView() {
                 <TableCell className="font-medium">{flag.key}</TableCell>
                 <TableCell>
                   {flag.tenant_id ? (
-                    <Badge variant="outline">
-                      <code className="text-xs">{flag.tenant_id.slice(0, 8)}…</code>
-                    </Badge>
+                    <ScopeBadge tenantId={flag.tenant_id} />
                   ) : (
                     <Badge variant="secondary">global</Badge>
                   )}
@@ -144,13 +188,23 @@ export function FeatureFlagsView() {
             />
           </div>
           <div className="grid gap-1.5">
-            <Label>Tenant ID (optional — blank means global default)</Label>
-            <Input
+            <Label>Scope</Label>
+            <Select
               value={form.tenant_id}
               onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-              className="font-mono"
-              placeholder="leave blank for global"
-            />
+            >
+              <option value="">Global default</option>
+              {directory.data?.map((t) => (
+                <option key={t.internalId} value={t.internalId}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+            {directory.isError && (
+              <p className="text-xs text-amber-600">
+                Could not load the tenant directory — only a global flag can be created right now.
+              </p>
+            )}
           </div>
           <div className="grid gap-1.5">
             <Label>Description</Label>

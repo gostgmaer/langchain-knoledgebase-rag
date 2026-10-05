@@ -72,7 +72,7 @@ export function DashboardView({ basePath }: { basePath: string }) {
       )}
       <PageHeader
         title={`Welcome, ${session?.displayName ?? ""}`}
-        description={`Browsing ${tenant?.name ?? session?.tenantId ?? ""}`}
+        description={`Browsing ${tenant?.name ?? (session?.tenantId ? "…" : "")}`}
       />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

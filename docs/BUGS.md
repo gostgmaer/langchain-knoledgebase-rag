@@ -774,6 +774,29 @@ or script could call this API at all without one.
   11's original taxonomy did — re-ran the updated `scripts/iam_rbac_seed.sql` (now 29 codes × 3
   roles) against the real IAM database.
 
+### 34. ✅ Tenant IDs shown as raw UUIDs in several places — now resolved to real names
+User-reported: several admin screens showed a tenant as a raw (sometimes truncated) UUID instead
+of its real name, with no obvious reason the ID specifically was needed there.
+- **Feature Flags had an actual, unambiguous bug**, not just a polish gap: the Scope column showed
+  `flag.tenant_id.slice(0, 8)…` with zero name resolution, for every tenant-scoped override, every
+  time. The "New flag" form was worse — a free-text box asking an admin to paste a tenant's raw
+  UUID from memory, with no directory to look it up against inside the app at all.
+- **Fixed:** Scope column now resolves through the same `useTenant()` id→name lookup Documents'
+  "Uploaded by" and the Tenants page already use. The New Flag form's text box became a real `
+  <select>` populated from the tenant directory (the same `/api/iam/tenants` fetch the Tenants page
+  already does) — "Global default" plus every real tenant by name, nothing typed blind anymore.
+- **Three more spots** (`dashboard-view.tsx`, `topbar.tsx`, `workspace-switcher.tsx`) already
+  resolved to a real name via `useTenant()` correctly in the common case, but fell back to the raw
+  UUID while that lookup was still loading — a brief but real flash of an ID where a name was
+  about to appear a moment later. Changed the fallback to a lightweight `…` instead; the "Switch by
+  ID" box and "Recently viewed" pills on the Tenants page were left exactly as-is, since that's the
+  one place in the app where typing/showing a raw ID is genuinely the point of the feature.
+- **Verified live**: created a real tenant-scoped feature flag via the API, loaded the Feature
+  Flags page, and confirmed the Scope column shows "EasyDev" (the tenant's real name), not a
+  truncated UUID — screenshot confirmed. Opened the New Flag dialog and confirmed its Scope
+  dropdown lists real tenant names (`["Global default", "E2E Switch 1790356435", "EasyDev"]`) via a
+  direct DOM check. `tsc --noEmit` and the full Vitest suite (29) both clean.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
