@@ -561,6 +561,219 @@ anywhere (`grep -rl "sdk.notification"` across `packages/`/`tests/`) before remo
 `docs/UNUSED_FILES.md` corrected alongside it (four other listed files turned out to already be
 gone too, from an earlier pass — that table just never got updated).
 
+### 27. ✅ Full-shell "Loading…" flash on every hard navigation — looked like 3 inconsistent pages, was actually one gate
+A full end-to-end UI audit (every admin page visited, console checked, one real action tried per
+page) found Documents/Analytics/Observability flashing a totally blank page — no sidebar, no
+topbar — while loading, when every other route kept the app shell and showed an in-content
+skeleton instead.
+- **Root cause**: `app-shell.tsx`'s session gate (`if (isLoading || !session || ...) return
+  <div>Loading…</div>`) blanks the *entire* shell, not just the content area, and runs on every
+  hard navigation (the audit used full browser navigations, not in-app `Link` clicks) — on *every*
+  page, not just these 3. It was only catchable on screen for pages slow enough to still be in
+  that state when a screenshot landed (Documents' heavier table, Analytics'/Observability's chart
+  rendering) — not a per-page inconsistency, the same gate everywhere, just differently visible.
+- **Fixed:** `Sidebar`/`Topbar` never actually depend on session data (`navItems`/`homeHref` come
+  from the `[role]` URL segment, not the session), so they now render immediately and
+  unconditionally; only the `<main>` content area swaps to a skeleton while the session resolves.
+  `topbar.tsx`'s own `if (!session) return null` had the same problem one level down (the header
+  bar itself would vanish and reflow back in) — now renders its `<header>` shell unconditionally
+  too, with a skeleton for the session-dependent parts only.
+- Also found during the same audit and fixed: Chat's conversation header showed a raw ID
+  (`Conversation 903fbec1…`) instead of a title, inconsistent with the history sidebar, which
+  already showed a readable preview for the same conversation (`useConversationHistory`'s local
+  index). The header now reads from the same `entries` list instead of the id.
+- **Verified live**: full-stack UI audit (22 pages, every console checked, one real action per
+  page — chat message, search query, connector wizard, etc.) found zero console errors/warnings
+  across the board; this fix and the Upload Jobs list below (item 28) were then re-verified live
+  individually — screenshot of Chat showing a real conversation's title, confirmed console clean.
+
+### 28. ✅ Upload Jobs had no list view — paste-an-ID lookup only
+The same UI audit: `UploadJobsView` was a bare "paste the upload_job_id" box with the page's own
+description admitting "the backend has no list-all endpoint for these."
+- **Not actually true** — `UploadJobRepository.list_by_tenant()`/`count_by_tenant()` already
+  existed, unused; only the router endpoint, schema, and frontend list view were missing.
+- **Fixed:** `GET /api/v1/upload-jobs` (paginated, tenant-scoped, most-recent-first) using the
+  existing repository methods; `UploadJobListResponseSchema` to match. Frontend: `useUploadJobs()`
+  hook (polls every 3s only while something in the page is still `QUEUED`/`RUNNING`, same idea as
+  the existing per-job poll), and `UploadJobsView` rewritten as a real table with the existing
+  `EmptyState`/`StatusBadge`/`QueryError` conventions — the ID-lookup box stays as a secondary
+  "jump to a specific job" affordance, not the only way in.
+- **Verified live**: `GET /api/v1/upload-jobs` with a real admin token returned all 74 real upload
+  jobs in this environment; loaded the page in a real browser, confirmed the table renders with
+  correct status badges and timestamps, confirmed zero console errors.
+
+### 29. ✅ CUSTOM tool definitions were disconnected from the real tool registry — now real, callable webhook tools
+The same UI audit: `ToolsView`'s own description admitted a DB-backed `Tool` row was "distinct
+from the in-process registry that actually powers chat tool-calling" — creating one did nothing
+real; built-in tools (calculator, weather, search, knowledge-base search, IAM lookups) were the
+only ones chat could ever actually call.
+- **Scope, deliberately bounded** (user's own call, asked explicitly rather than invented): only
+  CUSTOM-category tools get real execution, as a generic HTTP webhook — the LLM's single text
+  input is sent to `configuration.url`. The other 8 categories (SEARCH, DATABASE, API, FILE, EMAIL,
+  NOTIFICATION, AI, UTILITY) already have fixed, code-defined implementations in
+  `packages/tools/builtin/`; a DB row in one of those stays descriptive metadata, same as before —
+  a generic per-category execution engine for all of them is a separate, much larger decision.
+- **Fixed:** `packages/tools/webhook.py`'s `make_webhook_tool()` builds a real LangChain
+  `StructuredTool` from a `Tool` row, reusing `packages/connectors/http.py`'s
+  `ResilientHttpClient` — the same SSRF-safe, retrying, circuit-broken client every knowledge
+  source connector already uses — rather than a second, weaker HTTP path. `CONNECTOR_ALLOW_PRIVATE_
+  HOSTS` governs both, so the policy is one setting, not two.
+- **A real architectural constraint surfaced and solved, not glossed over**: `ApplicationContainer`
+  is one shared, process-wide instance (not rebuilt per request), and the whole LangGraph graph —
+  nodes, LLM tool-binding, all of it — is built through a fully *synchronous*
+  `dependency-injector` provider chain (`packages/infrastructure/container/graph.py`). Registering
+  a tenant's custom tools needs an async DB query; making `init_tool_manager` itself async would
+  have forced every one of a dozen-plus providers up the chain (and every caller of
+  `container.graph.*` anywhere in the app) to become async too — a blast radius far bigger than
+  this feature. Fixed with a narrow `ContextVar` (`packages/tools/context.py`, same pattern
+  `current_session` already uses for the identical structural reason): the chat router does the
+  async DB fetch and builds the real tool objects up front (`load_custom_tools()`), drops them in
+  the context var, and the synchronous `init_tool_manager` just reads them back — zero async code
+  added anywhere in the DI chain.
+- **Verified live, fully end to end**, not just unit-level: created a real CUSTOM tool via
+  `POST /api/v1/tool-definitions` (`configuration: {"url": "https://httpbin.org/post"}`), sent a
+  real chat message asking the model to call it — the LLM genuinely recognized and chose to call
+  it (`pending_approval.tool_calls[0].name == "say-pong"`), approved the pending tool call via
+  `POST /chat/{id}/resume`, and the webhook actually executed and the model used the real response
+  ("PONG"). Separately confirmed the SSRF guard itself: `assert_public_url()` correctly blocked
+  `169.254.169.254` (cloud metadata), `127.0.0.1`, `localhost`, and `192.168.1.1` when called
+  directly; the live webhook call to a metadata-style address only timed out instead of being
+  blocked because this *dev* environment has `CONNECTOR_ALLOW_PRIVATE_HOSTS=true` (same setting
+  connectors already read) — production's default `false` blocks it the same way connectors are
+  already blocked today. Full unit+integration suite (385) still green.
+
+### 30. ✅ Prompts had no text or version history UI — the data model was already there, unused
+The same UI audit: `PromptsView`'s own description admitted "actual prompt text/versioning has no
+UI yet." Creating a prompt only ever created metadata (name/category/description) — there was no
+way to give it real content at all.
+- **Not actually a missing data model** — `PromptVersion` (`packages/domain/models/prompt_version.py`)
+  already existed, fully designed: `template` (the real text), incrementing `version`, `status`
+  (DRAFT/PUBLISHED/DEPRECATED/ARCHIVED), `is_published`, `changelog`, `variables`, `examples`. It
+  just had zero repository methods, zero API routes, and zero frontend UI — the same
+  "already-built, never wired up" shape as item 28 (Upload Jobs).
+- **Fixed:** `PromptVersionRepository` (list/get-published/next-version-number/publish);
+  `GET /prompts/{id}/versions` (full history), `POST /prompts/{id}/versions` (new DRAFT),
+  `POST /prompts/{id}/versions/{version_id}/publish`. Publish is the one operation that does the
+  real work: it unpublishes whichever version was live (demoting its status to DEPRECATED) and
+  publishes the target — the exact same operation whether the target is the newest draft or an
+  older version, which is what makes "rollback" not a special case: it's just publishing an old
+  version again. Nothing is ever deleted or overwritten. `PromptResponseSchema` now carries
+  `published_version` inline so the list page shows current live content without a second request.
+  Frontend: a "Versions" panel per prompt with the full history, a new-draft form, and a Publish
+  button per non-live version.
+- **Verified live, the full cycle**: created a real prompt, created v1 and published it, created v2
+  and published it (confirmed v1 auto-demoted to DEPRECATED), then **rolled back** by publishing v1
+  again (confirmed v1 back to PUBLISHED/live, v2 untouched in history, nothing deleted) — all via
+  the real running API, then confirmed the same state rendering correctly in a real browser
+  (version list, LIVE/DEPRECATED badges, changelog, template text). Full unit+integration suite
+  (388) still green.
+
+### 31. ✅ Tenants had no real directory, Settings had no profile/password — both features already existed in IAM, just not reachable from here
+The last of the UI audit's five gaps. Tenants showed a raw-UUID switcher only ("IAM has no
+endpoint that lists every tenant"); Settings only had two OAuth toggles, no profile or password
+management.
+- **The premise was wrong — investigated the real IAM backend (`multi-tannet-auth-services`, a
+  separate NestJS/Prisma service) before building anything there**, since the user explicitly
+  authorized extending it if actually needed. It wasn't: `GET /tenants` (paginated, gated by a
+  real `tenant:read_all` permission already granted to `super_admin`) and `GET`/`PATCH /profile` +
+  `POST /auth/password/change` all already exist, fully built and correctly permissioned — this
+  app's own `packages/sdk/iam/` just never had a method calling them, and the frontend never had a
+  screen for them. **Zero changes to the IAM service were needed.**
+- **Fixed, entirely on the frontend**: `frontend/src/app/api/iam/[...path]/route.ts`'s existing
+  deliberate allowlist proxy (cookie-authenticated, explicit method+path patterns only — see its
+  own docstring) gained four more routes: `GET /tenants`, `GET`/`PATCH /profile`,
+  `POST /auth/password/change` (and `PATCH` added to the route's exported HTTP methods, which
+  only had GET/POST/DELETE before). `TenantsPage` now shows a real directory table (name, slug,
+  status, created date, "Browse as") above the existing by-ID switcher, which stays as a fallback.
+  `SettingsPage` gained Profile (name/display name/phone, editable) and Password (change) cards,
+  matching its own existing `/api/iam/auth/social/*` call pattern exactly (same tolerant
+  `{success,data}`-then-`{data}` double-unwrap, same local `json()` helper).
+- **Verified live, through the real running app**: `GET /api/tenants` with a real super_admin
+  token returned both real tenants in this environment; loaded the Tenants page in a real browser
+  and confirmed the same two rows render correctly. For Settings, actually changed the real
+  profile's `displayName` through the UI (not just a mock), confirmed via a direct API call that
+  IAM genuinely persisted it, then reverted it through the same UI and confirmed it cleared —
+  a real round-trip, not just "the form submits." Password change was verified by code review and
+  UI inspection only, not a live submission — deliberately: this account's documented bootstrap
+  credentials are shared dev infrastructure this session (and future ones) depends on being able
+  to log in with, and changing it for a test would be a real, if reversible, disruption not worth
+  the risk for a straightforward passthrough to an endpoint the recon already confirmed works.
+  Frontend `tsc --noEmit` and the full Vitest suite (29) both clean throughout.
+
+### 32. ✅ Agents/Model Profiles were create-only, Documents showed raw uploader IDs, Team had no real members list
+A second, deeper UI sweep (after item 31) specifically hunting for smaller gaps the first pass
+hadn't prioritized found four more real, consistent product gaps — not polish:
+- **Agents and Model Profiles had no edit or deactivate** — confirmed at the backend, not just the
+  UI: `packages/api/routers/{agents,models}.py` only ever had `POST`/`GET`, no `PATCH`. Both
+  `AGENTS_WRITE`/`MODELS_WRITE` permission codes already existed, implying "write" was meant to
+  cover more than create. **Fixed**: `PATCH /agents/{id}` and `PATCH /model-profiles/{id}`
+  (partial update, re-validates the name-uniqueness and model-profile-exists checks the create
+  path already had), plus an Edit dialog and an Activate/Deactivate button on both admin pages.
+- **Two real bugs found and fixed in the IAM SDK while building the "Uploaded by" name
+  resolution** (`packages/sdk/iam/user.py`, `models.py`) — both genuinely dead code until now,
+  confirmed live, not just by inspection:
+  1. `User.model_validate()`'s field names didn't match IAM's real response at all — expected a
+     required `tenantId` that doesn't exist (a user's tenant memberships are a many-to-many via
+     `user_tenant_roles`, not a field on the user — every real call would have failed validation),
+     `id` instead of the real `internalId`, `isVerified` instead of `isEmailVerified`.
+  2. `get_user()` sent no `Authorization` header at all; IAM correctly rejected every call with
+     401 "Access denied. No token provided." Fixed to forward the caller's bearer token, same
+     idiom as `get_tenant()`. New `GET /users/{id}` (RAG backend, mirrors `GET /tenants/{id}`
+     exactly) and `GET /users` (tenant-scoped list, new `list_users()` SDK method) now back a real
+     `useUser()`/`useTenantUsers()` hook pair. Documents' "Uploaded by" row resolves a real name
+     instead of a truncated UUID; Team gained a real Members table (name/email/status) above the
+     existing invitations list — honestly disclosed limit: IAM's list endpoint doesn't return a
+     member's specific role, only membership, so that column isn't there.
+- **Verified live**: `GET /api/v1/users/{id}` and `GET /api/v1/users` both confirmed against the
+  real running IAM through the RAG backend (5 real users returned for the real tenant, correct
+  names/emails); `PATCH /agents/{id}` and `PATCH /model-profiles/{id}` both confirmed — edited a
+  real field, confirmed via `GET`, reverted to the original value; both activate/deactivate
+  toggles confirmed round-trip (off then on). Full backend suite (391-392, one pre-existing flaky
+  integration test confirmed unrelated by re-running it alone — passes in isolation) and frontend
+  `tsc --noEmit`/Vitest (29) clean. Browser-level UI screenshots not captured this pass — the
+  Chrome extension disconnected after a Docker Desktop restart mid-session; every change here is
+  instead verified at the real HTTP layer the UI calls, same backend the rest of this item's
+  manual browser testing (item 31) used.
+
+### 33. ✅ No API key support at all — zero way to call this API outside a browser session
+A real, genuine enterprise-platform gap, found by auditing against standard SaaS capabilities
+rather than a UI sweep: this app had no concept of a programmatic credential anywhere —
+everything went through an IAM-issued browser session token. No CI pipeline, integration,
+or script could call this API at all without one.
+- **Design**: a tenant-scoped `ApiKey` (`packages/domain/models/api_key.py`) — raw value shown
+  exactly once at creation (`rag_live_<32 random url-safe chars>`), only its SHA-256 hash ever
+  stored, same handling a password gets. `AuthService.resolve()` (`packages/auth/service.py`)
+  now branches on the token's shape: `rag_live_` prefix goes to this app's own `api_keys` table
+  instead of an IAM round-trip, resolving to a synthetic `CurrentUser` with `roles=["admin"]` and
+  every permission code this app defines (`_ALL_PERMISSION_CODES`, collected from `Permission`
+  itself so it can't drift out of sync) — matching exactly what the real "admin" role already has
+  via `scripts/iam_rbac_seed.sql`, not a privilege escalation. Attributed back to whoever created
+  it (`created_by_user_id`/`email`) for audit purposes.
+- **A real architectural constraint hit and solved, the same shape as item 29's**: the auth
+  middleware runs before any route-level dependency establishes a DB session, so API-key lookup
+  needed its own path to the database. Wired `database.session_factory` directly into
+  `AuthService` (`packages/infrastructure/container/iam.py`) — a short-lived session opened and
+  closed entirely within one `resolve()` call, independent of the request-scoped session every
+  route handler shares.
+- New routes: `POST/GET /api-keys`, `DELETE /api-keys/{id}` (revoke — not a hard delete, the row
+  stays for the audit trail). New frontend "API Keys" page under Administration (both `admin` and
+  `tenant_admin` — a tenant-scoped credential, not a platform-wide one) with a one-time reveal
+  dialog and a copy button.
+- **Verified live, including the two properties that actually matter for something this
+  security-sensitive**: created a real key through the real API, then authenticated a real request
+  to `GET /agents` using *only* that raw key — no JWT anywhere — and it worked. Confirmed **tenant
+  isolation holds**: sent a deliberately spoofed `X-Tenant-ID` header for a different tenant
+  alongside the key, and the response still came from the key's own tenant, proving a key can't be
+  used to reach another tenant's data by changing a header (`require_uuid_header`'s existing
+  `can_override_tenant` check already requires `super_admin`, which API keys deliberately don't
+  get). Confirmed revocation is immediate (revoked key → 401 on the next call) and a garbage key is
+  rejected cleanly (401, no crash). Then did the same create → reveal → revoke cycle through the
+  real browser UI end to end (screenshots confirm the one-time-reveal dialog, the masked list, and
+  a real toast on revoke) once the Chrome extension reconnected mid-session.
+- New permission codes (`api_keys:read`/`write`) needed mapping on the IAM side the same way item
+  11's original taxonomy did — re-ran the updated `scripts/iam_rbac_seed.sql` (now 29 codes × 3
+  roles) against the real IAM database.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

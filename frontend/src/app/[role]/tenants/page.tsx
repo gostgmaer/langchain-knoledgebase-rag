@@ -1,16 +1,57 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
+import { QueryError } from "@/components/shared/query-error";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useTenant } from "@/hooks/use-api";
 import { useSession } from "@/lib/session";
+import { formatDateTime } from "@/lib/utils";
+import { Building2 } from "lucide-react";
 
 const HISTORY_KEY = "rag-console-tenant-history";
+
+interface IamTenant {
+  internalId: string;
+  publicId: string;
+  name: string;
+  slug: string;
+  isActive: boolean;
+  isDefault: boolean;
+  createdAt: string;
+}
+
+async function json<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.error ?? "Request failed.");
+  return body as T;
+}
+
+// Same tolerant unwrap as the Settings page: the IAM gateway wraps as { success, data }, the
+// BFF wraps that again as { data }.
+function asTenants(value: unknown): IamTenant[] {
+  const inner = (value as { data?: unknown })?.data ?? value;
+  if (Array.isArray(inner)) return inner as IamTenant[];
+  const nested = (inner as { data?: unknown })?.data;
+  return Array.isArray(nested) ? (nested as IamTenant[]) : [];
+}
 
 /** One "recently viewed" pill — resolves its own real name, falling back to the raw id
  * while loading or if IAM can't be reached for it. */
@@ -42,6 +83,12 @@ export default function TenantsPage() {
     }
   });
 
+  const directory = useQuery({
+    queryKey: ["tenant-directory"],
+    queryFn: async () => asTenants(await json<unknown>("/api/iam/tenants?page=1&limit=100")),
+    retry: false,
+  });
+
   function switchTo(tenantId: string) {
     setViewingTenant(tenantId);
     setDraft(tenantId);
@@ -52,27 +99,62 @@ export default function TenantsPage() {
 
   return (
     <div>
-      <PageHeader title="Tenants" description="Cross-tenant browsing for platform operators." />
+      <PageHeader title="Tenants" description="Every organization on the platform, and which one you're currently browsing as." />
 
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle>A real limit, worth being upfront about</CardTitle>
-          <CardDescription>
-            IAM (the system of record for organizations) has no endpoint that lists every tenant
-            across the platform — only a by-id lookup, which this page uses to show real names
-            instead of raw ids wherever it already knows one. Every resource route (documents,
-            agents, knowledge bases, ...) is scoped by whichever{" "}
-            <code className="rounded bg-neutral-100 px-1 dark:bg-neutral-800">X-Tenant-ID</code>{" "}
-            header is sent. This page can only switch which single tenant you&apos;re currently
-            browsing as, one ID at a time — it can&apos;t show you a real directory of every
-            tenant to pick from.
-          </CardDescription>
+          <CardTitle>Directory</CardTitle>
         </CardHeader>
+        <CardContent>
+          {directory.isError ? (
+            <QueryError
+              error={directory.error}
+              onRetry={() => void directory.refetch()}
+              message="Could not load the tenant directory — IAM's GET /tenants needs tenant:read_all, which only super_admin has today. The switcher below still works by ID regardless."
+            />
+          ) : directory.isLoading ? (
+            <Skeleton className="h-40 w-full" />
+          ) : !directory.data || directory.data.length === 0 ? (
+            <EmptyState icon={Building2} title="No tenants found" />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Slug</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {directory.data.map((t) => (
+                  <TableRow key={t.internalId}>
+                    <TableCell>
+                      <div className="font-medium">{t.name}</div>
+                      {t.isDefault && <div className="text-xs text-neutral-400">default</div>}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-neutral-500">{t.slug}</TableCell>
+                    <TableCell>
+                      <Badge variant={t.isActive ? "success" : "outline"}>{t.isActive ? "active" : "inactive"}</Badge>
+                    </TableCell>
+                    <TableCell className="text-neutral-500">{formatDateTime(t.createdAt)}</TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="outline" onClick={() => switchTo(t.internalId)}>
+                        Browse as
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Switch tenant</CardTitle>
+          <CardTitle>Switch by ID</CardTitle>
         </CardHeader>
         <CardContent>
           <form

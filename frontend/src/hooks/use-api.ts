@@ -20,6 +20,8 @@ import {
   retrievalSettings,
   search,
   tenants,
+  users,
+  apiKeys,
   tools,
   uploadJobs,
   usage,
@@ -32,10 +34,14 @@ import type {
   RetrievalSettingsUpdate,
   DocumentUploadOptions,
   CreateAgentRequest,
+  UpdateAgentRequest,
   CreateFeatureFlagRequest,
   CreateKnowledgeBaseRequest,
   CreateModelProfileRequest,
+  UpdateModelProfileRequest,
   CreatePromptRequest,
+  CreatePromptVersionRequest,
+  CreateApiKeyRequest,
   CreateToolRequest,
   FeedbackRating,
   SearchRequest,
@@ -83,6 +89,60 @@ export function useTenant(tenantId: string | null | undefined) {
     enabled: !!identity && valid,
     staleTime: 5 * 60_000,
     retry: false,
+  });
+}
+
+/** Resolves a user's real name/email from IAM — same idiom as useTenant above. */
+export function useUser(userId: string | null | undefined) {
+  const identity = useIdentity();
+  const valid = !!userId && UUID_RE.test(userId);
+  return useQuery({
+    queryKey: ["user", userId],
+    queryFn: () => users.get(identity!, userId!),
+    enabled: !!identity && valid,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
+/** Real members of the current tenant (docs/BUGS.md item 32), not just pending invitations. */
+export function useTenantUsers() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["tenant-users", identity?.tenantId],
+    queryFn: () => users.list(identity!),
+    enabled: !!identity,
+  });
+}
+
+// ---------------------------------------------------------------
+// API Keys
+// ---------------------------------------------------------------
+
+export function useApiKeys() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["api-keys", identity?.tenantId],
+    queryFn: () => apiKeys.list(identity!),
+    enabled: !!identity,
+  });
+}
+
+export function useCreateApiKey() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateApiKeyRequest) => apiKeys.create(identity!, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["api-keys", identity?.tenantId] }),
+  });
+}
+
+export function useRevokeApiKey() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiKeys.revoke(identity!, id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["api-keys", identity?.tenantId] }),
   });
 }
 
@@ -250,6 +310,23 @@ export function useDeleteDocument() {
   });
 }
 
+export function useUploadJobs() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["upload-jobs", identity?.tenantId],
+    queryFn: () => uploadJobs.list(identity!),
+    enabled: !!identity,
+    // Jobs move through QUEUED/RUNNING on their own; a light poll keeps the list current without
+    // the caller having to know which rows are still in flight, same idea as useUploadJob's own
+    // per-job poll below, just scoped to "is anything in this page still moving".
+    refetchInterval: (query) => {
+      const jobs = query.state.data?.upload_jobs ?? [];
+      const anyPending = jobs.some((j) => j.status === "QUEUED" || j.status === "RUNNING");
+      return anyPending ? 3000 : false;
+    },
+  });
+}
+
 export function useUploadJob(id: string | null, pollWhilePending: boolean) {
   const identity = useIdentity();
   return useQuery({
@@ -337,6 +414,15 @@ export function useCreateAgent() {
   });
 }
 
+export function useUpdateAgent() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateAgentRequest }) => agents.update(identity!, id, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents", identity?.tenantId] }),
+  });
+}
+
 // ---------------------------------------------------------------
 // Model Profiles
 // ---------------------------------------------------------------
@@ -368,6 +454,16 @@ export function useCreateModelProfile() {
   });
 }
 
+export function useUpdateModelProfile() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateModelProfileRequest }) =>
+      modelProfiles.update(identity!, id, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["model-profiles"] }),
+  });
+}
+
 // ---------------------------------------------------------------
 // Prompts
 // ---------------------------------------------------------------
@@ -387,6 +483,39 @@ export function useCreatePrompt() {
   return useMutation({
     mutationFn: (body: CreatePromptRequest) => prompts.create(identity!, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["prompts", identity?.tenantId] }),
+  });
+}
+
+export function usePromptVersions(promptId: string | null) {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["prompt-versions", identity?.tenantId, promptId],
+    queryFn: () => prompts.listVersions(identity!, promptId!),
+    enabled: !!identity && !!promptId,
+  });
+}
+
+export function useCreatePromptVersion(promptId: string) {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreatePromptVersionRequest) => prompts.createVersion(identity!, promptId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["prompt-versions", identity?.tenantId, promptId] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", identity?.tenantId] });
+    },
+  });
+}
+
+export function usePublishPromptVersion(promptId: string) {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (versionId: string) => prompts.publishVersion(identity!, promptId, versionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["prompt-versions", identity?.tenantId, promptId] });
+      queryClient.invalidateQueries({ queryKey: ["prompts", identity?.tenantId] });
+    },
   });
 }
 

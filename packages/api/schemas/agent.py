@@ -32,6 +32,34 @@ class CreateAgentRequestSchema(BaseModel):
     max_tokens: int = Field(default=4096, gt=0)
 
 
+class UpdateAgentRequestSchema(BaseModel):
+    """Incoming request to edit an existing agent. Every field is optional — only what's sent changes."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+
+    description: str | None = Field(default=None, max_length=2000)
+
+    system_prompt: str | None = Field(default=None, min_length=1)
+
+    llm_provider: str | None = Field(default=None, min_length=1, max_length=50)
+
+    llm_model: str | None = Field(default=None, min_length=1, max_length=100)
+
+    model_profile_id: UUID | None = None
+
+    temperature: float | None = Field(default=None, ge=0, le=2)
+
+    top_p: float | None = Field(default=None, ge=0, le=1)
+
+    max_tokens: int | None = Field(default=None, gt=0)
+
+    is_active: bool | None = None
+
+
 class AgentResponseSchema(BaseModel):
     """A single agent's configuration."""
 

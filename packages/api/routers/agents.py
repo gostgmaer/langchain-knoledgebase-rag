@@ -19,6 +19,7 @@ from packages.api.schemas.agent import (
     AgentListResponseSchema,
     AgentResponseSchema,
     CreateAgentRequestSchema,
+    UpdateAgentRequestSchema,
 )
 from packages.domain.enums.agent_status import AgentStatus
 from packages.domain.models.agent import Agent
@@ -151,4 +152,59 @@ async def get_agent(
     return ApiResponse(
         message="Agent retrieved.",
         data=AgentResponseSchema.model_validate(agent),
+    )
+
+
+@router.patch(
+    "/{agent_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[AgentResponseSchema],
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.AGENTS_WRITE))],
+    summary="Edit an agent",
+    description="Partial update — only the fields sent are changed. Renaming re-derives the slug.",
+)
+async def update_agent(
+    agent_id: UUID,
+    payload: UpdateAgentRequestSchema,
+    request: Request,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    agents = container.repositories.agent()
+    agent = await agents.get(agent_id)
+
+    if agent is None or agent.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent not found.",
+        )
+
+    updates = payload.model_dump(exclude_unset=True)
+
+    if "name" in updates and updates["name"] != agent.name:
+        existing = await agents.get_by_tenant_and_name(tenant_id, updates["name"])
+        if existing is not None and existing.id != agent.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"An agent named '{updates['name']}' already exists for this tenant.",
+            )
+        agent.slug = _slugify(updates["name"])
+
+    if "model_profile_id" in updates:
+        model_profile = await container.repositories.model_profile().get(updates["model_profile_id"])
+        if model_profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Model profile '{updates['model_profile_id']}' does not exist.",
+            )
+
+    for field, value in updates.items():
+        setattr(agent, field, value)
+
+    updated = await agents.update(agent)
+
+    return ApiResponse(
+        message="Agent updated.",
+        data=AgentResponseSchema.model_validate(updated),
     )

@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { Sidebar, type NavItem } from "@/components/layout/sidebar";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Topbar } from "@/components/layout/topbar";
 import { type Role, useSession } from "@/lib/session";
 
@@ -34,15 +35,27 @@ export function AppShell({
     }
   }, [isLoading, session, role, router]);
 
-  if (isLoading || !session || session.role !== role) {
-    return <div className="flex h-screen items-center justify-center text-sm text-neutral-400">Loading…</div>;
-  }
+  // The chrome (sidebar/topbar) never depends on session data — navItems/homeHref come from the
+  // `[role]` URL segment, not the session — so it renders immediately on every navigation instead
+  // of the whole page blanking out while the session resolves. Previously every hard navigation hid
+  // the sidebar/topbar for a beat; only noticeable on pages slow enough to actually catch it on
+  // screen (Documents, Analytics, Observability), which looked like a per-page inconsistency but
+  // was really this same gate on every page.
+  const sessionReady = !isLoading && !!session && session.role === role;
 
-  // An IAM account that belongs to no workspace has no tenant, so every API call
-  // would be refused. Say so, instead of showing an app that silently fails.
-  if (!session.tenantId) {
-    return (
-      <div className="flex h-screen items-center justify-center p-6">
+  let mainContent: ReactNode;
+  if (!sessionReady || !session) {
+    mainContent = (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    );
+  } else if (!session.tenantId) {
+    // An IAM account that belongs to no workspace has no tenant, so every API call would be
+    // refused. Say so, instead of showing an app that silently fails.
+    mainContent = (
+      <div className="flex h-full items-center justify-center p-6">
         <div className="max-w-md space-y-4 rounded-lg border p-6 text-center">
           <h1 className="text-lg font-semibold">You are not in a workspace yet</h1>
           <p className="text-sm text-muted-foreground">
@@ -56,6 +69,8 @@ export function AppShell({
         </div>
       </div>
     );
+  } else {
+    mainContent = children;
   }
 
   return (
@@ -63,7 +78,7 @@ export function AppShell({
       <Sidebar items={navItems} homeHref={homeHref} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar onMenuClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6">{mainContent}</main>
       </div>
     </div>
   );

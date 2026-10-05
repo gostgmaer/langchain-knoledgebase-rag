@@ -126,17 +126,19 @@ class IntrospectionResponse(BaseModel):
 
 class User(BaseModel):
     """
-    `GET /users/:id` — field names inferred from this service's
-    consistent camelCase convention (confirmed live elsewhere: JWKS,
-    openid-configuration, JWT claims), not yet verified live itself
-    since nothing in this app currently calls `IAMUsersSDK.get_user()`.
+    `GET /users/:id` — the "field names inferred, not yet verified live" note this docstring used
+    to carry was right to be cautious: live-verified against this dev environment's real IAM and
+    the inferred shape was wrong. The real response has no `tenantId` at all (a user's tenant
+    memberships are a many-to-many via `user_tenant_roles`, not a single field on the user — the
+    old model's required `tenant_id` would have made every real call fail validation), uses
+    `internalId` rather than `id` (matching IAM's own `GET /tenants` list endpoint, not its single-
+    tenant lookup — the two aren't even consistent with each other), and `isEmailVerified` rather
+    than `isVerified`.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
-    id: UUID
-
-    tenant_id: UUID = Field(alias="tenantId")
+    id: UUID = Field(alias="internalId")
 
     email: str
 
@@ -144,9 +146,11 @@ class User(BaseModel):
 
     last_name: str | None = Field(default=None, alias="lastName")
 
+    display_name: str | None = Field(default=None, alias="displayName")
+
     is_active: bool = Field(default=True, alias="isActive")
 
-    is_verified: bool = Field(default=False, alias="isVerified")
+    is_verified: bool = Field(default=False, alias="isEmailVerified")
 
     created_at: datetime = Field(alias="createdAt")
 

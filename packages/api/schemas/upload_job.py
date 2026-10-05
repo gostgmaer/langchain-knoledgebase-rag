@@ -22,3 +22,16 @@ class UploadJobResponseSchema(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     created_at: datetime
+
+
+class UploadJobListResponseSchema(BaseModel):
+    """A page of the calling tenant's upload jobs, most recent first."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    total: int
+    limit: int
+    offset: int
+    upload_jobs: list[UploadJobResponseSchema]

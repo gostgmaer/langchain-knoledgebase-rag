@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
@@ -14,7 +14,7 @@ from packages.api.dependencies import (
 )
 from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
-from packages.api.schemas.upload_job import UploadJobResponseSchema
+from packages.api.schemas.upload_job import UploadJobListResponseSchema, UploadJobResponseSchema
 from packages.infrastructure.container import ApplicationContainer
 
 router = APIRouter(
@@ -22,6 +22,37 @@ router = APIRouter(
     tags=["Upload Jobs"],
     dependencies=[Depends(require_admin()), Depends(require_permission(Permission.UPLOAD_JOBS_READ))],
 )
+
+
+@router.get(
+    "",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[UploadJobListResponseSchema],
+    summary="List upload jobs",
+    description="Lists the calling tenant's upload jobs, most recent first, any status.",
+)
+async def list_upload_jobs(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    upload_jobs = container.repositories.upload_job()
+
+    total = await upload_jobs.count_by_tenant(tenant_id)
+    rows = await upload_jobs.list_by_tenant(tenant_id, limit=limit, offset=offset)
+
+    return ApiResponse(
+        message="Upload jobs retrieved.",
+        data=UploadJobListResponseSchema(
+            total=total,
+            limit=limit,
+            offset=offset,
+            upload_jobs=[UploadJobResponseSchema.model_validate(j) for j in rows],
+        ),
+    )
 
 
 @router.get(

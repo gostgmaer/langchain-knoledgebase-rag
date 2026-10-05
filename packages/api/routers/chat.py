@@ -18,6 +18,8 @@ from packages.api.dependencies import (
 )
 from packages.api.responses import ApiResponse
 from packages.shared.access import set_retrieval_filters
+from packages.tools.context import set_custom_tools
+from packages.tools.webhook import load_custom_tools
 from packages.api.schemas.chat import (
     ChatRequestSchema,
     ChatResponseSchema,
@@ -64,6 +66,7 @@ async def chat(
 
     tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
     user_id = require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID)
+    set_custom_tools(await load_custom_tools(container.repositories.tool(), tenant_id))
     if payload.filters:
         chosen = payload.filters.model_dump()
         chosen["source_types"] = chosen.pop("sources")  # the API says "sources", retrieval says "source_types"
@@ -211,6 +214,7 @@ async def resume(
 ):
     tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
     user_id = require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID)
+    set_custom_tools(await load_custom_tools(container.repositories.tool(), tenant_id))
 
     conversations = container.repositories.conversation()
     conversation = await conversations.get(conversation_id)

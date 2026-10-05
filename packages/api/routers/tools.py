@@ -43,10 +43,10 @@ def _slugify(name: str) -> str:
     dependencies=[Depends(require_admin()), Depends(require_permission(Permission.TOOLS_WRITE))],
     summary="Register a tool definition",
     description=(
-        "Creates a new tool definition's metadata for the calling tenant. "
-        "This is a DB-backed record only — it has no live link to "
-        "packages/tools/ (the in-process registry that actually powers "
-        "chat tool-calling)."
+        "Creates a new tool definition for the calling tenant. A CUSTOM-category row with "
+        "configuration.url becomes a real, callable webhook tool in chat (packages/tools/"
+        "webhook.py, docs/BUGS.md item 29) — every other category is metadata only, since "
+        "packages/tools/builtin/ already has fixed, code-defined implementations for those."
     ),
 )
 async def create_tool(

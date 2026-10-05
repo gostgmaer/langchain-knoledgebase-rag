@@ -331,6 +331,19 @@ export interface CreateAgentRequest {
   max_tokens?: number;
 }
 
+export interface UpdateAgentRequest {
+  name?: string;
+  description?: string | null;
+  system_prompt?: string;
+  llm_provider?: string;
+  llm_model?: string;
+  model_profile_id?: string;
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  is_active?: boolean;
+}
+
 // ---------------------------------------------------------------
 // Model Profiles (global, not tenant-scoped)
 // ---------------------------------------------------------------
@@ -379,6 +392,26 @@ export interface CreateModelProfileRequest {
   is_default?: boolean;
 }
 
+export interface UpdateModelProfileRequest {
+  status?: string;
+  name?: string;
+  provider?: string;
+  model?: string;
+  description?: string | null;
+  temperature?: number;
+  top_p?: number;
+  top_k?: number | null;
+  max_tokens?: number;
+  context_window?: number;
+  embedding_dimensions?: number;
+  supports_streaming?: boolean;
+  supports_tools?: boolean;
+  supports_reasoning?: boolean;
+  supports_images?: boolean;
+  supports_embeddings?: boolean;
+  is_default?: boolean;
+}
+
 // ---------------------------------------------------------------
 // Prompts
 // ---------------------------------------------------------------
@@ -395,6 +428,31 @@ export const PROMPT_CATEGORIES = [
 ] as const;
 export type PromptCategory = (typeof PROMPT_CATEGORIES)[number];
 
+export interface PromptVersion {
+  id: string;
+  prompt_id: string;
+  version: number;
+  status: string;
+  template: string;
+  variables: Record<string, unknown>;
+  examples: Record<string, unknown>[];
+  changelog: string | null;
+  is_published: boolean;
+  is_default: boolean;
+  created_at: string;
+}
+
+export interface PromptVersionListResponse {
+  versions: PromptVersion[];
+}
+
+export interface CreatePromptVersionRequest {
+  template: string;
+  variables?: Record<string, unknown>;
+  examples?: Record<string, unknown>[];
+  changelog?: string | null;
+}
+
 export interface Prompt {
   id: string;
   tenant_id: string;
@@ -403,6 +461,7 @@ export interface Prompt {
   description: string | null;
   category: string;
   is_active: boolean;
+  published_version: PromptVersion | null;
 }
 
 export interface PromptListResponse extends Page<Prompt> {
@@ -504,6 +563,10 @@ export interface UploadJob {
   created_at: string;
 }
 
+export interface UploadJobListResponse extends Page<UploadJob> {
+  upload_jobs: UploadJob[];
+}
+
 // ---------------------------------------------------------------
 // Usage (Token Usage + Cost Tracking, docs/mvpRAG.md v1.1)
 // ---------------------------------------------------------------
@@ -593,6 +656,56 @@ export interface TenantResponse {
   name: string;
   slug: string;
   is_active: boolean;
+}
+
+// ---------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------
+
+export interface UserResponse {
+  id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  display_name: string | null;
+  is_active: boolean;
+}
+
+export interface UserListResponse {
+  users: UserResponse[];
+}
+
+// ---------------------------------------------------------------
+// API Keys
+// ---------------------------------------------------------------
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  is_active: boolean;
+  created_by_email: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface ApiKeyListResponse {
+  api_keys: ApiKey[];
+}
+
+export interface CreateApiKeyRequest {
+  name: string;
+  expires_at?: string | null;
+}
+
+export interface CreateApiKeyResponse {
+  id: string;
+  name: string;
+  key: string;
+  key_prefix: string;
+  expires_at: string | null;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------

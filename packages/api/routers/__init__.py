@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, FastAPI
 
 from packages.api.routers.agents import router as agent_router
+from packages.api.routers.api_keys import router as api_key_router
 from packages.api.routers.analytics import router as analytics_router
 from packages.api.routers.auth import router as auth_router
 from packages.api.routers.chat import router as chat_router
@@ -20,6 +21,7 @@ from packages.api.routers.search import router as search_router
 from packages.api.routers.tenants import router as tenant_router
 from packages.api.routers.tools import router as tool_router
 from packages.api.routers.upload_jobs import router as upload_job_router
+from packages.api.routers.users import router as user_router
 from packages.api.routers.observability import router as observability_router
 from packages.api.routers.knowledge_sources import router as knowledge_sources_router, webhook_router as source_webhook_router
 from packages.api.routers.retrieval_logs import router as retrieval_logs_router
@@ -45,6 +47,7 @@ api_router.include_router(document_router)
 api_router.include_router(knowledge_base_router)
 api_router.include_router(search_router)
 api_router.include_router(agent_router)
+api_router.include_router(api_key_router)
 api_router.include_router(model_router)
 api_router.include_router(prompt_router)
 api_router.include_router(tool_router)
@@ -60,6 +63,7 @@ api_router.include_router(observability_router)
 api_router.include_router(analytics_router)
 api_router.include_router(feature_flag_router)
 api_router.include_router(tenant_router)
+api_router.include_router(user_router)
 
 
 def register_routers(app: FastAPI) -> None:

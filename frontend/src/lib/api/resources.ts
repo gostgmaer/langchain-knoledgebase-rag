@@ -6,10 +6,13 @@ import type {
   ChatResponseData,
   Conversation,
   CreateAgentRequest,
+  UpdateAgentRequest,
   CreateFeatureFlagRequest,
   CreateKnowledgeBaseRequest,
   CreateModelProfileRequest,
+  UpdateModelProfileRequest,
   CreatePromptRequest,
+  CreatePromptVersionRequest,
   CreateToolRequest,
   AuditList,
   ConnectionTest,
@@ -55,13 +58,22 @@ import type {
   ModelProfileListResponse,
   Prompt,
   PromptListResponse,
+  PromptVersion,
+  PromptVersionListResponse,
   SearchRequest,
   SearchResponse,
   SubmitFeedbackRequest,
   TenantResponse,
+  UserListResponse,
+  UserResponse,
+  ApiKey,
+  ApiKeyListResponse,
+  CreateApiKeyRequest,
+  CreateApiKeyResponse,
   ToolDefinition,
   ToolListResponse,
   UploadJob,
+  UploadJobListResponse,
   UsageResponse,
 } from "./types";
 
@@ -82,6 +94,22 @@ export const health = {
 export const tenants = {
   get: (identity: Identity, tenantId: string) =>
     apiFetch<TenantResponse>(`/tenants/${tenantId}`, identity),
+};
+
+export const users = {
+  get: (identity: Identity, userId: string) =>
+    apiFetch<UserResponse>(`/users/${userId}`, identity),
+  list: (identity: Identity) =>
+    apiFetch<UserListResponse>("/users", identity),
+};
+
+export const apiKeys = {
+  list: (identity: Identity) =>
+    apiFetch<ApiKeyListResponse>("/api-keys", identity),
+  create: (identity: Identity, body: CreateApiKeyRequest) =>
+    apiFetch<CreateApiKeyResponse>("/api-keys", identity, { method: "POST", body }),
+  revoke: (identity: Identity, id: string) =>
+    apiFetch<ApiKey>(`/api-keys/${id}`, identity, { method: "DELETE" }),
 };
 
 // ---------------------------------------------------------------
@@ -184,6 +212,8 @@ export const agents = {
   get: (identity: Identity, id: string) => apiFetch<Agent>(`/agents/${id}`, identity),
   create: (identity: Identity, body: CreateAgentRequest) =>
     apiFetch<Agent>("/agents", identity, { method: "POST", body }),
+  update: (identity: Identity, id: string, body: UpdateAgentRequest) =>
+    apiFetch<Agent>(`/agents/${id}`, identity, { method: "PATCH", body }),
 };
 
 // ---------------------------------------------------------------
@@ -199,6 +229,8 @@ export const modelProfiles = {
     apiFetch<ModelProfile>(`/model-profiles/${id}`, identity),
   create: (identity: Identity, body: CreateModelProfileRequest) =>
     apiFetch<ModelProfile>("/model-profiles", identity, { method: "POST", body }),
+  update: (identity: Identity, id: string, body: UpdateModelProfileRequest) =>
+    apiFetch<ModelProfile>(`/model-profiles/${id}`, identity, { method: "PATCH", body }),
 };
 
 // ---------------------------------------------------------------
@@ -211,6 +243,14 @@ export const prompts = {
   get: (identity: Identity, id: string) => apiFetch<Prompt>(`/prompts/${id}`, identity),
   create: (identity: Identity, body: CreatePromptRequest) =>
     apiFetch<Prompt>("/prompts", identity, { method: "POST", body }),
+  listVersions: (identity: Identity, promptId: string) =>
+    apiFetch<PromptVersionListResponse>(`/prompts/${promptId}/versions`, identity),
+  createVersion: (identity: Identity, promptId: string, body: CreatePromptVersionRequest) =>
+    apiFetch<PromptVersion>(`/prompts/${promptId}/versions`, identity, { method: "POST", body }),
+  publishVersion: (identity: Identity, promptId: string, versionId: string) =>
+    apiFetch<PromptVersion>(`/prompts/${promptId}/versions/${versionId}/publish`, identity, {
+      method: "POST",
+    }),
 };
 
 // ---------------------------------------------------------------
@@ -244,6 +284,8 @@ export const feedback = {
 // ---------------------------------------------------------------
 
 export const uploadJobs = {
+  list: (identity: Identity) =>
+    apiFetch<UploadJobListResponse>("/upload-jobs", identity, { query: PAGE }),
   get: (identity: Identity, id: string) => apiFetch<UploadJob>(`/upload-jobs/${id}`, identity),
 };
 

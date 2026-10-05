@@ -45,6 +45,12 @@ class Permission:
     AGENTS_READ = "agents:read"
     AGENTS_WRITE = "agents:write"
 
+    # API Keys — packages/api/routers/api_keys.py. `*_WRITE` covers both create and revoke (revoke
+    # is strictly less powerful than create — minting a new credential — so one code for both,
+    # same reasoning as Knowledge Sources' write code covering more than one verb).
+    API_KEYS_READ = "api_keys:read"
+    API_KEYS_WRITE = "api_keys:write"
+
     # Analytics — packages/api/routers/analytics.py (read-only resource, no write/delete routes)
     ANALYTICS_READ = "analytics:read"
 

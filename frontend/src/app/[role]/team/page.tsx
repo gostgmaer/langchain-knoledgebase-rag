@@ -3,14 +3,27 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
+import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
+import { QueryError } from "@/components/shared/query-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useTenantUsers } from "@/hooks/use-api";
 import { useSession } from "@/lib/session";
+import { Users } from "lucide-react";
 
 interface Role {
   id: string;
@@ -48,6 +61,7 @@ export default function TeamPage() {
   const { session } = useSession();
   const tenantId = session?.tenantId;
   const queryClient = useQueryClient();
+  const membersQuery = useTenantUsers();
 
   const [email, setEmail] = useState("");
   const [pickedRoleId, setPickedRoleId] = useState("");
@@ -100,7 +114,50 @@ export default function TeamPage() {
 
   return (
     <div>
-      <PageHeader title="Team" description="Invite people to this workspace and manage pending invitations." />
+      <PageHeader title="Team" description="Who's actually in this workspace, and pending invitations." />
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Members</CardTitle>
+          <CardDescription>
+            Real accounts in this workspace — IAM is the system of record, this doesn't show which
+            specific role each member holds (a separate, real limit worth being upfront about: the
+            list endpoint doesn't return it, only membership).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {membersQuery.isError ? (
+            <QueryError error={membersQuery.error} onRetry={() => void membersQuery.refetch()} />
+          ) : membersQuery.isLoading ? (
+            <Skeleton className="h-32 w-full" />
+          ) : !membersQuery.data || membersQuery.data.users.length === 0 ? (
+            <EmptyState icon={Users} title="No members found" />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {membersQuery.data.users.map((u) => (
+                  <TableRow key={u.id}>
+                    <TableCell className="font-medium">
+                      {[u.first_name, u.last_name].filter(Boolean).join(" ") || "—"}
+                    </TableCell>
+                    <TableCell className="text-neutral-500">{u.email}</TableCell>
+                    <TableCell>
+                      <Badge variant={u.is_active ? "success" : "outline"}>{u.is_active ? "active" : "inactive"}</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="mb-6">
         <CardHeader>

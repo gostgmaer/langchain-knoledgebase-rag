@@ -4,6 +4,7 @@ from dependency_injector import containers, providers
 
 from packages.infrastructure.repositories.agent import AgentRepository
 from packages.infrastructure.repositories.ai_response import AIResponseRepository
+from packages.infrastructure.repositories.api_key import ApiKeyRepository
 from packages.infrastructure.repositories.conversation import ConversationRepository
 from packages.infrastructure.repositories.document import DocumentRepository
 from packages.infrastructure.repositories.document_chunk import DocumentChunkRepository
@@ -17,6 +18,7 @@ from packages.infrastructure.repositories.memory import MemoryRepository
 from packages.infrastructure.repositories.message import MessageRepository
 from packages.infrastructure.repositories.model_profile import ModelProfileRepository
 from packages.infrastructure.repositories.prompt import PromptRepository
+from packages.infrastructure.repositories.prompt_version import PromptVersionRepository
 from packages.infrastructure.repositories.relationship import RelationshipRepository
 from packages.infrastructure.repositories.tool import ToolRepository
 from packages.infrastructure.repositories.upload_job import UploadJobRepository
@@ -65,6 +67,11 @@ class RepositoryContainer(
         session=session,
     )
 
+    prompt_version = providers.Factory(
+        PromptVersionRepository,
+        session=session,
+    )
+
     tool = providers.Factory(
         ToolRepository,
         session=session,
@@ -77,6 +84,11 @@ class RepositoryContainer(
 
     agent = providers.Factory(
         AgentRepository,
+        session=session,
+    )
+
+    api_key = providers.Factory(
+        ApiKeyRepository,
         session=session,
     )
 
