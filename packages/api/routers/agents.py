@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
     get_scoped_container,
     require_admin,
     require_permission,
@@ -86,6 +87,15 @@ async def create_agent(
     )
 
     created = await agents.create(agent)
+
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="agent.created",
+        resource_type="agent",
+        resource_id=created.id,
+        detail={"name": created.name, "model_profile_id": str(created.model_profile_id)},
+    )
 
     return ApiResponse(
         message="Agent created.",
@@ -203,6 +213,15 @@ async def update_agent(
         setattr(agent, field, value)
 
     updated = await agents.update(agent)
+
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="agent.updated",
+        resource_type="agent",
+        resource_id=updated.id,
+        detail={"name": updated.name, "fields": sorted(updates)},
+    )
 
     return ApiResponse(
         message="Agent updated.",

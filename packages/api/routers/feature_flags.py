@@ -6,6 +6,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from packages.api.dependencies import (
+    DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
     can_override_tenant,
     get_current_user,
     get_scoped_container,
@@ -92,6 +94,17 @@ async def create_feature_flag(
             enabled=payload.enabled,
             description=payload.description,
         )
+    )
+
+    # A global flag (tenant_id None) has no natural audit scope of its own — attributed to the
+    # acting admin's own tenant instead, with the flag's real (possibly global) scope in detail.
+    await container.audit().record(
+        tenant_id=current_user.tenant_id if current_user else DEFAULT_TENANT_ID,
+        actor_id=current_user.id if current_user else DEFAULT_USER_ID,
+        action="feature_flag.created",
+        resource_type="feature_flag",
+        resource_id=created.id,
+        detail={"key": created.key, "scope": str(created.tenant_id) if created.tenant_id else "global"},
     )
 
     return ApiResponse(
@@ -190,6 +203,19 @@ async def toggle_feature_flag(
     service = container.feature_flags.service()
     service.invalidate(updated.key, updated.tenant_id)
 
+    await container.audit().record(
+        tenant_id=current_user.tenant_id if current_user else DEFAULT_TENANT_ID,
+        actor_id=current_user.id if current_user else DEFAULT_USER_ID,
+        action="feature_flag.toggled",
+        resource_type="feature_flag",
+        resource_id=updated.id,
+        detail={
+            "key": updated.key,
+            "enabled": updated.enabled,
+            "scope": str(updated.tenant_id) if updated.tenant_id else "global",
+        },
+    )
+
     return ApiResponse(
         message="Feature flag updated.",
         data=FeatureFlagResponseSchema.model_validate(updated),
@@ -219,9 +245,18 @@ async def delete_feature_flag(
 
     _forbid_unless_may_manage(flag.tenant_id, current_user)
 
-    key, tenant_id = flag.key, flag.tenant_id
+    key, tenant_id, flag_id = flag.key, flag.tenant_id, flag.id
     await flags.delete(flag)
 
     container.feature_flags.service().invalidate(key, tenant_id)
+
+    await container.audit().record(
+        tenant_id=current_user.tenant_id if current_user else DEFAULT_TENANT_ID,
+        actor_id=current_user.id if current_user else DEFAULT_USER_ID,
+        action="feature_flag.deleted",
+        resource_type="feature_flag",
+        resource_id=flag_id,
+        detail={"key": key, "scope": str(tenant_id) if tenant_id else "global"},
+    )
 
     return ApiResponse(message="Feature flag deleted.")

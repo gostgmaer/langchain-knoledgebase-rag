@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
     get_scoped_container,
     require_admin,
     require_permission,
@@ -82,6 +83,15 @@ async def create_tool(
     )
 
     created = await tools.create(tool)
+
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="tool.created",
+        resource_type="tool",
+        resource_id=created.id,
+        detail={"name": created.name, "category": str(created.category)},
+    )
 
     return ApiResponse(
         message="Tool definition created.",

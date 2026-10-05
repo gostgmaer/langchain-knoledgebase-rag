@@ -3,9 +3,16 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from packages.api.dependencies import get_scoped_container, require_admin, require_permission
+from packages.api.dependencies import (
+    DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
+    get_scoped_container,
+    require_admin,
+    require_permission,
+    require_uuid_header,
+)
 from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
 from packages.api.schemas.model_profile import (
@@ -39,6 +46,7 @@ router = APIRouter(
 )
 async def create_model_profile(
     payload: CreateModelProfileRequestSchema,
+    request: Request,
     container: ApplicationContainer = Depends(get_scoped_container),
 ):
     model_profiles = container.repositories.model_profile()
@@ -75,6 +83,18 @@ async def create_model_profile(
     )
 
     created = await model_profiles.create(model_profile)
+
+    # Model profiles have no tenant of their own (shared, global reference data), but
+    # AuditEvent.tenant_id is required — DEFAULT_TENANT_ID is the same "no real tenant"
+    # sentinel already used wherever a request arrives with no X-Tenant-ID header.
+    await container.audit().record(
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="model_profile.created",
+        resource_type="model_profile",
+        resource_id=created.id,
+        detail={"name": created.name, "provider": str(created.provider), "model": created.model},
+    )
 
     return ApiResponse(
         message="Model profile created.",
@@ -149,6 +169,7 @@ async def get_model_profile(
 async def update_model_profile(
     model_profile_id: UUID,
     payload: UpdateModelProfileRequestSchema,
+    request: Request,
     container: ApplicationContainer = Depends(get_scoped_container),
 ):
     model_profiles = container.repositories.model_profile()
@@ -174,6 +195,15 @@ async def update_model_profile(
         setattr(model_profile, field, value)
 
     updated = await model_profiles.update(model_profile)
+
+    await container.audit().record(
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="model_profile.updated",
+        resource_type="model_profile",
+        resource_id=updated.id,
+        detail={"name": updated.name, "fields": sorted(updates)},
+    )
 
     return ApiResponse(
         message="Model profile updated.",

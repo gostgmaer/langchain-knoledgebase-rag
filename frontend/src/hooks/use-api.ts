@@ -662,11 +662,11 @@ export function useTopDocuments(days: number) {
   });
 }
 
-export function useAuditEvents(limit: number, offset: number) {
+export function useAuditEvents(limit: number, offset: number, action?: string) {
   const identity = useIdentity();
   return useQuery({
-    queryKey: ["observability-audit", identity?.tenantId, limit, offset],
-    queryFn: () => observability.audit(identity!, limit, offset),
+    queryKey: ["observability-audit", identity?.tenantId, limit, offset, action],
+    queryFn: () => observability.audit(identity!, limit, offset, action),
     enabled: !!identity,
     placeholderData: (previous) => previous,
   });

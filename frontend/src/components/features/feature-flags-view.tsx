@@ -25,15 +25,11 @@ import {
 import { useCreateFeatureFlag, useDeleteFeatureFlag, useFeatureFlags, useTenant, useToggleFeatureFlag } from "@/hooks/use-api";
 import { useTenantDirectory } from "@/hooks/use-tenant-directory";
 
-/** Resolves a tenant id to its real name, falling back to a truncated id only while loading or
- * if IAM can't be reached for it — same idiom as Documents' "Uploaded by" and the Tenants page. */
+/** Resolves a tenant id to its real name. Never falls back to a raw id (docs/BUGS.md item 34)
+ * — "unknown tenant" if IAM genuinely can't be reached for it. */
 function ScopeBadge({ tenantId }: { tenantId: string }) {
   const { data: tenant, isLoading } = useTenant(tenantId);
-  return (
-    <Badge variant="outline">
-      {isLoading ? "…" : (tenant?.name ?? <code className="text-xs">{tenantId.slice(0, 8)}…</code>)}
-    </Badge>
-  );
+  return <Badge variant="outline">{isLoading ? "…" : (tenant?.name ?? "unknown tenant")}</Badge>;
 }
 
 export function FeatureFlagsView() {

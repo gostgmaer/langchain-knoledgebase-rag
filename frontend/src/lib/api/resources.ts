@@ -342,8 +342,10 @@ export const observability = {
     apiFetch<ObservabilitySummary>("/observability/summary", identity, { query: { days } }),
   topDocuments: (identity: Identity, days: number) =>
     apiFetch<TopDocument[]>("/observability/top-documents", identity, { query: { days, limit: 10 } }),
-  audit: (identity: Identity, limit: number, offset: number) =>
-    apiFetch<AuditList>("/observability/audit", identity, { query: { limit, offset } }),
+  audit: (identity: Identity, limit: number, offset: number, action?: string) =>
+    apiFetch<AuditList>("/observability/audit", identity, {
+      query: { limit, offset, ...(action ? { action } : {}) },
+    }),
 };
 
 export const retrievalSettings = {

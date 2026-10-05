@@ -821,6 +821,48 @@ of its real name, with no obvious reason the ID specifically was needed there.
   render it) — confirmed "Viewing tenant: E2E Switch 1790356435" after selecting it, confirmed
   switching back to "EasyDev" worked too, both via the real running app, console clean throughout.
   `tsc --noEmit` and Vitest (29) clean.
+- **Correction to the paragraph above**: "tries a real name first and only falls back to an id on
+  genuine lookup failure" was still a raw-id leak, just a rarer one — a user should never see a
+  UUID, including on an IAM outage. Documents' `UploadedBy` and Feature Flags' `ScopeBadge` now
+  fall back to the words "unknown user" / "unknown tenant" instead of `userId.slice(0, 8)` /
+  `tenantId.slice(0, 8)…` when resolution genuinely fails.
+
+### 35. ✅ Audit trail existed but only covered documents/knowledge-sources — agents, model
+profiles, feature flags, API keys, tools, and prompts changed with zero record of who did it
+
+`packages/domain/models/audit_event.py` and `AuditService` were already solid — append-only,
+best-effort (a logging failure never breaks the operation it's auditing), secrets stripped from
+`detail` — and `GET /observability/audit` already existed with pagination and an `action` filter.
+But only `documents.py`, `knowledge_sources.py`, and `retrieval_settings.py` ever called
+`audit().record(...)`. Every admin action built this session — creating or editing an agent,
+minting or revoking an API key, publishing a prompt version (the app's own rollback mechanism),
+toggling a feature flag, registering a model profile or a webhook tool — left no trace at all.
+For a platform being evaluated for enterprise sale, "who changed this and when" on exactly these
+actions is what a security review asks for first.
+- **Fixed**: added `audit().record(...)` calls to `agents.py` (create/update), `models.py`
+  (create/update — model profiles are global, not tenant-scoped, so these use
+  `DEFAULT_TENANT_ID` as the audit scope, same sentinel already used wherever no `X-Tenant-ID`
+  header is sent), `feature_flags.py` (create/toggle/delete — a global flag's audit scope is the
+  acting admin's own tenant, with the flag's real scope recorded in `detail`), `api_keys.py`
+  (create/revoke), `prompts.py` (create prompt/create version/publish version), and `tools.py`
+  (create).
+- **Audit trail UI gap**: `actor_id` was already in the API response and the TypeScript type, but
+  the Observability page's Audit trail table never rendered it — no "Who" column at all. Added
+  one, resolving through `useUser()` (same idiom as Documents' "Uploaded by"); a `null` actor_id
+  (a system-triggered event like a scheduled re-sync) renders as "system", never a blank or an id.
+  Also wired up the `action` filter the backend already supported but the UI never exposed, as a
+  plain text input above the table.
+- **Re-swept for the same raw-id-fallback issue** found in item 34 above while in this file —
+  Documents' `UploadedBy` and Feature Flags' `ScopeBadge` fixed as noted in the correction above.
+- **Verified live**: created a new tool definition ("Audit Trail Smoke Test") through the real UI,
+  then loaded Observability and confirmed the new `tool.created` row appeared at the top of the
+  Audit trail with "Kishor Super Admin" (not a UUID) in the Who column and the right `detail`
+  JSON. Typed `tool.created` into the new action filter and confirmed it narrowed the table to
+  exactly that one row ("Audit trail (1)"). `tsc --noEmit` and Vitest (29) clean on the frontend;
+  backend `pytest` on all five touched routers' API tests is 20 passed / 3 failed, the 3 failures
+  being the already-known, already-excluded `"google"` vs `"GOOGLE"` enum-casing bug (identical
+  failures existed before this change, confirmed via `gh pr checks` on PR #5 earlier in this
+  session) — no regressions.
 
 ---
 
