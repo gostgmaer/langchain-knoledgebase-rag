@@ -13,6 +13,7 @@ from packages.infrastructure.container.feature_flags import FeatureFlagsContaine
 from packages.infrastructure.container.graph import GraphContainer
 from packages.infrastructure.container.iam import IAMContainer
 from packages.infrastructure.container.memory import MemoryContainer
+from packages.infrastructure.container.platform_settings import PlatformSettingsContainer
 from packages.infrastructure.container.queue import QueueContainer
 from packages.infrastructure.container.rag import RAGContainer
 from packages.infrastructure.container.repositories import RepositoryContainer
@@ -56,6 +57,11 @@ class ApplicationContainer(containers.DeclarativeContainer):
 
     feature_flags = providers.Container(
         FeatureFlagsContainer,
+        database=database,
+    )
+
+    platform_settings = providers.Container(
+        PlatformSettingsContainer,
         database=database,
     )
 

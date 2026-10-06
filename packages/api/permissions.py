@@ -92,6 +92,12 @@ class Permission:
     OBSERVABILITY_READ = "observability:read"
     OBSERVABILITY_PURGE = "observability:purge"
 
+    # Platform Settings — packages/api/routers/platform_settings.py (docs/BUGS.md item 38).
+    # Operational knobs (rate limits, CORS origins, retention windows), platform-wide, not
+    # per-tenant — same "operator config, not tenant config" reasoning as Observability's purge.
+    PLATFORM_SETTINGS_READ = "platform_settings:read"
+    PLATFORM_SETTINGS_WRITE = "platform_settings:write"
+
     # Prompts — packages/api/routers/prompts.py
     PROMPTS_READ = "prompts:read"
     PROMPTS_WRITE = "prompts:write"

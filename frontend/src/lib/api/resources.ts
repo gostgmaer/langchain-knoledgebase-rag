@@ -35,6 +35,8 @@ import type {
   DocumentChunkListResponse,
   ObservabilitySummary,
   ReindexResult,
+  PlatformSettingsResponse,
+  PlatformSettingsUpdate,
   RetrievalSettings,
   RetrievalSettingsUpdate,
   RetrievalLogDetail,
@@ -355,6 +357,12 @@ export const retrievalSettings = {
   get: (identity: Identity) => apiFetch<RetrievalSettings>("/retrieval-settings", identity),
   save: (identity: Identity, body: RetrievalSettingsUpdate) =>
     apiFetch<RetrievalSettings>("/retrieval-settings", identity, { method: "PUT", body }),
+};
+
+export const platformSettings = {
+  get: (identity: Identity) => apiFetch<PlatformSettingsResponse>("/platform-settings", identity),
+  save: (identity: Identity, body: PlatformSettingsUpdate) =>
+    apiFetch<PlatformSettingsResponse>("/platform-settings", identity, { method: "PATCH", body }),
 };
 
 // ---------------------------------------------------------------

@@ -971,6 +971,70 @@ not the chat UI itself.
   pre-existing, already-excluded `"google"`/`"GOOGLE"` enum-casing bug as every other round this
   session, not a regression.
 
+### 38. ✅ New feature — admin-configurable Platform Settings, so operational knobs don't need a redeploy
+
+User ask: too many `.env` variables with no way to change them except a redeploy; wanted an admin
+page/API for the ones that are safe to expose. Scoped deliberately, not "move every env var":
+secrets (API keys, `JWT_SECRET`, DB/Redis URLs, the connector credential encryption key) and
+security-boundary fields (`AUTH_REQUIRED`, `admin_roles`, `tenant_override_roles`) stay `.env`-only
+— the first because a settings UI reading them back is itself a leak, the second because they're a
+security decision, not an operational tuning knob. What moved: rate limits, CORS origins, session
+expiry, retention windows, embedding/connector-sync concurrency — plus the 4 of
+`packages/config/features.py`'s 10 `enable_*` booleans that turned out to have a real consumer.
+- **New `PlatformSetting` model/service** (`packages/application/services/platform_settings_service.py`):
+  one JSONB-valued table, keyed by setting name, same in-process ~30s TTL cache as the existing
+  `FeatureFlagService` (no row = `.env` default; a row is an admin's override). A typed `SETTINGS`
+  registry (key, label, kind, min/max, help, `.env` fallback) drives both the API's validation and
+  the frontend's generic form — adding a new settable knob later is one registry entry, not a
+  migration.
+- **Real bug found wiring it up**: every consumer (`RateLimitMiddleware`, the global CORS
+  middleware, retention/reindex/session-expiry jobs, connector sync) previously read its value
+  *once*, at process/middleware-construction time — meaning even the existing `.env` values already
+  needed a restart to change, undocumented. Fixed each to read through `PlatformSettingsService`
+  fresh (cached) on every use instead of capturing a value in `__init__`.
+- **Real bug found making CORS dynamic**: Starlette's `CORSMiddleware` has no concept of a
+  per-request dynamic origin list — it builds its matcher once at construction. Replaced it with a
+  new pure-ASGI `DynamicCORSMiddleware` (`packages/api/middleware/cors.py`, not `BaseHTTPMiddleware`
+  — deliberately, to avoid breaking this app's SSE chat streaming the way buffering a response to
+  inspect it would) that re-reads the allowed-origins list through `PlatformSettingsService` on
+  every request, still exempting `/api/v1/widget/` (item 37's own per-agent CORS). Confirmed live:
+  overriding `cors_origins` on the Platform Settings page changed what the running API accepted
+  immediately, no restart.
+- **`features.py`'s dead flags, made real**: grepping the whole codebase found `enable_web_search`,
+  `enable_weather`, `enable_news` and `enable_calculator` had zero consumers anywhere — static,
+  inert config. Wired each to gate its matching builtin tool's registration in
+  `init_tool_manager` (`packages/infrastructure/container/tools.py`), through the *same* dynamic
+  Feature Flag mechanism `enable_rbac` already uses (not a new system) — an admin can now disable a
+  specific tool platform-wide without a redeploy. `enable_rag`/`enable_tools`/`enable_memory`/
+  `enable_streaming`/`enable_query_rewrite` were deliberately left alone: gating those for real means
+  conditionally skipping whole LangGraph nodes, a separate, larger feature, not a settings move.
+  `enable_reranking` needed no change — it already flows into the existing per-tenant Retrieval
+  Settings page as that field's seed default.
+- **Real test-isolation bug found writing tests for this**: `PlatformSettingsService` is wired onto
+  the same raw, un-rollback-able `database.session_factory` `FeatureFlagService` already uses (for
+  the same reason: both need to work outside a request's transaction) — meaning the API test
+  suite's `client` fixture would otherwise write *real, permanent* override rows into the live dev
+  database on every `PATCH /platform-settings` test. Fixed by adding an in-memory
+  `_InMemoryPlatformSettingsService` fake to `tests/conftest.py`, mirroring the existing
+  `_RBACDisabledFeatureFlagService` pattern exactly. Confirmed live: `SELECT * FROM
+  platform_settings` on the real dev DB was empty before and after the full test run.
+- **Real ContextVar test-leak found in the same pass**: the new tool-gating tests reset
+  `packages/tools/context.py`'s enabled-tools ContextVar to `frozenset()` ("nothing enabled") in
+  teardown instead of its true default `None` ("never fetched, fail open") — since ContextVars
+  aren't test-isolated by pytest automatically, this silently broke `test_widget_tool_gating.py`'s
+  own tests when run in the same session. Added a proper `reset_enabled_tools()` and used it in
+  both files' teardown.
+- **Verified live**: toggled a value (general rate limit → 500), saved, confirmed the "overridden"
+  badge and persisted value on reload, reset it back via the UI's own reset button, confirmed the
+  override row was actually deleted from Postgres (not just nulled) both times. Also hit a live,
+  expected 403 ("Missing required permission: platform_settings:read") from this environment's
+  `enable_rbac` having been manually left on earlier in this session with no IAM role mapping yet
+  for the brand-new permission code — not a bug; toggled `enable_rbac` off via Feature Flags to
+  complete verification, then restored it to exactly the on state it was found in. 16 new tests
+  (`test_platform_settings_api.py`, `test_dynamic_cors.py`, `test_feature_flag_tool_gating.py`) plus
+  the fixed widget tests, full suite: 444 passed, 3 failed — the same pre-existing, already-excluded
+  enum-casing bug.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

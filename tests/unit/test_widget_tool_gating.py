@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from packages.infrastructure.container.tools import init_tool_manager
-from packages.tools.context import set_custom_tools, set_widget_mode
+from packages.tools.context import reset_enabled_tools, set_custom_tools, set_widget_mode
 from packages.tools.executor import ToolExecutor
 from packages.tools.registry import ToolRegistry
 
@@ -23,6 +23,10 @@ WIDGET_FORBIDDEN = {"lookup_iam_user", "lookup_iam_tenant", "get_weather", "get_
 
 
 def _build(*, widget: bool, custom_tool_names: tuple[str, ...] = ()) -> set[str]:
+    # docs/BUGS.md item 38 added a second gate (the enabled-tools ContextVar) alongside widget
+    # mode; this file only ever exercises widget mode, so it resets that other one to its true
+    # fail-open default rather than leaving it however a previous test last set it.
+    reset_enabled_tools()
     set_widget_mode(widget)
     custom = []
     for name in custom_tool_names:
@@ -49,6 +53,7 @@ def _reset_context():
     yield
     set_widget_mode(False)
     set_custom_tools([])
+    reset_enabled_tools()
 
 
 def test_authenticated_chat_gets_every_builtin_tool():

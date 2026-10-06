@@ -13,14 +13,19 @@ logger = get_logger(__name__)
 
 _CACHE_TTL_SECONDS = 30.0
 
-# Seeded only with today's one real consumer (see
-# packages/api/dependencies.py's require_permission/require_role) —
-# matching FeatureSettings.enable_rbac's current static default. The
-# other 10 flags declared in packages/config/features.py have no
-# runtime gating logic anywhere to look up a dynamic value for, so
-# they're deliberately not seeded here.
+# Seeded with every flag that has a real runtime consumer — matching each one's
+# `packages/config/features.py::FeatureSettings` static default, so turning this app's dynamic
+# flag system on for a key never silently changes behaviour for a tenant with no override row yet
+# (see packages/api/dependencies.py's require_permission/require_role for enable_rbac;
+# packages/infrastructure/container/tools.py's init_tool_manager for the other four, docs/BUGS.md
+# item 38). The remaining 6 flags declared in FeatureSettings have no runtime gating logic
+# anywhere to look up a dynamic value for, so they're deliberately not seeded here.
 _STATIC_DEFAULTS: dict[str, bool] = {
     "enable_rbac": False,
+    "enable_web_search": True,
+    "enable_weather": True,
+    "enable_news": True,
+    "enable_calculator": True,
 }
 
 

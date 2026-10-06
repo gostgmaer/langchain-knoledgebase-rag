@@ -865,6 +865,31 @@ export interface ReindexResult {
   skipped?: number;
 }
 
+// ---------------------------------------------------------------
+// Platform Settings — operational knobs (docs/BUGS.md item 38)
+// ---------------------------------------------------------------
+
+export interface PlatformSettingItem {
+  key: string;
+  label: string;
+  kind: "int" | "bool" | "string_list";
+  help: string | null;
+  minimum: number | null;
+  maximum: number | null;
+  value: number | boolean | string[];
+  env_default: number | boolean | string[];
+  is_overridden: boolean;
+}
+
+export interface PlatformSettingsResponse {
+  settings: PlatformSettingItem[];
+}
+
+export interface PlatformSettingsUpdate {
+  /** key -> new value, or null to revert that one key to its .env default. */
+  values: Record<string, number | boolean | string[] | null>;
+}
+
 export interface ChatFilters {
   document_types?: string[];
   categories?: string[];

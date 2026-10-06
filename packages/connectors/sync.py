@@ -272,7 +272,11 @@ class SyncEngine:
             snapshot.targets = None  # the connector cannot fetch single items: do a normal sync instead
 
         changes = await connector.get_changes(context) if connector.supports_changes and state else None
-        semaphore = asyncio.Semaphore(settings.rag.connector_sync_concurrency)
+        # docs/BUGS.md item 38: read through PlatformSettingsService (cached ~30s), not the
+        # static settings.rag.connector_sync_concurrency — an admin's change on the Platform
+        # Settings page applies to the next sync without a restart.
+        concurrency = await self._container.platform_settings.service().get("connector_sync_concurrency")
+        semaphore = asyncio.Semaphore(concurrency)
         pending: set[asyncio.Task] = set()
         flushed = {"n": 0}
 
@@ -288,7 +292,7 @@ class SyncEngine:
             task = asyncio.create_task(guarded(document))
             pending.add(task)
             task.add_done_callback(pending.discard)
-            if len(pending) >= settings.rag.connector_sync_concurrency * 2:
+            if len(pending) >= concurrency * 2:
                 await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
 
         discovery_complete = False
@@ -328,7 +332,8 @@ class SyncEngine:
         None when the connector cannot fetch one item by id (the caller then runs a full sync). The sync cursor and
         the removal sweep are untouched: this is a shortcut, not a replacement for full syncs.
         """
-        semaphore = asyncio.Semaphore(settings.rag.connector_sync_concurrency)
+        concurrency = await self._container.platform_settings.service().get("connector_sync_concurrency")
+        semaphore = asyncio.Semaphore(concurrency)
 
         async def one(external_id: str) -> None:
             async with semaphore:

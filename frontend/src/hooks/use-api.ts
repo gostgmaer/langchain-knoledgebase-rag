@@ -15,6 +15,7 @@ import {
   knowledgeSources,
   modelProfiles,
   observability,
+  platformSettings,
   prompts,
   retrievalLogs,
   retrievalSettings,
@@ -31,6 +32,7 @@ import type {
   DocumentUpdate,
   IdentityMapping,
   UpdateSourceRequest,
+  PlatformSettingsUpdate,
   RetrievalSettingsUpdate,
   DocumentUploadOptions,
   CreateAgentRequest,
@@ -267,6 +269,26 @@ export function useSaveRetrievalSettings() {
   return useMutation({
     mutationFn: (body: RetrievalSettingsUpdate) => retrievalSettings.save(identity!, body),
     onSuccess: (data) => queryClient.setQueryData(["retrieval-settings", identity?.tenantId], data),
+  });
+}
+
+/** Platform-wide operational knobs (docs/BUGS.md item 38) — not tenant-scoped, but apiFetch
+ * still needs an Identity for headers, same as useModelProfiles. */
+export function usePlatformSettings() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["platform-settings"],
+    queryFn: () => platformSettings.get(identity!),
+    enabled: !!identity,
+  });
+}
+
+export function useSavePlatformSettings() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PlatformSettingsUpdate) => platformSettings.save(identity!, body),
+    onSuccess: (data) => queryClient.setQueryData(["platform-settings"], data),
   });
 }
 

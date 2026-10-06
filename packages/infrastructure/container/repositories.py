@@ -12,6 +12,7 @@ from packages.infrastructure.repositories.document_version import DocumentVersio
 from packages.infrastructure.repositories.embedding import EmbeddingRepository
 from packages.infrastructure.repositories.entity import EntityRepository
 from packages.infrastructure.repositories.feature_flag import FeatureFlagRepository
+from packages.infrastructure.repositories.platform_setting import PlatformSettingRepository
 from packages.infrastructure.repositories.feedback import FeedbackRepository
 from packages.infrastructure.repositories.knowledge_base import KnowledgeBaseRepository
 from packages.infrastructure.repositories.memory import MemoryRepository
@@ -119,6 +120,11 @@ class RepositoryContainer(
 
     feature_flag = providers.Factory(
         FeatureFlagRepository,
+        session=session,
+    )
+
+    platform_setting = providers.Factory(
+        PlatformSettingRepository,
         session=session,
     )
 

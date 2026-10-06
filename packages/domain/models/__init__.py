@@ -27,6 +27,7 @@ from .memory import Memory
 from .message import Message
 from .message_citation import MessageCitation
 from .model_profile import ModelProfile
+from .platform_setting import PlatformSetting
 from .prompt import Prompt
 from .prompt_version import PromptVersion
 from .relationship import Relationship
@@ -64,6 +65,7 @@ __all__ = [
     "Message",
     "MessageCitation",
     "ModelProfile",
+    "PlatformSetting",
     "Prompt",
     "PromptVersion",
     "Relationship",

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import time
 
+from dependency_injector.wiring import Provide, inject
 from fastapi import Request
 from redis.asyncio import Redis
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
+from packages.application.services.platform_settings_service import PlatformSettingsService
 from packages.config.loader import settings
+from packages.infrastructure.container import ApplicationContainer
 from packages.shared.logging import get_logger
 
 logger = get_logger(__name__)
@@ -83,11 +86,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         ("POST", "/documents"),
     )
 
-    def __init__(self, app) -> None:
-        super().__init__(app)
-        self._max_requests = settings.api.rate_limit_requests_per_minute
-        self._max_expensive_requests = settings.api.rate_limit_expensive_requests_per_minute
-
     def _is_expensive(self, request: Request) -> bool:
         path = request.url.path.removeprefix(settings.api.api_prefix)
         return any(
@@ -110,20 +108,31 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             )
         return None
 
-    async def dispatch(self, request: Request, call_next) -> Response:
-        if self._max_requests <= 0 and self._max_expensive_requests <= 0:
+    @inject
+    async def dispatch(
+        self,
+        request: Request,
+        call_next,
+        platform_settings: PlatformSettingsService = Provide[ApplicationContainer.platform_settings.service],
+    ) -> Response:
+        # Read fresh (cached ~30s) rather than captured once in __init__, so an admin's change on
+        # the Platform Settings page (docs/BUGS.md item 38) takes effect without a restart.
+        max_requests = await platform_settings.get("rate_limit_requests_per_minute")
+        max_expensive_requests = await platform_settings.get("rate_limit_expensive_requests_per_minute")
+
+        if max_requests <= 0 and max_expensive_requests <= 0:
             return await call_next(request)
 
         key = request.headers.get("X-Tenant-ID") or (
             request.client.host if request.client else "unknown"
         )
 
-        rejection = await self._check("general", key, self._max_requests)
+        rejection = await self._check("general", key, max_requests)
         if rejection is not None:
             return rejection
 
         if self._is_expensive(request):
-            rejection = await self._check("expensive", key, self._max_expensive_requests)
+            rejection = await self._check("expensive", key, max_expensive_requests)
             if rejection is not None:
                 return rejection
 

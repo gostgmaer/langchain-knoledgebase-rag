@@ -3,6 +3,7 @@
 import {
   Cable,
   Activity,
+  Cog,
   ListTree,
   SlidersHorizontal,
   BarChart3,
@@ -96,6 +97,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/admin/team", label: "Team", icon: Users, section: "Administration" },
     { href: "/admin/api-keys", label: "API Keys", icon: Key, section: "Administration" },
     { href: "/admin/feature-flags", label: "Feature Flags", icon: Flag, section: "Administration" },
+    { href: "/admin/platform-settings", label: "Platform Settings", icon: Cog, section: "Administration" },
     { href: "/admin/settings", label: "Settings", icon: Settings, section: "Administration" },
   ],
 };

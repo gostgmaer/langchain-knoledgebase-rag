@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from packages.config.loader import settings
 
 from .authentication import AuthenticationMiddleware
-from .cors import SelectiveCORSMiddleware
+from .cors import DynamicCORSMiddleware
 from .logging import LoggingMiddleware
 from .metrics import MetricsMiddleware
 from .rate_limit import RateLimitMiddleware
@@ -95,17 +95,26 @@ def register_middlewares(app: FastAPI) -> None:
     #
     # Exempts /api/v1/widget/ — the embeddable chat widget's allowed
     # origins are per-agent, stored in the database by a tenant admin
-    # at runtime, not expressible in this one static, startup-time
-    # list. That router (packages/api/routers/widget.py) answers its
-    # own preflight and sets its own per-request CORS headers; see
-    # SelectiveCORSMiddleware's own docstring for why this is
-    # necessary, not just tidy — CORSMiddleware otherwise intercepts
-    # every OPTIONS request in the app, including that router's own.
+    # at runtime, not expressible in this one platform-wide list. That
+    # router (packages/api/routers/widget.py) answers its own preflight
+    # and sets its own per-request CORS headers; see DynamicCORSMiddleware's
+    # own docstring for why this is necessary, not just tidy.
     #
+    # Reads the allowed-origins list fresh on every request through
+    # PlatformSettingsService (docs/BUGS.md item 38), not a list fixed
+    # at process startup — an admin's change on the Platform Settings
+    # page takes effect without a restart. `app.state.container` is
+    # looked up lazily, inside the closure, since it isn't set yet at
+    # this point in startup.
+    #
+    async def _allowed_origins() -> list[str]:
+        container = app.state.container
+        return await container.platform_settings.service().get("cors_origins")
+
     app.add_middleware(
-        SelectiveCORSMiddleware,
+        DynamicCORSMiddleware,
         exempt_prefix=f"{settings.api.api_prefix}/widget/",
-        allow_origins=settings.api.cors_origins,
+        get_allowed_origins=_allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["X-Tenant-ID", "X-User-ID", "Content-Type", "Authorization"],

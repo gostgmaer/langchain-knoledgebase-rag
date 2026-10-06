@@ -338,7 +338,12 @@ async def audit_events(
     dependencies=[Depends(require_super_admin()), Depends(require_permission(Permission.OBSERVABILITY_PURGE))],
 )
 async def run_retention_purge(container: ApplicationContainer = Depends(get_scoped_container)):
+    platform_settings = container.platform_settings.service()
     return ApiResponse(
         message="Retention purge finished.",
-        data=await purge_expired(container.database.session_factory()),
+        data=await purge_expired(
+            container.database.session_factory(),
+            retrieval_log_days=await platform_settings.get("retention_retrieval_log_days"),
+            audit_days=await platform_settings.get("retention_audit_days"),
+        ),
     )
