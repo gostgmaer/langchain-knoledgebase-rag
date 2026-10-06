@@ -1087,6 +1087,27 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   startup log with no error, confirmed `rag_context_token_budget`/`retrieval_keyword_weight` both
   resolve through `PlatformSettingsService.get()` to their defaults, and confirmed `PromptBuilder`
   builds a real prompt end-to-end through the new DI wiring.
+- **Reversed, same session, on explicit request**: after seeing the Platform Settings page,
+  the user asked for `platform_settings` itself to be pre-populated after all — new
+  `PlatformSettingsService.seed_defaults()`, called from `packages/api/lifespan.py` right after
+  the default-model-profile seed above. Writes one row per `SETTINGS` key with its built-in
+  default for any key with no row yet; idempotent, never touches a key an admin already changed.
+  The trade-off from the bullet above still applies and is now accepted on purpose: once seeded,
+  a future release changing a built-in default won't reach an install that already ran this until
+  an admin resets that key. Updated `PlatformSetting`'s own docstring (it previously said this
+  table "only ever holds the keys someone actually changed" — no longer true) to point at
+  `is_overridden` (`value != spec.default`) as the real way to tell a seeded default from a real
+  override. Verified live: restarted the container, confirmed `"Platform settings seeded with
+  built-in defaults."` in the startup log, then queried `platform_settings` directly — all 10
+  known keys present with their literal defaults.
+- **Separately, while on that page**: hit the same `enable_rbac`-with-no-IAM-role-mapping 403
+  already documented above, this time for real (not just during this session's own verification)
+  — `platform_settings:read`/`write` aren't granted to any role in the external IAM system yet.
+  Per the user's explicit choice, toggled `enable_rbac` off globally (not restored this time —
+  left off until IAM roles are updated) by writing the `FeatureFlag` row directly
+  (`packages/infrastructure/repositories/feature_flag.py`), confirmed the change took effect via a
+  fresh `FeatureFlagService.get_effective()` read. No code change; an operational action, logged
+  here since it changes this environment's standing security posture.
 
 ---
 

@@ -171,6 +171,37 @@ class PlatformSettingsService:
         """Every known setting's current effective value, in one pass."""
         return {spec.key: await self.get(spec.key) for spec in SETTINGS}
 
+    async def seed_defaults(self) -> None:
+        """
+        Writes an explicit row for every `SETTINGS` key that has none yet, so
+        `platform_settings` is never empty after first boot and an admin opening the page sees
+        every current value as a real row, not an absence. Called once from
+        `packages/api/lifespan.py` at startup; idempotent — only inserts missing keys, never
+        touches a row that already exists (including one an admin already overrode).
+
+        Deliberate trade-off, confirmed with the user over the alternative (no seeding, `.get()`'s
+        "no row = whatever the code's built-in default is today" behavior, which is the service's
+        own long-standing default): once a row exists here, a future release that changes a
+        built-in default will NOT reach an installation that already ran this seed — the stored
+        row keeps returning today's value until an admin explicitly resets that key.
+        """
+        from packages.domain.models.platform_setting import PlatformSetting
+
+        async with self._session_factory() as session:
+            repo = PlatformSettingRepository(session)
+            seeded_keys: list[str] = []
+            for spec in SETTINGS:
+                existing = await repo.get_by_key(spec.key)
+                if existing is None:
+                    value = list(spec.default) if isinstance(spec.default, list) else spec.default
+                    session.add(PlatformSetting(key=spec.key, value=value, updated_by=None))
+                    seeded_keys.append(spec.key)
+            if seeded_keys:
+                await session.commit()
+
+        for key in seeded_keys:
+            self.invalidate(key)
+
     async def set(self, key: str, value: Any, *, updated_by: UUID | None) -> None:
         """`value=None` reverts the key to its built-in default (deletes the override row)."""
         from packages.domain.models.platform_setting import PlatformSetting

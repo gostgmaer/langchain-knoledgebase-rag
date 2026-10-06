@@ -104,6 +104,17 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Could not seed the default model profile: %s", exc)
 
+    # Writes one row per known Platform Setting (packages/application/services/
+    # platform_settings_service.py's SETTINGS) with its built-in default, for
+    # every key that doesn't have a row yet — so the platform_settings table
+    # is never empty on first boot. Idempotent: only fills in missing keys,
+    # never touches one an admin already overrode.
+    try:
+        await container.platform_settings.service().seed_defaults()
+        logger.info("Platform settings seeded with built-in defaults.")
+    except Exception as exc:
+        logger.warning("Could not seed default platform settings: %s", exc)
+
     # Persistent (Postgres-backed) checkpointing — Session Management's
     # "Persistent Sessions" gap. Deliberately non-fatal: the in-memory
     # MemorySaver default (packages/infrastructure/container/graph.py)
