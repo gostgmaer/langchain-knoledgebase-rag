@@ -184,7 +184,12 @@ async def purge_expired_logs_job(ctx: dict[str, Any]) -> dict[str, int]:
     from packages.application.services.retention_service import purge_expired
 
     container: ApplicationContainer = ctx["container"]
-    result = await purge_expired(container.database.session_factory())
+    platform_settings = container.platform_settings.service()
+    result = await purge_expired(
+        container.database.session_factory(),
+        retrieval_log_days=await platform_settings.get("retention_retrieval_log_days"),
+        audit_days=await platform_settings.get("retention_audit_days"),
+    )
     logger.info("Retention purge finished", **result)
     return result
 
@@ -192,7 +197,8 @@ async def purge_expired_logs_job(ctx: dict[str, Any]) -> dict[str, int]:
 async def reindex_stale_documents_job(ctx: dict[str, Any]) -> dict[str, int]:
     """
     Weekly sweep re-embedding documents not touched in
-    settings.rag.reindex_stale_after_days — Scheduled Re-indexing
+    the platform's reindex_stale_after_days setting (docs/BUGS.md item 38 —
+    admin-configurable, not an env var) — Scheduled Re-indexing
     (docs/mvpRAG.md v1.1), picking up embedding model changes or
     quality improvements without waiting for a manual re-upload. Each
     document is caught and logged independently so one bad document
@@ -201,7 +207,8 @@ async def reindex_stale_documents_job(ctx: dict[str, Any]) -> dict[str, int]:
     """
 
     container: ApplicationContainer = ctx["container"]
-    cutoff = datetime.now(UTC) - timedelta(days=settings.rag.reindex_stale_after_days)
+    reindex_stale_after_days = await container.platform_settings.service().get("reindex_stale_after_days")
+    cutoff = datetime.now(UTC) - timedelta(days=reindex_stale_after_days)
 
     reindexed = 0
     failed = 0
@@ -305,8 +312,8 @@ async def cleanup_orphaned_chunks_job(ctx: dict[str, Any]) -> dict[str, int]:
 
 async def expire_stale_conversations_job(ctx: dict[str, Any]) -> dict[str, int]:
     """
-    Archives ACTIVE conversations with no activity for
-    `settings.app.session_expiry_days`, and frees their LangGraph
+    Archives ACTIVE conversations with no activity for the platform's session_expiry_days
+    setting (docs/BUGS.md item 38 — admin-configurable, not an env var), and frees their LangGraph
     checkpoint data. The worker's own `ApplicationContainer` does not
     have the real Postgres checkpointer wired the way
     packages/api/lifespan.py wires it for the API process — this opens
@@ -317,11 +324,12 @@ async def expire_stale_conversations_job(ctx: dict[str, Any]) -> dict[str, int]:
     """
 
     container: ApplicationContainer = ctx["container"]
+    session_expiry_days = await container.platform_settings.service().get("session_expiry_days")
     # Conversation.last_message_at is TIMESTAMP WITHOUT TIME ZONE (this
     # app's established naive-UTC convention — see
     # ConversationService.touch()) — a timezone-aware cutoff here
     # raises asyncpg.exceptions.DataError, confirmed live.
-    cutoff = datetime.utcnow() - timedelta(days=settings.app.session_expiry_days)
+    cutoff = datetime.utcnow() - timedelta(days=session_expiry_days)
 
     expired = 0
     checkpointer = None

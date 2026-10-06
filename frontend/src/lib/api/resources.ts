@@ -2,6 +2,7 @@ import { apiFetch, type Identity } from "./client";
 import type {
   Agent,
   AgentListResponse,
+  AgentWidgetRotateResponse,
   AnalyticsSummary,
   ChatResponseData,
   Conversation,
@@ -34,6 +35,8 @@ import type {
   DocumentChunkListResponse,
   ObservabilitySummary,
   ReindexResult,
+  PlatformSettingsResponse,
+  PlatformSettingsUpdate,
   RetrievalSettings,
   RetrievalSettingsUpdate,
   RetrievalLogDetail,
@@ -214,6 +217,8 @@ export const agents = {
     apiFetch<Agent>("/agents", identity, { method: "POST", body }),
   update: (identity: Identity, id: string, body: UpdateAgentRequest) =>
     apiFetch<Agent>(`/agents/${id}`, identity, { method: "PATCH", body }),
+  rotateWidgetId: (identity: Identity, id: string) =>
+    apiFetch<AgentWidgetRotateResponse>(`/agents/${id}/widget/rotate`, identity, { method: "POST" }),
 };
 
 // ---------------------------------------------------------------
@@ -342,14 +347,22 @@ export const observability = {
     apiFetch<ObservabilitySummary>("/observability/summary", identity, { query: { days } }),
   topDocuments: (identity: Identity, days: number) =>
     apiFetch<TopDocument[]>("/observability/top-documents", identity, { query: { days, limit: 10 } }),
-  audit: (identity: Identity, limit: number, offset: number) =>
-    apiFetch<AuditList>("/observability/audit", identity, { query: { limit, offset } }),
+  audit: (identity: Identity, limit: number, offset: number, action?: string) =>
+    apiFetch<AuditList>("/observability/audit", identity, {
+      query: { limit, offset, ...(action ? { action } : {}) },
+    }),
 };
 
 export const retrievalSettings = {
   get: (identity: Identity) => apiFetch<RetrievalSettings>("/retrieval-settings", identity),
   save: (identity: Identity, body: RetrievalSettingsUpdate) =>
     apiFetch<RetrievalSettings>("/retrieval-settings", identity, { method: "PUT", body }),
+};
+
+export const platformSettings = {
+  get: (identity: Identity) => apiFetch<PlatformSettingsResponse>("/platform-settings", identity),
+  save: (identity: Identity, body: PlatformSettingsUpdate) =>
+    apiFetch<PlatformSettingsResponse>("/platform-settings", identity, { method: "PATCH", body }),
 };
 
 // ---------------------------------------------------------------

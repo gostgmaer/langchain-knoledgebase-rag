@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -21,10 +22,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useCreateFeatureFlag, useDeleteFeatureFlag, useFeatureFlags, useToggleFeatureFlag } from "@/hooks/use-api";
+import { useCreateFeatureFlag, useDeleteFeatureFlag, useFeatureFlags, useTenant, useToggleFeatureFlag } from "@/hooks/use-api";
+import { useTenantDirectory } from "@/hooks/use-tenant-directory";
+
+/** Resolves a tenant id to its real name. Never falls back to a raw id (docs/BUGS.md item 34)
+ * — "unknown tenant" if IAM genuinely can't be reached for it. */
+function ScopeBadge({ tenantId }: { tenantId: string }) {
+  const { data: tenant, isLoading } = useTenant(tenantId);
+  return <Badge variant="outline">{isLoading ? "…" : (tenant?.name ?? "unknown tenant")}</Badge>;
+}
 
 export function FeatureFlagsView() {
   const { data, isLoading } = useFeatureFlags();
+  const directory = useTenantDirectory();
   const createFlag = useCreateFeatureFlag();
   const toggleFlag = useToggleFeatureFlag();
   const deleteFlag = useDeleteFeatureFlag();
@@ -89,9 +99,7 @@ export function FeatureFlagsView() {
                 <TableCell className="font-medium">{flag.key}</TableCell>
                 <TableCell>
                   {flag.tenant_id ? (
-                    <Badge variant="outline">
-                      <code className="text-xs">{flag.tenant_id.slice(0, 8)}…</code>
-                    </Badge>
+                    <ScopeBadge tenantId={flag.tenant_id} />
                   ) : (
                     <Badge variant="secondary">global</Badge>
                   )}
@@ -144,13 +152,23 @@ export function FeatureFlagsView() {
             />
           </div>
           <div className="grid gap-1.5">
-            <Label>Tenant ID (optional — blank means global default)</Label>
-            <Input
+            <Label>Scope</Label>
+            <Select
               value={form.tenant_id}
               onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-              className="font-mono"
-              placeholder="leave blank for global"
-            />
+            >
+              <option value="">Global default</option>
+              {directory.data?.map((t) => (
+                <option key={t.internalId} value={t.internalId}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+            {directory.isError && (
+              <p className="text-xs text-amber-600">
+                Could not load the tenant directory — only a global flag can be created right now.
+              </p>
+            )}
           </div>
           <div className="grid gap-1.5">
             <Label>Description</Label>

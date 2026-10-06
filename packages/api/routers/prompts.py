@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
     get_scoped_container,
     require_admin,
     require_permission,
@@ -104,6 +105,15 @@ async def create_prompt(
     )
 
     created = await prompts.create(prompt)
+
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="prompt.created",
+        resource_type="prompt",
+        resource_id=created.id,
+        detail={"name": created.name},
+    )
 
     return ApiResponse(
         message="Prompt created.",
@@ -230,6 +240,15 @@ async def create_prompt_version(
 
     created = await prompt_versions.create(version)
 
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="prompt_version.created",
+        resource_type="prompt",
+        resource_id=prompt_id,
+        detail={"version": next_version},
+    )
+
     return ApiResponse(
         message=f"Version {next_version} created.",
         data=PromptVersionResponseSchema.model_validate(created),
@@ -268,6 +287,15 @@ async def publish_prompt_version(
         )
 
     published = await prompt_versions.publish(prompt_id, version)
+
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="prompt_version.published",
+        resource_type="prompt",
+        resource_id=prompt_id,
+        detail={"version": published.version},
+    )
 
     return ApiResponse(
         message=f"Version {published.version} is now published.",

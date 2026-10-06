@@ -61,6 +61,44 @@ class _RBACDisabledFeatureFlagService:
         pass
 
 
+class _InMemoryPlatformSettingsService:
+    """
+    Deterministic stand-in for PlatformSettingsService in API tests — same reasoning as
+    `_RBACDisabledFeatureFlagService` above: the real service (packages/infrastructure/container/
+    platform_settings.py) is wired onto `database.session_factory`, unaffected by this fixture's
+    `database.session` rollback override, so without this fake, every `PATCH /platform-settings`
+    an API test makes would write a real, permanent override row into the live dev database (and
+    `DynamicCORSMiddleware`/`RateLimitMiddleware`, which read through this same service on every
+    request, would start enforcing whatever a previous test run left behind). An in-memory dict
+    keeps every test isolated and starting from "nothing overridden," while still exercising the
+    real router's own validation logic (packages/api/routers/platform_settings.py runs that
+    before ever calling this fake's `.set()`).
+    """
+
+    def __init__(self) -> None:
+        from packages.application.services.platform_settings_service import SETTINGS
+
+        self._specs = {spec.key: spec for spec in SETTINGS}
+        self._overrides: dict[str, object] = {}
+
+    async def get(self, key: str):
+        if key in self._overrides:
+            return self._overrides[key]
+        return self._specs[key].default
+
+    async def set(self, key: str, value, *, updated_by=None) -> None:
+        if value is None:
+            self._overrides.pop(key, None)
+        else:
+            self._overrides[key] = value
+
+    def invalidate(self, key: str) -> None:
+        pass
+
+    async def effective_values(self) -> dict:
+        return {key: await self.get(key) for key in self._specs}
+
+
 @pytest_asyncio.fixture
 async def container() -> AsyncIterator[ApplicationContainer]:
     """
@@ -159,6 +197,7 @@ async def client(container: ApplicationContainer) -> AsyncIterator[AsyncClient]:
 
     container.database.session.override(providers.Factory(_make_session))
     container.feature_flags.service.override(providers.Object(_RBACDisabledFeatureFlagService()))
+    container.platform_settings.service.override(providers.Object(_InMemoryPlatformSettingsService()))
     app.state.container = container
 
     try:
@@ -168,5 +207,6 @@ async def client(container: ApplicationContainer) -> AsyncIterator[AsyncClient]:
     finally:
         container.database.session.reset_override()
         container.feature_flags.service.reset_override()
+        container.platform_settings.service.reset_override()
         await trans.rollback()
         await connection.close()

@@ -330,7 +330,7 @@ Two design decisions worth calling out explicitly:
 1. **Everything folds into one `system` message**, not separate `human` turns. An earlier version injected memory/context as their own `("human", ...)` template entries — which the model read as *the user having typed that content*, producing responses like "it appears **you** have provided some information regarding...". Folding it into the system message with explicit "(not written by the user)" labeling fixed that misattribution.
 2. **`context is not None` vs. `context == []` are different states**, checked explicitly. `None` means retrieval never ran this turn (the planner decided it wasn't needed) — say nothing about the knowledge base. `[]` means retrieval *ran* and found nothing relevant — say so plainly, and explicitly instruct the model not to fabricate a "searched public records" narrative for what was actually an empty internal KB lookup.
 
-`_dedup_and_budget(context)` drops exact-duplicate chunks (multi-query retrieval can easily surface the same chunk more than once) and truncates to `settings.rag.context_token_budget` (default 4000) tokens via `tiktoken.get_encoding("cl100k_base")`, so a large merged/reranked context can't blow out the prompt.
+`_dedup_and_budget(context)` drops exact-duplicate chunks (multi-query retrieval can easily surface the same chunk more than once) and truncates to the `rag_context_token_budget` Platform Setting (default 4000, admin-configurable without a redeploy — docs/BUGS.md item 38) tokens via `tiktoken.get_encoding("cl100k_base")`, so a large merged/reranked context can't blow out the prompt.
 
 ### 4.14 Decision point — `GraphRouter.after_llm()` (`packages/graph/router.py`)
 
@@ -705,7 +705,6 @@ All settings load through `packages/config/loader.py`'s `settings` singleton, a 
 |---|---|---|
 | `retrieval_strategy` | `"hybrid"` | Which `BaseRetriever` `RetrieverFactory` builds — `similarity`/`mmr`/`hybrid`. |
 | `max_results` | `5` | Final top-K count after reranking, per turn. |
-| `context_token_budget` | `4000` | Token cap `PromptBuilder` enforces on joined context before it enters the prompt. |
 | `min_relevance_score` | `0.0` | Cross-encoder score floor — reranked results below this are dropped, not surfaced as citations. |
 | `chunk_size`/`chunk_overlap` | `1000`/`200` | Recursive splitter defaults. |
 | `vector_store_backend` | `"chroma"` | `chroma` or `postgres`. |

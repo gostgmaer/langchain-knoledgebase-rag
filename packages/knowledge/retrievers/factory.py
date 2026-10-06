@@ -1,6 +1,7 @@
 # factory.py
 from __future__ import annotations
 
+from packages.application.services.platform_settings_service import PlatformSettingsService
 from packages.config.loader import settings
 from packages.infrastructure.ai.manager import LLMManager
 from packages.infrastructure.repositories.entity import EntityRepository
@@ -32,6 +33,7 @@ class RetrieverFactory:
         llm: LLMManager,
         entity_repository: EntityRepository,
         relationship_repository: RelationshipRepository,
+        platform_settings: PlatformSettingsService,
     ) -> BaseRetriever:
 
         strategy = settings.rag.retrieval_strategy.lower()
@@ -43,7 +45,7 @@ class RetrieverFactory:
             return MMRRetriever(vector_store)
 
         if strategy == "hybrid":
-            return HybridRetriever(vector_store)
+            return HybridRetriever(vector_store, platform_settings)
 
         if strategy == "self_query":
             # Composition, not a replacement search algorithm — wraps
@@ -51,13 +53,13 @@ class RetrieverFactory:
             # with an LLM step that extracts real metadata filters
             # before delegating (Advanced Retrieval's Self Query
             # Retriever, docs/mvpRAG.md v2.0).
-            return SelfQueryRetriever(HybridRetriever(vector_store), llm)
+            return SelfQueryRetriever(HybridRetriever(vector_store, platform_settings), llm)
 
         if strategy == "parent_document":
             # Same composition pattern — small chunks for match
             # precision via hybrid, expanded to their full parent
             # section for answer context (docs/mvpRAG.md v2.0).
-            return ParentDocumentRetriever(HybridRetriever(vector_store), vector_store)
+            return ParentDocumentRetriever(HybridRetriever(vector_store, platform_settings), vector_store)
 
         if strategy == "multi_vector":
             # Same composition pattern — hybrid search over both real
@@ -65,7 +67,7 @@ class RetrieverFactory:
             # resolving any summary hit back to real primary chunk
             # content before it reaches the LLM/citations
             # (docs/mvpRAG.md v2.0).
-            return MultiVectorRetriever(HybridRetriever(vector_store), vector_store)
+            return MultiVectorRetriever(HybridRetriever(vector_store, platform_settings), vector_store)
 
         if strategy == "graph_rag":
             # Same composition pattern — hybrid search expanded with a
@@ -73,7 +75,7 @@ class RetrieverFactory:
             # Graph RAG, docs/mvpRAG.md v2.0), resolving neighboring
             # entities' documents back to real chunk content.
             return GraphRAGRetriever(
-                HybridRetriever(vector_store),
+                HybridRetriever(vector_store, platform_settings),
                 vector_store,
                 entity_repository,
                 relationship_repository,

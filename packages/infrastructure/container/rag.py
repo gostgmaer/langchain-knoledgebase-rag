@@ -61,6 +61,8 @@ class RAGContainer(
 
     upload = providers.DependenciesContainer()
 
+    platform_settings = providers.DependenciesContainer()
+
     embeddings = providers.Singleton(
         EmbeddingManager,
     )
@@ -204,6 +206,7 @@ class RAGContainer(
         llm=ai.manager,
         entity_repository=repositories.entity,
         relationship_repository=repositories.relationship,
+        platform_settings=platform_settings.service,
     )
 
     retriever_manager = providers.Factory(

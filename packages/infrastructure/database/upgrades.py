@@ -92,6 +92,11 @@ UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_document_checksum ON documents (knowledge_base_id, checksum)",
     "CREATE INDEX IF NOT EXISTS ix_chunk_content_hash ON document_chunks (content_hash)",
     "CREATE INDEX IF NOT EXISTS ix_message_retrieval ON messages (retrieval_id)",
+    # --- agents: public embeddable chat widget (docs/BUGS.md item 37)
+    "ALTER TABLE agents ADD COLUMN IF NOT EXISTS widget_enabled boolean NOT NULL DEFAULT false",
+    "ALTER TABLE agents ADD COLUMN IF NOT EXISTS widget_public_id varchar(32)",
+    "ALTER TABLE agents ADD COLUMN IF NOT EXISTS widget_allowed_origins json NOT NULL DEFAULT '[]'",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_agent_widget_public_id ON agents (widget_public_id) WHERE widget_public_id IS NOT NULL",
 )
 
 # Row-level security: defence in depth behind the query-layer tenant filters. The policy applies

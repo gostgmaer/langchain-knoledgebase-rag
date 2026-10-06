@@ -23,10 +23,12 @@ from packages.api.routers.tools import router as tool_router
 from packages.api.routers.upload_jobs import router as upload_job_router
 from packages.api.routers.users import router as user_router
 from packages.api.routers.observability import router as observability_router
+from packages.api.routers.platform_settings import router as platform_settings_router
 from packages.api.routers.knowledge_sources import router as knowledge_sources_router, webhook_router as source_webhook_router
 from packages.api.routers.retrieval_logs import router as retrieval_logs_router
 from packages.api.routers.retrieval_settings import router as retrieval_settings_router
 from packages.api.routers.usage import router as usage_router
+from packages.api.routers.widget import router as widget_router
 from packages.api.security import get_bearer_token, get_tenant_id
 
 api_router = APIRouter(
@@ -64,6 +66,8 @@ api_router.include_router(analytics_router)
 api_router.include_router(feature_flag_router)
 api_router.include_router(tenant_router)
 api_router.include_router(user_router)
+api_router.include_router(widget_router)
+api_router.include_router(platform_settings_router)
 
 
 def register_routers(app: FastAPI) -> None:

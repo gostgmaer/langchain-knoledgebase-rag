@@ -15,6 +15,7 @@ import {
   knowledgeSources,
   modelProfiles,
   observability,
+  platformSettings,
   prompts,
   retrievalLogs,
   retrievalSettings,
@@ -31,6 +32,7 @@ import type {
   DocumentUpdate,
   IdentityMapping,
   UpdateSourceRequest,
+  PlatformSettingsUpdate,
   RetrievalSettingsUpdate,
   DocumentUploadOptions,
   CreateAgentRequest,
@@ -270,6 +272,26 @@ export function useSaveRetrievalSettings() {
   });
 }
 
+/** Platform-wide operational knobs (docs/BUGS.md item 38) — not tenant-scoped, but apiFetch
+ * still needs an Identity for headers, same as useModelProfiles. */
+export function usePlatformSettings() {
+  const identity = useIdentity();
+  return useQuery({
+    queryKey: ["platform-settings"],
+    queryFn: () => platformSettings.get(identity!),
+    enabled: !!identity,
+  });
+}
+
+export function useSavePlatformSettings() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PlatformSettingsUpdate) => platformSettings.save(identity!, body),
+    onSuccess: (data) => queryClient.setQueryData(["platform-settings"], data),
+  });
+}
+
 export function useUpdateDocument(id: string) {
   const identity = useIdentity();
   const queryClient = useQueryClient();
@@ -419,6 +441,15 @@ export function useUpdateAgent() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: UpdateAgentRequest }) => agents.update(identity!, id, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents", identity?.tenantId] }),
+  });
+}
+
+export function useRotateWidgetId() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => agents.rotateWidgetId(identity!, id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents", identity?.tenantId] }),
   });
 }
@@ -662,11 +693,11 @@ export function useTopDocuments(days: number) {
   });
 }
 
-export function useAuditEvents(limit: number, offset: number) {
+export function useAuditEvents(limit: number, offset: number, action?: string) {
   const identity = useIdentity();
   return useQuery({
-    queryKey: ["observability-audit", identity?.tenantId, limit, offset],
-    queryFn: () => observability.audit(identity!, limit, offset),
+    queryKey: ["observability-audit", identity?.tenantId, limit, offset, action],
+    queryFn: () => observability.audit(identity!, limit, offset, action),
     enabled: !!identity,
     placeholderData: (previous) => previous,
   });

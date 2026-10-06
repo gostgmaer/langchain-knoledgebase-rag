@@ -57,7 +57,7 @@ export function WorkspaceSwitcher() {
       <span className="text-xs text-neutral-500">
         Workspace:{" "}
         <span className="font-medium text-neutral-700 dark:text-neutral-300">
-          {current?.name ?? resolvedCurrent?.name ?? session.tenantId}
+          {current?.name ?? resolvedCurrent?.name ?? "…"}
         </span>
       </span>
     );

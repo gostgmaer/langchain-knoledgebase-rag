@@ -14,6 +14,25 @@ from packages.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
+def _json_safe_errors(errors: list[dict]) -> list[dict]:
+    """
+    `exc.errors()` puts the raw exception a custom pydantic `field_validator` raised in
+    `ctx['error']` — useful for debugging, but that's a live Python object (a `ValueError`
+    instance, not a string), and `model_dump(mode="json")` has no idea how to serialize one. Left
+    as-is, this crashes the handler that exists specifically to turn a validation failure into a
+    clean response, turning a 422 into an unhandled 500 instead — stringify it before it gets
+    anywhere near JSON.
+    """
+    cleaned = []
+    for err in errors:
+        err = dict(err)
+        ctx = err.get("ctx")
+        if isinstance(ctx, dict) and "error" in ctx:
+            err["ctx"] = {**ctx, "error": str(ctx["error"])}
+        cleaned.append(err)
+    return cleaned
+
+
 async def validation_exception_handler(
     request: Request,
     exc: RequestValidationError,
@@ -24,7 +43,7 @@ async def validation_exception_handler(
             error="ValidationError",
             message="Request validation failed.",
             details={
-                "errors": exc.errors(),
+                "errors": _json_safe_errors(exc.errors()),
             },
         ).model_dump(mode="json"),
     )

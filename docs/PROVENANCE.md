@@ -117,8 +117,9 @@ each answer).
 ## 8. Audit and retention
 
 Audit events (full list in section 11) are each written in their own transaction so they
-never join or break the request. Retention (`RETENTION_RETRIEVAL_LOG_DAYS`, default 90;
-`RETENTION_AUDIT_DAYS`, default 365; `0` = keep forever) is enforced by a daily worker job
+never join or break the request. Retention (`retention_retrieval_log_days`, default 90 days;
+`retention_audit_days`, default 365 days; `0` = keep forever — admin-configurable from the
+Platform Settings page, not env vars, docs/BUGS.md item 38) is enforced by a daily worker job
 (`purge_expired_logs_job`, 05:00). Documents, versions and chunks are never purged by age.
 
 ## 9. What "quality" means here

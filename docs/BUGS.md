@@ -774,6 +774,341 @@ or script could call this API at all without one.
   11's original taxonomy did — re-ran the updated `scripts/iam_rbac_seed.sql` (now 29 codes × 3
   roles) against the real IAM database.
 
+### 34. ✅ Tenant IDs shown as raw UUIDs in several places — now resolved to real names
+User-reported: several admin screens showed a tenant as a raw (sometimes truncated) UUID instead
+of its real name, with no obvious reason the ID specifically was needed there.
+- **Feature Flags had an actual, unambiguous bug**, not just a polish gap: the Scope column showed
+  `flag.tenant_id.slice(0, 8)…` with zero name resolution, for every tenant-scoped override, every
+  time. The "New flag" form was worse — a free-text box asking an admin to paste a tenant's raw
+  UUID from memory, with no directory to look it up against inside the app at all.
+- **Fixed:** Scope column now resolves through the same `useTenant()` id→name lookup Documents'
+  "Uploaded by" and the Tenants page already use. The New Flag form's text box became a real `
+  <select>` populated from the tenant directory (the same `/api/iam/tenants` fetch the Tenants page
+  already does) — "Global default" plus every real tenant by name, nothing typed blind anymore.
+- **Three more spots** (`dashboard-view.tsx`, `topbar.tsx`, `workspace-switcher.tsx`) already
+  resolved to a real name via `useTenant()` correctly in the common case, but fell back to the raw
+  UUID while that lookup was still loading — a brief but real flash of an ID where a name was
+  about to appear a moment later. Changed the fallback to a lightweight `…` instead; the "Switch by
+  ID" box and "Recently viewed" pills on the Tenants page were left exactly as-is, since that's the
+  one place in the app where typing/showing a raw ID is genuinely the point of the feature.
+- **Verified live**: created a real tenant-scoped feature flag via the API, loaded the Feature
+  Flags page, and confirmed the Scope column shows "EasyDev" (the tenant's real name), not a
+  truncated UUID — screenshot confirmed. Opened the New Flag dialog and confirmed its Scope
+  dropdown lists real tenant names (`["Global default", "E2E Switch 1790356435", "EasyDev"]`) via a
+  direct DOM check. `tsc --noEmit` and the full Vitest suite (29) both clean.
+- **User correctly pushed back on the "Switch by ID" carve-out above** — the principle isn't "raw
+  IDs are fine for a power-user feature," it's that an ID is a developer concept and a user should
+  never need to see or type one unless there's genuinely no name to show instead. Fixed properly:
+  the topbar's admin cross-tenant switcher (previously a free-text box with placeholder "Switch to
+  a different tenant ID…") is now a `<select>` of real tenant names, same pattern as
+  `WorkspaceSwitcher`. The Tenants page's separate "Switch by ID" card is gone entirely — it was
+  fully redundant once the Directory table above it already has a name-based "Browse as" button on
+  every row — and "Recently viewed" now resolves purely against the already-fetched directory data
+  (by name), never rendering a raw id even as a fallback; an entry whose tenant no longer resolves
+  is silently dropped rather than shown as an orphaned UUID. The repeated `/api/iam/tenants` fetch
+  across three components (Tenants page, Feature Flags, topbar) was pulled into one shared
+  `useTenantDirectory()` hook (`frontend/src/hooks/use-tenant-directory.ts`) along the way, rather
+  than copy-pasting it a third time.
+- **Re-audited the rest of the app for the same `.slice(0, 8)`-style truncated-id pattern** to make
+  sure nothing else tenant-related was missed: every remaining instance (Retrieval Log's
+  retrieval/request/trace ids, Knowledge Sources' sync-run history, Feedback's message id,
+  Documents' sync id) is on an admin-only diagnostic view for something that has no "name" concept
+  at all — a sync run or a trace isn't a named entity the way a tenant/user/document is — or already
+  tries a real name first and only falls back to an id on genuine lookup failure (Documents'
+  "Uploaded by", Observability's/Retrieval Log's document references). None of those are the same
+  bug; left as-is.
+- **Verified live, again**: used the topbar's new dropdown to actually switch tenants (not just
+  render it) — confirmed "Viewing tenant: E2E Switch 1790356435" after selecting it, confirmed
+  switching back to "EasyDev" worked too, both via the real running app, console clean throughout.
+  `tsc --noEmit` and Vitest (29) clean.
+- **Correction to the paragraph above**: "tries a real name first and only falls back to an id on
+  genuine lookup failure" was still a raw-id leak, just a rarer one — a user should never see a
+  UUID, including on an IAM outage. Documents' `UploadedBy` and Feature Flags' `ScopeBadge` now
+  fall back to the words "unknown user" / "unknown tenant" instead of `userId.slice(0, 8)` /
+  `tenantId.slice(0, 8)…` when resolution genuinely fails.
+
+### 35. ✅ Audit trail existed but only covered documents/knowledge-sources — agents, model
+profiles, feature flags, API keys, tools, and prompts changed with zero record of who did it
+
+`packages/domain/models/audit_event.py` and `AuditService` were already solid — append-only,
+best-effort (a logging failure never breaks the operation it's auditing), secrets stripped from
+`detail` — and `GET /observability/audit` already existed with pagination and an `action` filter.
+But only `documents.py`, `knowledge_sources.py`, and `retrieval_settings.py` ever called
+`audit().record(...)`. Every admin action built this session — creating or editing an agent,
+minting or revoking an API key, publishing a prompt version (the app's own rollback mechanism),
+toggling a feature flag, registering a model profile or a webhook tool — left no trace at all.
+For a platform being evaluated for enterprise sale, "who changed this and when" on exactly these
+actions is what a security review asks for first.
+- **Fixed**: added `audit().record(...)` calls to `agents.py` (create/update), `models.py`
+  (create/update — model profiles are global, not tenant-scoped, so these use
+  `DEFAULT_TENANT_ID` as the audit scope, same sentinel already used wherever no `X-Tenant-ID`
+  header is sent), `feature_flags.py` (create/toggle/delete — a global flag's audit scope is the
+  acting admin's own tenant, with the flag's real scope recorded in `detail`), `api_keys.py`
+  (create/revoke), `prompts.py` (create prompt/create version/publish version), and `tools.py`
+  (create).
+- **Audit trail UI gap**: `actor_id` was already in the API response and the TypeScript type, but
+  the Observability page's Audit trail table never rendered it — no "Who" column at all. Added
+  one, resolving through `useUser()` (same idiom as Documents' "Uploaded by"); a `null` actor_id
+  (a system-triggered event like a scheduled re-sync) renders as "system", never a blank or an id.
+  Also wired up the `action` filter the backend already supported but the UI never exposed, as a
+  plain text input above the table.
+- **Re-swept for the same raw-id-fallback issue** found in item 34 above while in this file —
+  Documents' `UploadedBy` and Feature Flags' `ScopeBadge` fixed as noted in the correction above.
+- **Verified live**: created a new tool definition ("Audit Trail Smoke Test") through the real UI,
+  then loaded Observability and confirmed the new `tool.created` row appeared at the top of the
+  Audit trail with "Kishor Super Admin" (not a UUID) in the Who column and the right `detail`
+  JSON. Typed `tool.created` into the new action filter and confirmed it narrowed the table to
+  exactly that one row ("Audit trail (1)"). `tsc --noEmit` and Vitest (29) clean on the frontend;
+  backend `pytest` on all five touched routers' API tests is 20 passed / 3 failed, the 3 failures
+  being the already-known, already-excluded `"google"` vs `"GOOGLE"` enum-casing bug (identical
+  failures existed before this change, confirmed via `gh pr checks` on PR #5 earlier in this
+  session) — no regressions.
+
+### 36. ✅ New feature — Slack as a real knowledge source connector (was a named-but-unbuilt stub)
+
+`"slack"` was already a recognized source type (`packages/connectors/models.py`'s `SOURCE_TYPES`,
+`registry.py`'s `_PLANNED_DISPLAY`) with no actual connector behind it — the Add Source wizard
+showed it greyed out as "Coming soon." Built a real one, `packages/connectors/sources/slack.py`,
+following the same contract every other connector here does (`BaseKnowledgeConnector`: discover,
+fetch, test_connection, get_permissions) and registered it in
+`packages/connectors/sources/__init__.py`. Nothing else changed — the Add Source wizard, credential
+form, and config form are all generic, driven entirely by the connector's own `config_schema` /
+`credential_kind`, exactly as `base.py`'s own docstring promises.
+- **Design**: one document per thread (root message + replies), same shape as the Teams connector.
+  Slack's Web API answers almost everything with HTTP 200 and `{"ok": false, "error": "..."}` on
+  failure rather than a 4xx status, so auth/permission failures are read from the response body,
+  not the status code, and mapped to `AuthenticationFailed` only for the auth-shaped error codes
+  (`invalid_auth`, `token_revoked`, ...) — every other `ok: false` is a plain `ConnectorHttpError`.
+  Slack "mrkdwn" (`<@U123>` mentions, `<#C123|name>` channel refs, `<url|label>` links, HTML
+  entities) is rendered to real markdown with real names, not left as raw Slack syntax. Private
+  channels become permission grants from `conversations.members`; public channels fall back to
+  the source's default visibility, matching Confluence/Teams' documented convention for a case the
+  external API can't fully enumerate.
+- **A real bug found and fixed while writing tests, not just a gap**: the channel discovery method
+  only excluded private channels through the `types` parameter sent to Slack's own API — no check
+  in this codebase's own logic. Correct behavior for the real API, but it meant a mocked or
+  misbehaving response could leak a private channel through even with
+  `include_private_channels: false`. Added an explicit `channel.get("is_private")` check as
+  defense in depth, the same belt-and-suspenders approach Teams already uses for its own
+  `membership == "private"` check — never rely solely on an external system to enforce a boolean
+  this codebase itself promises.
+- **Honesty about verification**: unlike every other connector in this codebase (Confluence, Teams,
+  SharePoint — apparently verified against real tenants earlier in this project), this one could
+  only be verified against a mocked Slack API, not a real workspace, since no Slack credentials
+  exist in this environment. 13 new unit tests (`tests/unit/connectors/test_slack_connector.py`)
+  cover connection success/failure, the private-channel defense-in-depth fix, channel
+  allow/exclude lists, thread+reply merging into one document, mrkdwn rendering, file attachments,
+  permission mapping, and credential validation — all passing — but none of that substitutes for a
+  real workspace. Flagged to the user before starting; they chose to build it now and verify later
+  against a real app/workspace rather than wait.
+- **Verified live (the part that doesn't need Slack)**: restarted the API container, confirmed
+  `default_registry().is_available("slack")` is `True` with the right `config_schema`, then loaded
+  the real running Add Source wizard and confirmed the Slack card switched from greyed-out
+  "Coming soon" to selectable with its real description, and that its Connect step renders a real
+  "Bot User OAuth Token*" field with the connector's own setup instructions — all driven generically
+  off the backend's `ConnectorInfo`, no frontend code touched. Full unit suite: 361 passed.
+
+### 37. ✅ New feature — public embeddable chat widget, with two real bugs found while verifying it
+
+A chat bubble a customer can drop on their own website via a plain `<script>` tag. This is a
+genuinely different trust boundary from everything else in the app — the public internet, no IAM
+token, no `X-Tenant-ID`/`X-User-ID` header — and most of the design effort went into that boundary,
+not the chat UI itself.
+- **Security design**: `widget_public_id` (an agent field, `wgt_...`) is not a secret — safe in a
+  customer's page source, same trust model as a Stripe publishable key. The real gate is
+  `widget_allowed_origins`, a per-agent list a tenant admin controls; an **empty list denies
+  everyone by default**, not the other way around, so a freshly-enabled widget never accidentally
+  opens before an admin configures it. A restricted tool allowlist
+  (`packages/tools/context.py`'s `set_widget_mode`/`is_widget_mode`, read by `init_tool_manager`)
+  means an anonymous visitor gets knowledge-base search and the calculator only — never the
+  `lookup_iam_user`/`lookup_iam_tenant` tools or a tenant's CUSTOM webhook tools, both real internal-
+  data/internal-system exposure risks a public chat box must never have. Backend: new
+  `packages/api/routers/widget.py` (`GET .../config`, `POST .../chat`, both origin-checked and
+  rate-limited at 20 msg/min per widget+IP via a new `is_rate_limited()` helper extracted from
+  `RateLimitMiddleware`), three new `Agent` columns (`widget_enabled`, `widget_public_id`,
+  `widget_allowed_origins`), a `POST /agents/{id}/widget/rotate` endpoint for revoking a leaked id.
+  Frontend: a real toggle/origins-editor/embed-snippet UI in the Agents page's edit dialog, and
+  `frontend/public/widget.js` — a dependency-free, Shadow-DOM-isolated vanilla JS widget (visitor
+  identity and conversation continuity via a client-generated UUID in `localStorage`, not auth).
+- **Real bug #1, found writing the tool-gating test**: nothing stopped the tool-gating allowlist
+  from silently becoming a denylist as new builtin tools get added later — fixed by asserting the
+  *exact* widget tool set in `tests/unit/test_widget_tool_gating.py`, not just "contains the safe
+  ones," so a new tool defaults OUT of the widget until someone deliberately opts it in.
+- **Real bug #2, found live-testing against a real cross-origin page**: Starlette's global
+  `CORSMiddleware` (registered for the app's one static, startup-time origin allowlist) answers
+  *every* OPTIONS preflight in the whole app itself, before the request reaches any route —
+  confirmed live: a genuine browser preflight from a second local "customer site" (a plain
+  `http.server` on a different port, not just a same-origin fetch) came back `400`, and the
+  widget's own `@router.options(...)` handler never ran at all. The widget's allowed origins are
+  per-agent and live in the database; no static, process-start list can express that. Fixed with a
+  new `packages/api/middleware/cors.py`: `SelectiveCORSMiddleware` subclasses Starlette's own and
+  skips straight to the inner app for any path under `/api/v1/widget/`, leaving every other route's
+  CORS handling untouched.
+- **Real bug #3, found testing the above fix**: validating that CORS fix with a deliberately
+  malformed origin (`"not-a-url"`) crashed the app's *own validation-error handler* —
+  `pydantic_core.PydanticSerializationError: Unable to serialize unknown type: <class 'ValueError'>`.
+  FastAPI's `RequestValidationError.errors()` embeds the raw exception a custom `field_validator`
+  raised in `ctx['error']` — a live Python object, not a string — and
+  `packages/api/exception_handlers.py`'s `validation_exception_handler` was passing that straight
+  into `model_dump(mode="json")`. Pre-existing, latent since this codebase's first custom
+  `field_validator` that raises a bare `ValueError` (the widget's new
+  `widget_allowed_origins` check, in `packages/api/schemas/agent.py`, is the first one to ever hit
+  this path) — any future one would have hit the same crash. Fixed with a small `_json_safe_errors`
+  helper that stringifies `ctx['error']` before it gets anywhere near JSON serialization.
+- **Honesty about scope**: non-streaming only; conversation continuity depends on the visitor's
+  browser keeping its `localStorage` (no cross-device continuity, by design — there's no account to
+  tie it to). Both are reasonable v1 limits, not oversights, and are documented in `widget.js`'s own
+  comments and the Agents page's UI copy.
+- **Verified live, fully cross-origin**: enabled the widget on a real agent through the real admin
+  UI, copied its generated embed snippet, served a second plain HTML page from an actual different
+  origin (`http://localhost:8899`, a separate `http.server` process — not a same-origin test), and
+  confirmed: the chat bubble renders, the config fetch resolves the agent's real name over CORS, and
+  a real message round-trips through the full chat pipeline to a real LLM response — "Hello there" →
+  "Hello! How can I help you today?" — entirely from the simulated external site. Also confirmed
+  the backend-only pieces: 10 new API tests (`tests/api/test_widget_api.py` — id minting/rotation,
+  origin allow/deny including the empty-list-denies-all default, 404s, preflight CORS headers) all
+  passing, plus the 4 tool-gating unit tests. Full suite: 425 passed, 3 failed — the same
+  pre-existing, already-excluded `"google"`/`"GOOGLE"` enum-casing bug as every other round this
+  session, not a regression.
+
+### 38. ✅ New feature — admin-configurable Platform Settings, so operational knobs don't need a redeploy
+
+User ask: too many `.env` variables with no way to change them except a redeploy; wanted an admin
+page/API for the ones that are safe to expose. Scoped deliberately, not "move every env var":
+secrets (API keys, `JWT_SECRET`, DB/Redis URLs, the connector credential encryption key) and
+security-boundary fields (`AUTH_REQUIRED`, `admin_roles`, `tenant_override_roles`) stay `.env`-only
+— the first because a settings UI reading them back is itself a leak, the second because they're a
+security decision, not an operational tuning knob. What moved: rate limits, CORS origins, session
+expiry, retention windows, embedding/connector-sync concurrency — plus the 4 of
+`packages/config/features.py`'s 10 `enable_*` booleans that turned out to have a real consumer.
+- **New `PlatformSetting` model/service** (`packages/application/services/platform_settings_service.py`):
+  one JSONB-valued table, keyed by setting name, same in-process ~30s TTL cache as the existing
+  `FeatureFlagService` (no row = built-in default; a row is an admin's override). A typed
+  `SETTINGS` registry (key, label, kind, min/max, help, built-in default) drives both the API's
+  validation and the frontend's generic form — adding a new settable knob later is one registry
+  entry, not a migration.
+- **Follow-up, same session**: the 8 moved settings' original design still kept them as real
+  `.env`-bindable fields on `AppSettings`/`APISettings`/`RAGSettings` too (database override, env
+  var as fallback) — the user explicitly asked for the env vars themselves to go, not just an
+  alternative. Any field on a `pydantic_settings.BaseSettings` subclass is inherently settable via
+  its own env var by that class's machinery, so "remove the env var" meant removing the field
+  entirely, not just dropping its `alias=`. Did that for all 8 (`packages/config/api.py`, `app.py`,
+  `rag.py`), moved each one's built-in default to a plain literal directly in the `SETTINGS`
+  registry (the new single source of truth), and updated `.env`/`.env.example`/the docs that
+  described them. The one real consumption-site fallout: `retention_service.py`'s `purge_expired`
+  had a `settings.rag.retention_*` fallback for callers with no container (tests) — added a small
+  `default_value(key)` accessor to `platform_settings_service.py` so that fallback has a home that
+  doesn't require re-adding the removed fields.
+- **Real bug found wiring it up**: every consumer (`RateLimitMiddleware`, the global CORS
+  middleware, retention/reindex/session-expiry jobs, connector sync) previously read its value
+  *once*, at process/middleware-construction time — meaning even the existing `.env` values already
+  needed a restart to change, undocumented. Fixed each to read through `PlatformSettingsService`
+  fresh (cached) on every use instead of capturing a value in `__init__`.
+- **Real bug found making CORS dynamic**: Starlette's `CORSMiddleware` has no concept of a
+  per-request dynamic origin list — it builds its matcher once at construction. Replaced it with a
+  new pure-ASGI `DynamicCORSMiddleware` (`packages/api/middleware/cors.py`, not `BaseHTTPMiddleware`
+  — deliberately, to avoid breaking this app's SSE chat streaming the way buffering a response to
+  inspect it would) that re-reads the allowed-origins list through `PlatformSettingsService` on
+  every request, still exempting `/api/v1/widget/` (item 37's own per-agent CORS). Confirmed live:
+  overriding `cors_origins` on the Platform Settings page changed what the running API accepted
+  immediately, no restart.
+- **`features.py`'s dead flags, made real**: grepping the whole codebase found `enable_web_search`,
+  `enable_weather`, `enable_news` and `enable_calculator` had zero consumers anywhere — static,
+  inert config. Wired each to gate its matching builtin tool's registration in
+  `init_tool_manager` (`packages/infrastructure/container/tools.py`), through the *same* dynamic
+  Feature Flag mechanism `enable_rbac` already uses (not a new system) — an admin can now disable a
+  specific tool platform-wide without a redeploy. `enable_rag`/`enable_tools`/`enable_memory`/
+  `enable_streaming`/`enable_query_rewrite` were deliberately left alone: gating those for real means
+  conditionally skipping whole LangGraph nodes, a separate, larger feature, not a settings move.
+  `enable_reranking` needed no change — it already flows into the existing per-tenant Retrieval
+  Settings page as that field's seed default.
+- **Real test-isolation bug found writing tests for this**: `PlatformSettingsService` is wired onto
+  the same raw, un-rollback-able `database.session_factory` `FeatureFlagService` already uses (for
+  the same reason: both need to work outside a request's transaction) — meaning the API test
+  suite's `client` fixture would otherwise write *real, permanent* override rows into the live dev
+  database on every `PATCH /platform-settings` test. Fixed by adding an in-memory
+  `_InMemoryPlatformSettingsService` fake to `tests/conftest.py`, mirroring the existing
+  `_RBACDisabledFeatureFlagService` pattern exactly. Confirmed live: `SELECT * FROM
+  platform_settings` on the real dev DB was empty before and after the full test run.
+- **Real ContextVar test-leak found in the same pass**: the new tool-gating tests reset
+  `packages/tools/context.py`'s enabled-tools ContextVar to `frozenset()` ("nothing enabled") in
+  teardown instead of its true default `None` ("never fetched, fail open") — since ContextVars
+  aren't test-isolated by pytest automatically, this silently broke `test_widget_tool_gating.py`'s
+  own tests when run in the same session. Added a proper `reset_enabled_tools()` and used it in
+  both files' teardown.
+- **Verified live**: toggled a value (general rate limit → 500), saved, confirmed the "overridden"
+  badge and persisted value on reload, reset it back via the UI's own reset button, confirmed the
+  override row was actually deleted from Postgres (not just nulled) both times. Also hit a live,
+  expected 403 ("Missing required permission: platform_settings:read") from this environment's
+  `enable_rbac` having been manually left on earlier in this session with no IAM role mapping yet
+  for the brand-new permission code — not a bug; toggled `enable_rbac` off via Feature Flags to
+  complete verification, then restored it to exactly the on state it was found in. 16 new tests
+  (`test_platform_settings_api.py`, `test_dynamic_cors.py`, `test_feature_flag_tool_gating.py`) plus
+  the fixed widget tests, full suite: 444 passed, 3 failed — the same pre-existing, already-excluded
+  enum-casing bug.
+- **Dead config removed in the same cleanup pass**: a `.env`-var audit (every field on every
+  `pydantic_settings.BaseSettings` subclass, cross-referenced against `os.environ`/`os.getenv` usage
+  and `docker-compose.yml`) found one genuinely orphaned class, `NotificationSettings`
+  (`packages/config/notification.py`) — zero consumers anywhere. Deleted the class and its
+  `NOTIFICATION_*` block from `.env.example`. Everything else in `.env.example` was confirmed
+  genuinely needed (Postgres bootstrap vars read before this app even starts, a few ops-script-only
+  vars) — not dead, just consumed outside `pydantic-settings`.
+- **Second follow-up — two more RAG tuning knobs moved**: `RAG_CONTEXT_TOKEN_BUDGET` and
+  `RETRIEVAL_KEYWORD_WEIGHT` (`packages/config/rag.py`) moved to Platform Settings the same way,
+  as `rag_context_token_budget` / `retrieval_keyword_weight` (new `"float"` `SettingSpec` kind,
+  frontend got a matching number input). Deliberately *not* moved in this pass: `CHUNK_SIZE`/
+  `CHUNK_OVERLAP` and `EMBEDDING_RATE_LIMIT_REQUESTS_PER_MINUTE`/`_TOKENS_PER_MINUTE` — both are
+  baked into `providers.Singleton`-wired objects (`RecursiveDocumentSplitter`,
+  `EmbeddingManager`/`GoogleEmbeddingProvider`) constructed once at container/process startup, so
+  changing them on the Platform Settings page would silently do nothing until a restart — the same
+  trap already documented and fixed for the first 8 settings, not worth reintroducing. The two that
+  did move were confirmed read fresh per call (`PromptBuilder._dedup_and_budget`,
+  `HybridRetriever._reciprocal_rank_fusion`), not captured at construction, so both classes'
+  constructors now take `platform_settings: PlatformSettingsService` (threaded through
+  `RetrieverFactory.create` and the `rag`/`graph` DI containers) instead of reading
+  `packages.config.loader.settings` directly. `PromptBuilder.build`/`_dedup_and_budget` and
+  `HybridRetriever.retrieve` became `async` as part of this (both already only had async callers).
+- **"Seed the database on first run", scoped deliberately**: the user's ask was interpreted two
+  ways, and the wrong one would have been a real regression — so this was checked with the user
+  before building it. `PlatformSettingsService` already treats "no row" as "use the current
+  built-in default" (a row only exists once an admin overrides something); pre-inserting a row per
+  `SettingSpec` at first boot would permanently freeze that installation's values at whatever the
+  defaults were on day one — a future release raising a default (e.g. a rate limit) would silently
+  never reach any install that had already booted once, since a row would now "shadow" it. Decided
+  against seeding `platform_settings` itself for exactly this reason. What *did* get seeded:
+  `packages/api/lifespan.py` now eagerly calls the existing `ensure_default_model_profile`
+  (`packages/conversation/bootstrap.py`, already idempotent/get-or-create) once at startup, so the
+  default `ModelProfile` exists immediately instead of waiting for the first chat/search/document
+  request to lazily create it. `ensure_default_agent`/`ensure_default_conversation`/
+  `ensure_default_knowledge_base` were **not** also made eager — all three require a `tenant_id`,
+  and this app has no local `Tenant` table to enumerate at startup (tenants are owned by the
+  external IAM system, docs/PROVENANCE.md); they stay lazy, created on each tenant's first real use.
+  Verified live: restarted the API container, confirmed `"Default model profile ready."` in the
+  startup log with no error, confirmed `rag_context_token_budget`/`retrieval_keyword_weight` both
+  resolve through `PlatformSettingsService.get()` to their defaults, and confirmed `PromptBuilder`
+  builds a real prompt end-to-end through the new DI wiring.
+- **Reversed, same session, on explicit request**: after seeing the Platform Settings page,
+  the user asked for `platform_settings` itself to be pre-populated after all — new
+  `PlatformSettingsService.seed_defaults()`, called from `packages/api/lifespan.py` right after
+  the default-model-profile seed above. Writes one row per `SETTINGS` key with its built-in
+  default for any key with no row yet; idempotent, never touches a key an admin already changed.
+  The trade-off from the bullet above still applies and is now accepted on purpose: once seeded,
+  a future release changing a built-in default won't reach an install that already ran this until
+  an admin resets that key. Updated `PlatformSetting`'s own docstring (it previously said this
+  table "only ever holds the keys someone actually changed" — no longer true) to point at
+  `is_overridden` (`value != spec.default`) as the real way to tell a seeded default from a real
+  override. Verified live: restarted the container, confirmed `"Platform settings seeded with
+  built-in defaults."` in the startup log, then queried `platform_settings` directly — all 10
+  known keys present with their literal defaults.
+- **Separately, while on that page**: hit the same `enable_rbac`-with-no-IAM-role-mapping 403
+  already documented above, this time for real (not just during this session's own verification)
+  — `platform_settings:read`/`write` aren't granted to any role in the external IAM system yet.
+  Per the user's explicit choice, toggled `enable_rbac` off globally (not restored this time —
+  left off until IAM roles are updated) by writing the `FeatureFlag` row directly
+  (`packages/infrastructure/repositories/feature_flag.py`), confirmed the change took effect via a
+  fresh `FeatureFlagService.get_effective()` read. No code change; an operational action, logged
+  here since it changes this environment's standing security posture.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

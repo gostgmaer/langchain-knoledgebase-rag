@@ -13,11 +13,21 @@ from uuid import uuid4
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from packages.application.services.platform_settings_service import default_value
 from packages.chat.response import LLMChatResponse
 from packages.graph.nodes.writer import WriterNode
 from packages.graph.schemas import ResearchFinding
 from packages.knowledge.schemas import Citation
 from packages.prompts.builder import PromptBuilder
+
+
+class _FakePlatformSettings:
+    async def get(self, key: str):
+        return default_value(key)
+
+
+def _prompt_builder() -> PromptBuilder:
+    return PromptBuilder(_FakePlatformSettings())
 
 
 class _FakeLLMChatService:
@@ -61,7 +71,7 @@ async def test_output_satisfies_the_messages_usage_citations_contract():
         usage={"input_tokens": 10, "output_tokens": 5},
     )
     chat_service = _FakeLLMChatService(response)
-    node = WriterNode(chat_service, PromptBuilder())
+    node = WriterNode(chat_service, _prompt_builder())
 
     result = await node(_state())
 
@@ -74,7 +84,7 @@ async def test_output_satisfies_the_messages_usage_citations_contract():
 async def test_no_tools_are_bound_for_pure_synthesis():
     response = LLMChatResponse(message=AIMessage(content="synthesized"))
     chat_service = _FakeLLMChatService(response)
-    node = WriterNode(chat_service, PromptBuilder())
+    node = WriterNode(chat_service, _prompt_builder())
 
     await node(_state())
 
@@ -85,7 +95,7 @@ async def test_no_tools_are_bound_for_pure_synthesis():
 async def test_citations_are_flattened_across_every_finding():
     response = LLMChatResponse(message=AIMessage(content="synthesized"))
     chat_service = _FakeLLMChatService(response)
-    node = WriterNode(chat_service, PromptBuilder())
+    node = WriterNode(chat_service, _prompt_builder())
 
     findings = _findings()
     state = _state()
@@ -125,7 +135,7 @@ async def test_the_same_chunk_cited_by_two_sub_questions_is_deduped_keeping_the_
 
     response = LLMChatResponse(message=AIMessage(content="synthesized"))
     chat_service = _FakeLLMChatService(response)
-    node = WriterNode(chat_service, PromptBuilder())
+    node = WriterNode(chat_service, _prompt_builder())
 
     state = _state()
     state["research_findings"] = findings

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
     get_current_user,
     get_scoped_container,
     require_admin,
@@ -78,6 +79,15 @@ async def create_api_key(
 
     created = await api_keys.create(key)
 
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=current_user.id,
+        action="api_key.created",
+        resource_type="api_key",
+        resource_id=created.id,
+        detail={"name": created.name, "key_prefix": created.key_prefix},
+    )
+
     return ApiResponse(
         message="API key created — this is the only time the real key is shown.",
         data=CreateApiKeyResponseSchema(
@@ -129,6 +139,7 @@ async def revoke_api_key(
     api_key_id: UUID,
     request: Request,
     container: ApplicationContainer = Depends(get_scoped_container),
+    current_user: CurrentUser | None = Depends(get_current_user),
 ):
     tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
     api_keys = container.repositories.api_key()
@@ -141,6 +152,15 @@ async def revoke_api_key(
         )
 
     revoked = await api_keys.revoke(key)
+
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=current_user.id if current_user else DEFAULT_USER_ID,
+        action="api_key.revoked",
+        resource_type="api_key",
+        resource_id=revoked.id,
+        detail={"name": revoked.name, "key_prefix": revoked.key_prefix},
+    )
 
     return ApiResponse(
         message="API key revoked.",

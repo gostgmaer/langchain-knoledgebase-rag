@@ -2,15 +2,15 @@
 
 import { LogOut, Menu } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 import { useHealth, useTenant } from "@/hooks/use-api";
+import { useTenantDirectory } from "@/hooks/use-tenant-directory";
 import { ROLE_LABELS, useSession } from "@/lib/session";
 
 export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
@@ -18,7 +18,7 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { session, logout, setViewingTenant } = useSession();
   const { data: health } = useHealth();
   const { data: currentTenant } = useTenant(session?.tenantId);
-  const [tenantDraft, setTenantDraft] = useState(session?.tenantId ?? "");
+  const directory = useTenantDirectory();
 
   // The header bar itself always renders — only its session-dependent contents swap for a
   // skeleton — so the topbar doesn't disappear and reflow on every hard navigation while the
@@ -49,27 +49,27 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
           {ROLE_LABELS[session.role]}
         </Badge>
         {session.role === "admin" ? (
-          <form
-            className="hidden min-w-0 items-center gap-2 md:flex"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setViewingTenant(tenantDraft.trim());
-            }}
-          >
+          <div className="hidden min-w-0 items-center gap-2 md:flex">
             <span className="shrink-0 text-xs text-neutral-500">Viewing tenant:</span>
-            <span className="truncate text-xs font-medium text-neutral-700 dark:text-neutral-300">
-              {currentTenant?.name ?? session.tenantId}
-            </span>
-            <Input
-              value={tenantDraft}
-              onChange={(e) => setTenantDraft(e.target.value)}
-              placeholder="Switch to a different tenant ID…"
-              className="h-7 w-48 shrink-0 font-mono text-xs lg:w-64"
-            />
-            <Button type="submit" size="sm" variant="outline" className="shrink-0">
-              Switch
-            </Button>
-          </form>
+            {directory.data && directory.data.length > 0 ? (
+              <Select
+                value={session.tenantId}
+                onChange={(e) => setViewingTenant(e.target.value)}
+                className="h-7 w-48 shrink-0 py-0 text-xs lg:w-64"
+                aria-label="Switch which tenant you're viewing"
+              >
+                {directory.data.map((t) => (
+                  <option key={t.internalId} value={t.internalId}>
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <span className="truncate text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                {currentTenant?.name ?? "…"}
+              </span>
+            )}
+          </div>
         ) : (
           <div className="min-w-0">
             <WorkspaceSwitcher />

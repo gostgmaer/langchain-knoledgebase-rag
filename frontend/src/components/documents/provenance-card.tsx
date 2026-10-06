@@ -6,13 +6,13 @@ import { formatDateTime } from "@/lib/utils";
 
 const NOT_RECORDED = <span className="text-neutral-400">not recorded</span>;
 
-/** Resolves a user id to their real name, falling back to the raw id while loading or if
- * IAM can't be reached for it — same idiom as the Tenants page's history pills. */
+/** Resolves a user id to their real name. Never falls back to the raw id (docs/BUGS.md item
+ * 34) — if IAM genuinely can't be reached for it, "unknown user" is shown instead. */
 function UploadedBy({ userId }: { userId: string }) {
   const { data: user, isLoading } = useUser(userId);
   if (isLoading) return <span className="text-neutral-400">resolving…</span>;
   if (user) return <span>{[user.first_name, user.last_name].filter(Boolean).join(" ") || user.email}</span>;
-  return <code className="text-xs">{userId.slice(0, 8)}</code>;
+  return <span className="text-neutral-400">unknown user</span>;
 }
 
 /** Where a document came from and which pipeline/models processed it. */

@@ -11,12 +11,13 @@ import { QueryError } from "@/components/shared/query-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 
-import { useAuditEvents, useObservabilitySummary, useReindexOutdated, useTopDocuments } from "@/hooks/use-api";
+import { useAuditEvents, useObservabilitySummary, useReindexOutdated, useTopDocuments, useUser } from "@/hooks/use-api";
 import { formatDateTime } from "@/lib/utils";
 
 const RANGES = [
@@ -29,6 +30,15 @@ const AUDIT_PAGE = 15;
 
 const pct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
 const ms = (v: number | null) => (v === null ? "—" : `${Math.round(v)} ms`);
+
+/** Resolves an audit event's actor to a real name — same idiom as Documents' "Uploaded by".
+ * A system-triggered event (reindex, sync) has no actor_id at all, not an unresolved one. */
+function AuditActor({ actorId }: { actorId: string | null }) {
+  const { data: user, isLoading } = useUser(actorId);
+  if (!actorId) return <span className="text-neutral-400">system</span>;
+  if (isLoading) return <span className="text-neutral-400">…</span>;
+  return <span>{user ? `${user.first_name ?? ""} ${user.last_name ?? ""}`.trim() || user.email : "…"}</span>;
+}
 
 function Stat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
@@ -46,9 +56,10 @@ export function ObservabilityView() {
   const { role } = useParams<{ role: string }>();
   const [days, setDays] = useState<number>(7);
   const [auditOffset, setAuditOffset] = useState(0);
+  const [auditAction, setAuditAction] = useState("");
   const summary = useObservabilitySummary(days);
   const top = useTopDocuments(days);
-  const audit = useAuditEvents(AUDIT_PAGE, auditOffset);
+  const audit = useAuditEvents(AUDIT_PAGE, auditOffset, auditAction.trim() || undefined);
   const reindexOutdated = useReindexOutdated();
 
   const r = summary.data?.retrieval;
@@ -165,20 +176,33 @@ export function ObservabilityView() {
       </Card>
 
       <Card className="mt-4">
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
           <CardTitle>Audit trail{audit.data ? ` (${audit.data.total})` : ""}</CardTitle>
+          <Input
+            value={auditAction}
+            onChange={(e) => {
+              setAuditAction(e.target.value);
+              setAuditOffset(0);
+            }}
+            placeholder="Filter by action, e.g. agent.updated"
+            className="h-8 w-64 text-xs"
+          />
         </CardHeader>
         <CardContent>
           {audit.isError ? (
             <QueryError error={audit.error} onRetry={() => void audit.refetch()} />
           ) : !audit.data || audit.data.events.length === 0 ? (
-            <EmptyState icon={ScrollText} title="No audit events yet" />
+            <EmptyState
+              icon={ScrollText}
+              title={auditAction ? `No audit events for "${auditAction}"` : "No audit events yet"}
+            />
           ) : (
             <>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>When</TableHead>
+                    <TableHead>Who</TableHead>
                     <TableHead>Action</TableHead>
                     <TableHead>Resource</TableHead>
                     <TableHead>Detail</TableHead>
@@ -188,6 +212,9 @@ export function ObservabilityView() {
                   {audit.data.events.map((e) => (
                     <TableRow key={e.id}>
                       <TableCell className="text-neutral-500">{formatDateTime(e.created_at)}</TableCell>
+                      <TableCell>
+                        <AuditActor actorId={e.actor_id} />
+                      </TableCell>
                       <TableCell>
                         <Badge variant="secondary">{e.action}</Badge>
                       </TableCell>

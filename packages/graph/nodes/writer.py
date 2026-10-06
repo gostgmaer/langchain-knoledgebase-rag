@@ -55,7 +55,7 @@ class WriterNode:
             "distinctly, rather than blending them together."
         )
 
-        prompt = self._builder.build(
+        prompt = await self._builder.build(
             system_prompt=system_prompt,
             memories=state.get("memories") or [],
             context=synthesis_context,

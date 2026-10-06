@@ -31,8 +31,10 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
     AUTH_HEADER = "Authorization"
     AUTH_SCHEME = "Bearer "
 
-    # Reachable without a token even when AUTH_REQUIRED is on.
-    PUBLIC_PREFIXES = ("/api/v1/health", "/api/v1/auth/refresh", "/api/v1/webhooks/")
+    # Reachable without a token even when AUTH_REQUIRED is on. /api/v1/widget/ is the public
+    # embeddable chat widget (docs/BUGS.md item 37) — its own origin allowlist and rate limit are
+    # the real gate, not a token; see packages/api/routers/widget.py's module docstring.
+    PUBLIC_PREFIXES = ("/api/v1/health", "/api/v1/auth/refresh", "/api/v1/webhooks/", "/api/v1/widget/")
     PUBLIC_PATHS = ("/docs", "/redoc", "/openapi.json")
 
     @classmethod

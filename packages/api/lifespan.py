@@ -10,11 +10,13 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 import packages.domain.models  # noqa: F401 - Ensure models are loaded for Base.metadata
+from packages.conversation.bootstrap import ensure_default_model_profile
 from packages.infrastructure.database.upgrades import apply_schema_upgrades
 from packages.graph.visualizer import GraphVisualizer
 from packages.infrastructure.container import ApplicationContainer
 from packages.infrastructure.container.graph import create_postgres_checkpointer
 from packages.infrastructure.database.base import Base
+from packages.infrastructure.repositories.model_profile import ModelProfileRepository
 from packages.shared.logging import configure_logger, get_logger
 from packages.shared.tracing import configure_opentelemetry
 from packages.api.middleware.rate_limit import close_rate_limit_redis
@@ -85,6 +87,33 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("Failed to initialize database schema: %s", exc)
         raise
+
+    # Seeds the one genuinely global default this app owns outright: the
+    # default ModelProfile (packages/conversation/bootstrap.py), idempotent
+    # (get-or-create) so this is a no-op after the first boot. Agent,
+    # Conversation and KnowledgeBase defaults are deliberately NOT seeded
+    # here — all three require a tenant_id, and tenants are owned by the
+    # external IAM system (docs/PROVENANCE.md), not a local table this app
+    # can enumerate at startup. They stay lazily created on first per-tenant
+    # use (packages/api/routers/chat.py, conversations.py, documents.py).
+    try:
+        async with container.database.session_factory()() as session:
+            await ensure_default_model_profile(ModelProfileRepository(session))
+            await session.commit()
+        logger.info("Default model profile ready.")
+    except Exception as exc:
+        logger.warning("Could not seed the default model profile: %s", exc)
+
+    # Writes one row per known Platform Setting (packages/application/services/
+    # platform_settings_service.py's SETTINGS) with its built-in default, for
+    # every key that doesn't have a row yet — so the platform_settings table
+    # is never empty on first boot. Idempotent: only fills in missing keys,
+    # never touches one an admin already overrode.
+    try:
+        await container.platform_settings.service().seed_defaults()
+        logger.info("Platform settings seeded with built-in defaults.")
+    except Exception as exc:
+        logger.warning("Could not seed default platform settings: %s", exc)
 
     # Persistent (Postgres-backed) checkpointing — Session Management's
     # "Persistent Sessions" gap. Deliberately non-fatal: the in-memory

@@ -17,7 +17,7 @@ from packages.tools.builtin.knowledge_base import (
 from packages.tools.builtin.news import get_news
 from packages.tools.builtin.search import get_google_search
 from packages.tools.builtin.weather import get_weather
-from packages.tools.context import current_custom_tools
+from packages.tools.context import current_custom_tools, is_tool_enabled, is_widget_mode
 from packages.tools.executor import ToolExecutor
 from packages.tools.manager import ToolManager
 from packages.tools.registry import ToolRegistry
@@ -30,12 +30,28 @@ def init_tool_manager(
     iam_client: IAMClient,
 ) -> ToolManager:
     manager = ToolManager(registry=registry, executor=executor)
-    manager.register(get_weather)
-    manager.register(get_news)
-    manager.register(get_google_search)
-    manager.register(calculator)
+    # Each gated on its own Feature Flag (enable_calculator/enable_web_search/enable_weather/
+    # enable_news — docs/BUGS.md item 38), pre-fetched into packages/tools/context.py's
+    # set_enabled_tools the same way set_custom_tools's tools are; is_tool_enabled defaults to
+    # True (fail open) for any caller that never fetched flags at all.
+    if is_tool_enabled("calculator"):
+        manager.register(calculator)
     manager.register(make_knowledge_base_search_tool(knowledge_manager))
     manager.register(make_document_search_tool(knowledge_manager))
+
+    if is_widget_mode():
+        # Public embeddable chat widget (docs/BUGS.md item 37): an anonymous website visitor
+        # never gets web search/news (external cost and abuse surface), the IAM lookup tools
+        # (internal data), or a tenant's CUSTOM webhook tools (may reach internal systems) — see
+        # packages/tools/context.py's set_widget_mode docstring.
+        return manager
+
+    if is_tool_enabled("get_weather"):
+        manager.register(get_weather)
+    if is_tool_enabled("get_news"):
+        manager.register(get_news)
+    if is_tool_enabled("get_google_search"):
+        manager.register(get_google_search)
     manager.register(make_iam_user_lookup_tool(iam_client))
     manager.register(make_iam_tenant_lookup_tool(iam_client))
     # The tenant's CUSTOM webhook tools (docs/BUGS.md item 29) were already fetched from the DB

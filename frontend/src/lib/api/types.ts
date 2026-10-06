@@ -313,6 +313,9 @@ export interface Agent {
   max_tokens: number;
   is_active: boolean;
   status: string;
+  widget_enabled: boolean;
+  widget_public_id: string | null;
+  widget_allowed_origins: string[];
 }
 
 export interface AgentListResponse extends Page<Agent> {
@@ -342,6 +345,12 @@ export interface UpdateAgentRequest {
   top_p?: number;
   max_tokens?: number;
   is_active?: boolean;
+  widget_enabled?: boolean;
+  widget_allowed_origins?: string[];
+}
+
+export interface AgentWidgetRotateResponse {
+  widget_public_id: string;
 }
 
 // ---------------------------------------------------------------
@@ -854,6 +863,31 @@ export interface RetrievalSettingsUpdate {
 export interface ReindexResult {
   queued: number;
   skipped?: number;
+}
+
+// ---------------------------------------------------------------
+// Platform Settings — operational knobs (docs/BUGS.md item 38)
+// ---------------------------------------------------------------
+
+export interface PlatformSettingItem {
+  key: string;
+  label: string;
+  kind: "int" | "float" | "bool" | "string_list";
+  help: string | null;
+  minimum: number | null;
+  maximum: number | null;
+  value: number | boolean | string[];
+  default: number | boolean | string[];
+  is_overridden: boolean;
+}
+
+export interface PlatformSettingsResponse {
+  settings: PlatformSettingItem[];
+}
+
+export interface PlatformSettingsUpdate {
+  /** key -> new value, or null to revert that one key to its built-in default. */
+  values: Record<string, number | boolean | string[] | null>;
 }
 
 export interface ChatFilters {

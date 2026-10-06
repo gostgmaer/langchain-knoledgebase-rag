@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import re
+import secrets
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
     get_scoped_container,
     require_admin,
     require_permission,
@@ -18,6 +20,7 @@ from packages.api.responses import ApiResponse
 from packages.api.schemas.agent import (
     AgentListResponseSchema,
     AgentResponseSchema,
+    AgentWidgetRotateResponseSchema,
     CreateAgentRequestSchema,
     UpdateAgentRequestSchema,
 )
@@ -35,6 +38,12 @@ router = APIRouter(
 def _slugify(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return slug or "agent"
+
+
+def _new_widget_public_id() -> str:
+    # Not a secret — safe to sit in a customer's public page source (see agent.py's docstring on
+    # the field). "wgt_" just makes it recognizable in logs, the same idea as API keys' prefix.
+    return "wgt_" + secrets.token_urlsafe(16)
 
 
 @router.post(
@@ -86,6 +95,15 @@ async def create_agent(
     )
 
     created = await agents.create(agent)
+
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="agent.created",
+        resource_type="agent",
+        resource_id=created.id,
+        detail={"name": created.name, "model_profile_id": str(created.model_profile_id)},
+    )
 
     return ApiResponse(
         message="Agent created.",
@@ -199,12 +217,69 @@ async def update_agent(
                 detail=f"Model profile '{updates['model_profile_id']}' does not exist.",
             )
 
+    if updates.get("widget_enabled") and not agent.widget_public_id:
+        # First time the widget is turned on: mint its public id. Turning it off again leaves the
+        # id in place (re-enabling doesn't silently change a customer's already-embedded snippet).
+        agent.widget_public_id = _new_widget_public_id()
+
     for field, value in updates.items():
         setattr(agent, field, value)
 
     updated = await agents.update(agent)
 
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="agent.updated",
+        resource_type="agent",
+        resource_id=updated.id,
+        detail={"name": updated.name, "fields": sorted(updates)},
+    )
+
     return ApiResponse(
         message="Agent updated.",
         data=AgentResponseSchema.model_validate(updated),
+    )
+
+
+@router.post(
+    "/{agent_id}/widget/rotate",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[AgentWidgetRotateResponseSchema],
+    dependencies=[Depends(require_admin()), Depends(require_permission(Permission.AGENTS_WRITE))],
+    summary="Rotate the widget's public id",
+    description=(
+        "Mints a new widget_public_id and invalidates the old one immediately — any page still "
+        "embedding the previous snippet stops working. Use after the id leaked somewhere it "
+        "shouldn't have, or before reusing an agent for a different public site."
+    ),
+)
+async def rotate_widget_id(
+    agent_id: UUID,
+    request: Request,
+    container: ApplicationContainer = Depends(get_scoped_container),
+):
+    tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
+
+    agents = container.repositories.agent()
+    agent = await agents.get(agent_id)
+
+    if agent is None or agent.tenant_id != tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found.")
+
+    agent.widget_public_id = _new_widget_public_id()
+    updated = await agents.update(agent)
+
+    await container.audit().record(
+        tenant_id=tenant_id,
+        actor_id=require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID),
+        action="agent.widget_id_rotated",
+        resource_type="agent",
+        resource_id=updated.id,
+        detail={"name": updated.name},
+    )
+
+    return ApiResponse(
+        message="Widget id rotated — the previous embed snippet no longer works.",
+        data=AgentWidgetRotateResponseSchema.model_validate(updated),
     )

@@ -51,12 +51,9 @@ class RAGSettings(BaseSettings):
     ]
 
     retrieval_strategy: str = Field(default="hybrid", alias="RETRIEVAL_STRATEGY")
-    # Weight of the BM25 keyword ranking relative to the dense ranking when the hybrid retriever fuses
-    # them (1.0 = equal). Lower it if keyword matches on common words outrank the right document; measure
-    # with scripts/evaluate_retrieval.py before changing it.
-    keyword_weight: float = Field(default=1.0, ge=0.0, le=2.0, alias="RETRIEVAL_KEYWORD_WEIGHT")
+    # retrieval_keyword_weight and context_token_budget moved to Platform Settings
+    # (docs/BUGS.md item 38 follow-up) — see platform_settings_service.py's SETTINGS.
     max_results: int = Field(default=5, alias="RAG_MAX_RESULTS")
-    context_token_budget: int = Field(default=4000, alias="RAG_CONTEXT_TOKEN_BUDGET")
     min_relevance_score: float = Field(default=0.0, alias="RAG_MIN_RELEVANCE_SCORE")
 
     # Self-imposed cap on outgoing embedding calls, kept under whatever the
@@ -70,15 +67,11 @@ class RAGSettings(BaseSettings):
         default=30_000, alias="EMBEDDING_RATE_LIMIT_TOKENS_PER_MINUTE"
     )
 
-    # Scheduled Re-indexing (docs/mvpRAG.md v1.1) — a current document
-    # not re-embedded in this many days becomes a candidate for the
-    # weekly reindex_stale_documents_job.
-    reindex_stale_after_days: int = Field(default=90, alias="REINDEX_STALE_AFTER_DAYS")
-
-    # Data retention. Retrieval logs and audit events are deleted once older than this;
-    # 0 disables the purge for that table (keep forever).
-    retention_retrieval_log_days: int = Field(default=90, alias="RETENTION_RETRIEVAL_LOG_DAYS")
-    retention_audit_days: int = Field(default=365, alias="RETENTION_AUDIT_DAYS")
+    # reindex_stale_after_days / retention_retrieval_log_days / retention_audit_days moved to the
+    # database (docs/BUGS.md item 38) — admin-configurable Platform Settings now, not env vars;
+    # see packages/application/services/platform_settings_service.py's SETTINGS registry for
+    # their built-in defaults, and packages/worker/jobs.py / retention_service.py for how they're
+    # read per run.
 
     # External knowledge sources (connectors).
     # Fernet key(s), comma separated. The first encrypts, all decrypt (rotation). No key = credentials cannot be stored.
@@ -90,5 +83,6 @@ class RAGSettings(BaseSettings):
     # It must be network-isolated (pages it loads can request anything); unset = JavaScript rendering unavailable.
     connector_render_url: str | None = Field(default=None, alias="CONNECTOR_RENDER_URL")
     connector_render_token: str | None = Field(default=None, alias="CONNECTOR_RENDER_TOKEN")
-    connector_sync_concurrency: int = Field(default=4, ge=1, le=16, alias="CONNECTOR_SYNC_CONCURRENCY")
+    # connector_sync_concurrency moved to the database (docs/BUGS.md item 38) — see
+    # platform_settings_service.py's SETTINGS registry and packages/connectors/sync.py.
     connector_max_error_details: int = Field(default=100, alias="CONNECTOR_MAX_ERROR_DETAILS")

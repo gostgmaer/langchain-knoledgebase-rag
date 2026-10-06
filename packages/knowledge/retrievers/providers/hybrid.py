@@ -6,7 +6,7 @@ import re
 
 from rank_bm25 import BM25Okapi
 
-from packages.config.loader import settings
+from packages.application.services.platform_settings_service import PlatformSettingsService
 
 from packages.knowledge.retrievers.base import BaseRetriever
 from packages.knowledge.retrievers.schemas import RetrievalRequest
@@ -37,9 +37,11 @@ class HybridRetriever(BaseRetriever):
     def __init__(
         self,
         vector_store: VectorStoreManager,
+        platform_settings: PlatformSettingsService,
         candidate_pool_size: int = 500,
     ) -> None:
         self.vector_store = vector_store
+        self._platform_settings = platform_settings
         self.candidate_pool_size = candidate_pool_size
 
     async def retrieve(
@@ -72,10 +74,13 @@ class HybridRetriever(BaseRetriever):
             candidates,
         )
 
+        keyword_weight = await self._platform_settings.get("retrieval_keyword_weight")
+
         return self._reciprocal_rank_fusion(
             vector_results,
             keyword_results,
             limit=limit,
+            keyword_weight=keyword_weight,
         )
 
     def _bm25_rank(
@@ -110,6 +115,7 @@ class HybridRetriever(BaseRetriever):
         keyword_results: list[SearchResult],
         *,
         limit: int,
+        keyword_weight: float,
     ) -> list[SearchResult]:
 
         fused_scores: dict[object, float] = {}
@@ -117,7 +123,7 @@ class HybridRetriever(BaseRetriever):
         vector_scores = {r.chunk.id: r.score for r in vector_results}
         keyword_scores = {r.chunk.id: r.score for r in keyword_results}
 
-        for weight, ranked_list in ((1.0, vector_results), (settings.rag.keyword_weight, keyword_results)):
+        for weight, ranked_list in ((1.0, vector_results), (keyword_weight, keyword_results)):
             for rank, result in enumerate(ranked_list):
                 chunk_id = result.chunk.id
                 fused_scores[chunk_id] = (
