@@ -120,6 +120,16 @@ SETTINGS: tuple[SettingSpec, ...] = (
         1.0, minimum=0.0, maximum=2.0,
         help="Weight given to BM25 keyword matches in reciprocal rank fusion, relative to vector search (fixed at 1.0). Higher favors exact-term matches.",
     ),
+    SettingSpec(
+        "connector_max_error_details", "Knowledge source sync error detail cap", "int",
+        100, minimum=0,
+        help="Failed documents listed in a sync run's error detail. Failure counts are always exact; this only caps how many individual error messages are kept. 0 keeps none.",
+    ),
+    SettingSpec(
+        "max_file_size", "Max document upload size (bytes)", "int",
+        10 * 1024 * 1024, minimum=1,
+        help="Uploads larger than this are rejected before reaching the Upload Service. Should match that service's own MAX_FILE_SIZE, or a doomed upload just fails later instead of failing this check first.",
+    ),
 )
 
 _SPEC_BY_KEY: dict[str, SettingSpec] = {spec.key: spec for spec in SETTINGS}

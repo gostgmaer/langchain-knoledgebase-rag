@@ -1108,6 +1108,25 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   (`packages/infrastructure/repositories/feature_flag.py`), confirmed the change took effect via a
   fresh `FeatureFlagService.get_effective()` read. No code change; an operational action, logged
   here since it changes this environment's standing security posture.
+- **Third follow-up — two more settings moved, plus 6 genuinely dead fields found and removed**:
+  `CONNECTOR_MAX_ERROR_DETAILS` (`packages/config/rag.py`) and `MAX_FILE_SIZE`
+  (`packages/config/storage.py`) moved to Platform Settings the same way, as
+  `connector_max_error_details`/`max_file_size`. Both are read fresh at call time (`Counters.
+  add_error` in `packages/connectors/sync.py`, the `POST /documents` upload-size check in
+  `packages/api/routers/documents.py`), not baked into a Singleton. While investigating candidates,
+  found `IAMSettings.timeout`/`max_retries`/`verify_ssl` (`packages/config/iam.py`) and
+  `UploadServiceSettings.timeout`/`signed_url_expiry`/`verify_ssl`
+  (`packages/config/upload_service.py`) were never actually read anywhere — both SDK clients share
+  the one generic `create_http_client()` (`packages/infrastructure/http/client.py`), which hardcodes
+  its own timeout and doesn't take per-service overrides at all. `.env.example`/`.env`/
+  `docs/ENVIRONMENT.md` all described these 6 as if they did something (one comment literally said
+  "Seconds per IAM request, retries on transient failures, and TLS verification"); removed the
+  fields and every doc claim along with them rather than leave a config knob that silently does
+  nothing — the same standard as the `NotificationSettings` dead-class removal earlier this item.
+  `StorageSettings.signed_url_expiry` was dead for the same reason (nothing ever read it) and was
+  also deleted outright rather than moved, since moving a setting nothing consumes adds a page
+  control with no effect. Verified live: DI container still builds and resolves `IAMClient`/
+  `UploadClient` with the fields gone, full suite stayed clean (see below).
 
 ---
 

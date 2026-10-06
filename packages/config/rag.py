@@ -83,6 +83,6 @@ class RAGSettings(BaseSettings):
     # It must be network-isolated (pages it loads can request anything); unset = JavaScript rendering unavailable.
     connector_render_url: str | None = Field(default=None, alias="CONNECTOR_RENDER_URL")
     connector_render_token: str | None = Field(default=None, alias="CONNECTOR_RENDER_TOKEN")
-    # connector_sync_concurrency moved to the database (docs/BUGS.md item 38) — see
-    # platform_settings_service.py's SETTINGS registry and packages/connectors/sync.py.
-    connector_max_error_details: int = Field(default=100, alias="CONNECTOR_MAX_ERROR_DETAILS")
+    # connector_sync_concurrency and connector_max_error_details moved to the database
+    # (docs/BUGS.md item 38) — see platform_settings_service.py's SETTINGS registry and
+    # packages/connectors/sync.py.
