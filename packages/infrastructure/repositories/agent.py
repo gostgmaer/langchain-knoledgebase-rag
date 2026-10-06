@@ -42,6 +42,10 @@ class AgentRepository(BaseRepository[Agent]):
 
         return await self.scalar(stmt)
 
+    async def get_by_widget_public_id(self, widget_public_id: str) -> Agent | None:
+        stmt = select(Agent).where(Agent.widget_public_id == widget_public_id)
+        return await self.scalar(stmt)
+
     async def list_enabled(self) -> list[Agent]:
         stmt = (
             select(Agent)

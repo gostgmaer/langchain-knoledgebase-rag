@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
-from starlette.middleware.cors import CORSMiddleware
 
 from packages.config.loader import settings
 
 from .authentication import AuthenticationMiddleware
+from .cors import SelectiveCORSMiddleware
 from .logging import LoggingMiddleware
 from .metrics import MetricsMiddleware
 from .rate_limit import RateLimitMiddleware
@@ -93,8 +93,18 @@ def register_middlewares(app: FastAPI) -> None:
     # them by name. frontend/ (a separate Next.js origin in dev) is
     # the reason this exists at all — see packages/config/api.py.
     #
+    # Exempts /api/v1/widget/ — the embeddable chat widget's allowed
+    # origins are per-agent, stored in the database by a tenant admin
+    # at runtime, not expressible in this one static, startup-time
+    # list. That router (packages/api/routers/widget.py) answers its
+    # own preflight and sets its own per-request CORS headers; see
+    # SelectiveCORSMiddleware's own docstring for why this is
+    # necessary, not just tidy — CORSMiddleware otherwise intercepts
+    # every OPTIONS request in the app, including that router's own.
+    #
     app.add_middleware(
-        CORSMiddleware,
+        SelectiveCORSMiddleware,
+        exempt_prefix=f"{settings.api.api_prefix}/widget/",
         allow_origins=settings.api.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],

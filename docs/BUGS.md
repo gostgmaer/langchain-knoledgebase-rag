@@ -908,6 +908,69 @@ form, and config form are all generic, driven entirely by the connector's own `c
   "Bot User OAuth Token*" field with the connector's own setup instructions — all driven generically
   off the backend's `ConnectorInfo`, no frontend code touched. Full unit suite: 361 passed.
 
+### 37. ✅ New feature — public embeddable chat widget, with two real bugs found while verifying it
+
+A chat bubble a customer can drop on their own website via a plain `<script>` tag. This is a
+genuinely different trust boundary from everything else in the app — the public internet, no IAM
+token, no `X-Tenant-ID`/`X-User-ID` header — and most of the design effort went into that boundary,
+not the chat UI itself.
+- **Security design**: `widget_public_id` (an agent field, `wgt_...`) is not a secret — safe in a
+  customer's page source, same trust model as a Stripe publishable key. The real gate is
+  `widget_allowed_origins`, a per-agent list a tenant admin controls; an **empty list denies
+  everyone by default**, not the other way around, so a freshly-enabled widget never accidentally
+  opens before an admin configures it. A restricted tool allowlist
+  (`packages/tools/context.py`'s `set_widget_mode`/`is_widget_mode`, read by `init_tool_manager`)
+  means an anonymous visitor gets knowledge-base search and the calculator only — never the
+  `lookup_iam_user`/`lookup_iam_tenant` tools or a tenant's CUSTOM webhook tools, both real internal-
+  data/internal-system exposure risks a public chat box must never have. Backend: new
+  `packages/api/routers/widget.py` (`GET .../config`, `POST .../chat`, both origin-checked and
+  rate-limited at 20 msg/min per widget+IP via a new `is_rate_limited()` helper extracted from
+  `RateLimitMiddleware`), three new `Agent` columns (`widget_enabled`, `widget_public_id`,
+  `widget_allowed_origins`), a `POST /agents/{id}/widget/rotate` endpoint for revoking a leaked id.
+  Frontend: a real toggle/origins-editor/embed-snippet UI in the Agents page's edit dialog, and
+  `frontend/public/widget.js` — a dependency-free, Shadow-DOM-isolated vanilla JS widget (visitor
+  identity and conversation continuity via a client-generated UUID in `localStorage`, not auth).
+- **Real bug #1, found writing the tool-gating test**: nothing stopped the tool-gating allowlist
+  from silently becoming a denylist as new builtin tools get added later — fixed by asserting the
+  *exact* widget tool set in `tests/unit/test_widget_tool_gating.py`, not just "contains the safe
+  ones," so a new tool defaults OUT of the widget until someone deliberately opts it in.
+- **Real bug #2, found live-testing against a real cross-origin page**: Starlette's global
+  `CORSMiddleware` (registered for the app's one static, startup-time origin allowlist) answers
+  *every* OPTIONS preflight in the whole app itself, before the request reaches any route —
+  confirmed live: a genuine browser preflight from a second local "customer site" (a plain
+  `http.server` on a different port, not just a same-origin fetch) came back `400`, and the
+  widget's own `@router.options(...)` handler never ran at all. The widget's allowed origins are
+  per-agent and live in the database; no static, process-start list can express that. Fixed with a
+  new `packages/api/middleware/cors.py`: `SelectiveCORSMiddleware` subclasses Starlette's own and
+  skips straight to the inner app for any path under `/api/v1/widget/`, leaving every other route's
+  CORS handling untouched.
+- **Real bug #3, found testing the above fix**: validating that CORS fix with a deliberately
+  malformed origin (`"not-a-url"`) crashed the app's *own validation-error handler* —
+  `pydantic_core.PydanticSerializationError: Unable to serialize unknown type: <class 'ValueError'>`.
+  FastAPI's `RequestValidationError.errors()` embeds the raw exception a custom `field_validator`
+  raised in `ctx['error']` — a live Python object, not a string — and
+  `packages/api/exception_handlers.py`'s `validation_exception_handler` was passing that straight
+  into `model_dump(mode="json")`. Pre-existing, latent since this codebase's first custom
+  `field_validator` that raises a bare `ValueError` (the widget's new
+  `widget_allowed_origins` check, in `packages/api/schemas/agent.py`, is the first one to ever hit
+  this path) — any future one would have hit the same crash. Fixed with a small `_json_safe_errors`
+  helper that stringifies `ctx['error']` before it gets anywhere near JSON serialization.
+- **Honesty about scope**: non-streaming only; conversation continuity depends on the visitor's
+  browser keeping its `localStorage` (no cross-device continuity, by design — there's no account to
+  tie it to). Both are reasonable v1 limits, not oversights, and are documented in `widget.js`'s own
+  comments and the Agents page's UI copy.
+- **Verified live, fully cross-origin**: enabled the widget on a real agent through the real admin
+  UI, copied its generated embed snippet, served a second plain HTML page from an actual different
+  origin (`http://localhost:8899`, a separate `http.server` process — not a same-origin test), and
+  confirmed: the chat bubble renders, the config fetch resolves the agent's real name over CORS, and
+  a real message round-trips through the full chat pipeline to a real LLM response — "Hello there" →
+  "Hello! How can I help you today?" — entirely from the simulated external site. Also confirmed
+  the backend-only pieces: 10 new API tests (`tests/api/test_widget_api.py` — id minting/rotation,
+  origin allow/deny including the empty-list-denies-all default, 404s, preflight CORS headers) all
+  passing, plus the 4 tool-gating unit tests. Full suite: 425 passed, 3 failed — the same
+  pre-existing, already-excluded `"google"`/`"GOOGLE"` enum-casing bug as every other round this
+  session, not a regression.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

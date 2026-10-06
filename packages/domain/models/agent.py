@@ -108,6 +108,20 @@ class Agent(BaseModel):
         nullable=False,
     )
 
+    # Public embeddable chat widget (docs/BUGS.md item 37). `widget_public_id` is NOT a secret —
+    # it is meant to sit in a customer's public page source, the same trust model as a Stripe
+    # publishable key or a GA measurement id. The actual security boundary is
+    # `widget_allowed_origins`: the widget router rejects any request whose Origin isn't on this
+    # list, and treats an empty list as "deny everything" rather than "allow everything" so a
+    # freshly-enabled widget never accidentally opens by default.
+    widget_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Uniqueness enforced by the partial index in upgrades.py (runs on every startup, fresh DB
+    # included — the single source of truth here, not a second create_all-time constraint).
+    widget_public_id: Mapped[str | None] = mapped_column(String(32))
+
+    widget_allowed_origins: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+
     conversations: Mapped[list[Conversation]] = relationship(
         back_populates="agent",
         cascade="all, delete-orphan",

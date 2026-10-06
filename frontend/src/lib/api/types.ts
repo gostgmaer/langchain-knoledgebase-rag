@@ -313,6 +313,9 @@ export interface Agent {
   max_tokens: number;
   is_active: boolean;
   status: string;
+  widget_enabled: boolean;
+  widget_public_id: string | null;
+  widget_allowed_origins: string[];
 }
 
 export interface AgentListResponse extends Page<Agent> {
@@ -342,6 +345,12 @@ export interface UpdateAgentRequest {
   top_p?: number;
   max_tokens?: number;
   is_active?: boolean;
+  widget_enabled?: boolean;
+  widget_allowed_origins?: string[];
+}
+
+export interface AgentWidgetRotateResponse {
+  widget_public_id: string;
 }
 
 // ---------------------------------------------------------------

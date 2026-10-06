@@ -2,6 +2,7 @@ import { apiFetch, type Identity } from "./client";
 import type {
   Agent,
   AgentListResponse,
+  AgentWidgetRotateResponse,
   AnalyticsSummary,
   ChatResponseData,
   Conversation,
@@ -214,6 +215,8 @@ export const agents = {
     apiFetch<Agent>("/agents", identity, { method: "POST", body }),
   update: (identity: Identity, id: string, body: UpdateAgentRequest) =>
     apiFetch<Agent>(`/agents/${id}`, identity, { method: "PATCH", body }),
+  rotateWidgetId: (identity: Identity, id: string) =>
+    apiFetch<AgentWidgetRotateResponse>(`/agents/${id}/widget/rotate`, identity, { method: "POST" }),
 };
 
 // ---------------------------------------------------------------

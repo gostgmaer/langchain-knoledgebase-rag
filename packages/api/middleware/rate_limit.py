@@ -27,6 +27,29 @@ async def close_rate_limit_redis() -> None:
     await _redis.aclose()
 
 
+async def is_rate_limited(name: str, key: str, max_requests: int, *, window_seconds: int = WINDOW_SECONDS) -> bool:
+    """
+    The same fixed-window Redis counter RateLimitMiddleware uses, as a standalone check for a
+    route that needs its own, narrower limit (packages/api/routers/widget.py: a public,
+    unauthenticated endpoint needs a much tighter cap than the general per-tenant one). Fails
+    open on a Redis error, same reasoning as the middleware.
+    """
+
+    if max_requests <= 0:
+        return False
+    bucket = int(time.time() // window_seconds)
+    redis_key = f"ratelimit:{name}:{key}:{bucket}"
+    try:
+        async with _redis.pipeline(transaction=True) as pipe:
+            pipe.incr(redis_key)
+            pipe.expire(redis_key, window_seconds + 1)
+            count, _ = await pipe.execute()
+    except Exception:
+        logger.warning("Rate limiter: Redis unreachable, failing open for this request")
+        return False
+    return count > max_requests
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     Per-tenant (falls back to client IP) rate limit, backed by Redis so the
@@ -75,22 +98,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def _check(self, name: str, key: str, max_requests: int) -> Response | None:
         """Returns a 429 Response if this bucket is over its limit, else None."""
 
-        if max_requests <= 0:
-            return None
-
-        bucket = int(time.time() // WINDOW_SECONDS)
-        redis_key = f"ratelimit:{name}:{key}:{bucket}"
-
-        try:
-            async with _redis.pipeline(transaction=True) as pipe:
-                pipe.incr(redis_key)
-                pipe.expire(redis_key, WINDOW_SECONDS + 1)
-                count, _ = await pipe.execute()
-        except Exception:
-            logger.warning("Rate limiter: Redis unreachable, failing open for this request")
-            return None
-
-        if count > max_requests:
+        if await is_rate_limited(name, key, max_requests):
             retry_after = WINDOW_SECONDS - (int(time.time()) % WINDOW_SECONDS) + 1
             return JSONResponse(
                 status_code=429,

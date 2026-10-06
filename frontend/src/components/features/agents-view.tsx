@@ -1,18 +1,20 @@
 "use client";
 
-import { Bot } from "lucide-react";
+import { Bot, Copy, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -22,7 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { useAgents, useCreateAgent, useModelProfiles, useUpdateAgent } from "@/hooks/use-api";
+import { useAgents, useCreateAgent, useModelProfiles, useRotateWidgetId, useUpdateAgent } from "@/hooks/use-api";
 import type { Agent } from "@/lib/api/types";
 
 const EMPTY_FORM = {
@@ -32,6 +34,8 @@ const EMPTY_FORM = {
   llm_provider: "google",
   llm_model: "",
   model_profile_id: "",
+  widget_enabled: false,
+  widget_allowed_origins: [] as string[],
 };
 
 export function AgentsView() {
@@ -76,6 +80,8 @@ export function AgentsView() {
       llm_provider: agent.llm_provider,
       llm_model: agent.llm_model,
       model_profile_id: agent.model_profile_id,
+      widget_enabled: agent.widget_enabled,
+      widget_allowed_origins: agent.widget_allowed_origins,
     });
   }
 
@@ -92,6 +98,8 @@ export function AgentsView() {
           llm_provider: form.llm_provider,
           llm_model: form.llm_model,
           model_profile_id: form.model_profile_id,
+          widget_enabled: form.widget_enabled,
+          widget_allowed_origins: form.widget_allowed_origins,
         },
       });
       toast.success("Agent updated.");
@@ -182,11 +190,159 @@ export function AgentsView() {
       >
         <form onSubmit={handleUpdate} className="grid gap-4">
           <AgentFormFields form={form} setForm={setForm} profiles={profiles?.model_profiles ?? []} />
+          {editing && <WidgetSection agent={editing} form={form} setForm={setForm} />}
           <Button type="submit" loading={updateAgent.isPending}>
             Save changes
           </Button>
         </form>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * Public embeddable chat widget (docs/BUGS.md item 37). `agent` is the last-SAVED state (the
+ * embed snippet and rotate action use its real widget_public_id); `form`/`setForm` hold the
+ * draft enabled/origins that only take effect once "Save changes" is actually submitted — rotating
+ * the id is the one action here that's immediate and separate from that save, since it's
+ * destructive (invalidates the previous embed right away) and shouldn't wait on unrelated edits.
+ */
+function WidgetSection({
+  agent,
+  form,
+  setForm,
+}: {
+  agent: Agent;
+  form: typeof EMPTY_FORM;
+  setForm: (form: typeof EMPTY_FORM) => void;
+}) {
+  const [originDraft, setOriginDraft] = useState("");
+  const rotateWidgetId = useRotateWidgetId();
+
+  function addOrigin() {
+    const value = originDraft.trim();
+    if (!value) return;
+    if (!form.widget_allowed_origins.includes(value)) {
+      setForm({ ...form, widget_allowed_origins: [...form.widget_allowed_origins, value] });
+    }
+    setOriginDraft("");
+  }
+
+  const apiBase = process.env.NEXT_PUBLIC_WIDGET_API_URL ?? "http://127.0.0.1:8088/api/v1";
+  const snippet = agent.widget_public_id
+    ? `<script src="${typeof window !== "undefined" ? window.location.origin : ""}/widget.js" data-agent="${agent.widget_public_id}" data-api="${apiBase}" async></script>`
+    : null;
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+      <div className="flex items-center justify-between">
+        <div>
+          <Label>Embeddable chat widget</Label>
+          <p className="text-xs text-neutral-500">
+            A chat bubble a customer can drop on their own website. Restricted tool access — no IAM
+            lookups, no webhook tools, knowledge-base search only.
+          </p>
+        </div>
+        <Switch
+          checked={form.widget_enabled}
+          onCheckedChange={(next) => setForm({ ...form, widget_enabled: next })}
+          aria-label="Enable embeddable widget"
+        />
+      </div>
+
+      {form.widget_enabled && (
+        <>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Allowed origins</Label>
+            <p className="text-xs text-neutral-500">
+              Only these exact origins (scheme + host + port, no path) can use the widget. Empty = no
+              one can, yet.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {form.widget_allowed_origins.map((origin) => (
+                <Badge key={origin} variant="secondary" className="gap-1">
+                  {origin}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        widget_allowed_origins: form.widget_allowed_origins.filter((o) => o !== origin),
+                      })
+                    }
+                    aria-label={`Remove ${origin}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={originDraft}
+                onChange={(e) => setOriginDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addOrigin();
+                  }
+                }}
+                placeholder="https://www.example.com"
+                className="text-sm"
+              />
+              <Button type="button" variant="outline" size="sm" onClick={addOrigin}>
+                Add
+              </Button>
+            </div>
+          </div>
+
+          {agent.widget_public_id ? (
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Embed snippet</Label>
+              <div className="flex items-start gap-2">
+                <code className="flex-1 overflow-x-auto rounded-md bg-neutral-100 px-2 py-1.5 text-xs dark:bg-neutral-900">
+                  {snippet}
+                </code>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  title="Copy snippet"
+                  onClick={() => {
+                    if (snippet) navigator.clipboard.writeText(snippet);
+                    toast.success("Snippet copied.");
+                  }}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                loading={rotateWidgetId.isPending}
+                onClick={async () => {
+                  if (!confirm("Rotate the widget id? The current embed snippet stops working immediately.")) return;
+                  try {
+                    await rotateWidgetId.mutateAsync(agent.id);
+                    toast.success("Widget id rotated — update the embed snippet wherever it's used.");
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Could not rotate the widget id.");
+                  }
+                }}
+              >
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                Rotate widget id
+              </Button>
+            </div>
+          ) : (
+            <p className="text-xs text-neutral-500">
+              Save with the widget enabled to get its embed snippet.
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

@@ -1,9 +1,20 @@
 # Schema agent
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _validate_origins(origins: list[str] | None) -> list[str] | None:
+    if origins is None:
+        return None
+    for origin in origins:
+        parts = urlsplit(origin)
+        if parts.scheme not in ("http", "https") or not parts.netloc or parts.path:
+            raise ValueError(f"'{origin}' must be an origin like https://example.com, with no path.")
+    return origins
 
 
 class CreateAgentRequestSchema(BaseModel):
@@ -59,6 +70,12 @@ class UpdateAgentRequestSchema(BaseModel):
 
     is_active: bool | None = None
 
+    widget_enabled: bool | None = None
+
+    widget_allowed_origins: list[str] | None = Field(default=None, max_length=20)
+
+    _validate_widget_allowed_origins = field_validator("widget_allowed_origins")(_validate_origins)
+
 
 class AgentResponseSchema(BaseModel):
     """A single agent's configuration."""
@@ -81,6 +98,17 @@ class AgentResponseSchema(BaseModel):
     max_tokens: int
     is_active: bool
     status: str
+    widget_enabled: bool
+    widget_public_id: str | None
+    widget_allowed_origins: list[str]
+
+
+class AgentWidgetRotateResponseSchema(BaseModel):
+    """The agent's new widget_public_id after a rotation — the previous one stops working immediately."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    widget_public_id: str
 
 
 class AgentListResponseSchema(BaseModel):

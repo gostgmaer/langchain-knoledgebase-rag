@@ -423,6 +423,15 @@ export function useUpdateAgent() {
   });
 }
 
+export function useRotateWidgetId() {
+  const identity = useIdentity();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => agents.rotateWidgetId(identity!, id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents", identity?.tenantId] }),
+  });
+}
+
 // ---------------------------------------------------------------
 // Model Profiles
 // ---------------------------------------------------------------

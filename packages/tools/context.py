@@ -21,6 +21,14 @@ from langchain_core.tools import BaseTool
 
 _custom_tools: ContextVar[list[BaseTool] | None] = ContextVar("custom_webhook_tools", default=None)
 
+# Set by the public widget router (packages/api/routers/widget.py) before every request, never by
+# anything authenticated. An anonymous website visitor gets knowledge-base search and the
+# calculator only — never lookup_iam_user/lookup_iam_tenant (internal data, not public visitors'
+# to query) or a tenant's CUSTOM webhook tools (may reach internal systems never meant to be
+# reachable from the public internet). This is an allowlist, not a denylist, on purpose: a new
+# builtin tool added later is excluded from the widget by default until someone decides otherwise.
+_widget_mode: ContextVar[bool] = ContextVar("widget_mode", default=False)
+
 
 def set_custom_tools(tools: list[BaseTool]) -> None:
     _custom_tools.set(tools)
@@ -30,3 +38,11 @@ def current_custom_tools() -> list[BaseTool]:
     # No shared mutable default (ContextVar(default=[]) would be one list reused across every
     # context that never called set_custom_tools) — a fresh empty list per call instead.
     return _custom_tools.get() or []
+
+
+def set_widget_mode(enabled: bool) -> None:
+    _widget_mode.set(enabled)
+
+
+def is_widget_mode() -> bool:
+    return _widget_mode.get()
