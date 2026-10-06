@@ -123,6 +123,19 @@ function SettingField({
         />
       )}
 
+      {item.kind === "float" && (
+        <Input
+          type="number"
+          step="0.1"
+          min={item.minimum ?? undefined}
+          max={item.maximum ?? undefined}
+          value={isDefault ? "" : String(value)}
+          placeholder={`${item.default} (default)`}
+          onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+          aria-label={item.label}
+        />
+      )}
+
       {item.kind === "bool" && (
         <div className="flex items-center gap-2">
           {isDefault && <Badge variant="outline">default ({String(item.default)})</Badge>}

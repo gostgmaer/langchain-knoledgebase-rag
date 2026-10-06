@@ -872,7 +872,7 @@ export interface ReindexResult {
 export interface PlatformSettingItem {
   key: string;
   label: string;
-  kind: "int" | "bool" | "string_list";
+  kind: "int" | "float" | "bool" | "string_list";
   help: string | null;
   minimum: number | null;
   maximum: number | null;
@@ -886,7 +886,7 @@ export interface PlatformSettingsResponse {
 }
 
 export interface PlatformSettingsUpdate {
-  /** key -> new value, or null to revert that one key to its .env default. */
+  /** key -> new value, or null to revert that one key to its built-in default. */
   values: Record<string, number | boolean | string[] | null>;
 }
 

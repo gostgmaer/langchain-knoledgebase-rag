@@ -140,7 +140,8 @@ The API verifies each request by sending the caller's bearer token to IAM (`GET 
 | `CHUNK_OVERLAP` | `200` | Characters shared between adjacent chunks. |
 | `RETRIEVAL_STRATEGY` | `hybrid` | Retrieval mode (vector + keyword). |
 | `RAG_MAX_RESULTS` | `5` | Chunks passed to the answer step after reranking. |
-| `RAG_CONTEXT_TOKEN_BUDGET` | `4000` | Max tokens of retrieved context sent to the LLM. |
+| ~~`RETRIEVAL_KEYWORD_WEIGHT`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38 follow-up) — admin-configurable from the Platform Settings page. Built-in default: `1.0` (range 0.0-2.0). Weight of BM25 keyword matches relative to vector search in hybrid retrieval. |
+| ~~`RAG_CONTEXT_TOKEN_BUDGET`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38 follow-up) — admin-configurable from the Platform Settings page. Built-in default: `4000`. Max tokens of retrieved context sent to the LLM. |
 | `RAG_MIN_RELEVANCE_SCORE` | `0.0` | Cutoff on the reranker's raw score (can be negative). The top chunk is always kept so answers are never left without a citation; lower-ranked chunks below the cutoff are dropped. |
 | ~~`REINDEX_STALE_AFTER_DAYS`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38) — admin-configurable from the Platform Settings page. Built-in default: `90`. Retention windows (`RETENTION_RETRIEVAL_LOG_DAYS` / `RETENTION_AUDIT_DAYS`, built-in defaults `90` / `365`) moved the same way. |
 

@@ -30,7 +30,7 @@ class SettingSpec:
     key: str
     label: str
     kind: str
-    """int | bool | string_list"""
+    """int | float | bool | string_list"""
     default: Any
     minimum: float | None = None
     maximum: float | None = None
@@ -41,6 +41,13 @@ class SettingSpec:
         if self.kind == "int":
             if isinstance(value, bool) or not isinstance(value, int):
                 return f"'{self.label}' must be a whole number."
+            if self.minimum is not None and value < self.minimum:
+                return f"'{self.label}' must be at least {self.minimum:g}."
+            if self.maximum is not None and value > self.maximum:
+                return f"'{self.label}' must be at most {self.maximum:g}."
+        elif self.kind == "float":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return f"'{self.label}' must be a number."
             if self.minimum is not None and value < self.minimum:
                 return f"'{self.label}' must be at least {self.minimum:g}."
             if self.maximum is not None and value > self.maximum:
@@ -102,6 +109,16 @@ SETTINGS: tuple[SettingSpec, ...] = (
         "connector_sync_concurrency", "Knowledge source sync concurrency", "int",
         4, minimum=1, maximum=16,
         help="How many documents a single source sync processes in flight at once.",
+    ),
+    SettingSpec(
+        "rag_context_token_budget", "Retrieved context token budget", "int",
+        4000, minimum=1,
+        help="Max tokens of retrieved chunks folded into one prompt; de-duped context beyond this is dropped, not truncated mid-chunk.",
+    ),
+    SettingSpec(
+        "retrieval_keyword_weight", "Hybrid search keyword weight", "float",
+        1.0, minimum=0.0, maximum=2.0,
+        help="Weight given to BM25 keyword matches in reciprocal rank fusion, relative to vector search (fixed at 1.0). Higher favors exact-term matches.",
     ),
 )
 

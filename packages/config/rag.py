@@ -51,12 +51,9 @@ class RAGSettings(BaseSettings):
     ]
 
     retrieval_strategy: str = Field(default="hybrid", alias="RETRIEVAL_STRATEGY")
-    # Weight of the BM25 keyword ranking relative to the dense ranking when the hybrid retriever fuses
-    # them (1.0 = equal). Lower it if keyword matches on common words outrank the right document; measure
-    # with scripts/evaluate_retrieval.py before changing it.
-    keyword_weight: float = Field(default=1.0, ge=0.0, le=2.0, alias="RETRIEVAL_KEYWORD_WEIGHT")
+    # retrieval_keyword_weight and context_token_budget moved to Platform Settings
+    # (docs/BUGS.md item 38 follow-up) — see platform_settings_service.py's SETTINGS.
     max_results: int = Field(default=5, alias="RAG_MAX_RESULTS")
-    context_token_budget: int = Field(default=4000, alias="RAG_CONTEXT_TOKEN_BUDGET")
     min_relevance_score: float = Field(default=0.0, alias="RAG_MIN_RELEVANCE_SCORE")
 
     # Self-imposed cap on outgoing embedding calls, kept under whatever the

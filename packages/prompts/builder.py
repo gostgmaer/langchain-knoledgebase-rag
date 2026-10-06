@@ -10,7 +10,7 @@ import tiktoken
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from packages.config.loader import settings
+from packages.application.services.platform_settings_service import PlatformSettingsService
 from packages.memory.schemas import MemoryFact
 
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
@@ -28,7 +28,10 @@ class PromptBuilder:
     history) instead of hand-concatenated f-strings.
     """
 
-    def _dedup_and_budget(self, context: list[str]) -> list[str]:
+    def __init__(self, platform_settings: PlatformSettingsService) -> None:
+        self._platform_settings = platform_settings
+
+    async def _dedup_and_budget(self, context: list[str]) -> list[str]:
         """
         Drops exact-duplicate chunks (multi-query retrieval can surface
         the same chunk more than once) and truncates to a token budget
@@ -43,7 +46,7 @@ class PromptBuilder:
             seen.add(chunk)
             deduped.append(chunk)
 
-        budget = settings.rag.context_token_budget
+        budget = await self._platform_settings.get("rag_context_token_budget")
         budgeted: list[str] = []
         used = 0
         for chunk in deduped:
@@ -55,7 +58,7 @@ class PromptBuilder:
 
         return budgeted
 
-    def build(
+    async def build(
         self,
         *,
         system_prompt: str,
@@ -80,7 +83,7 @@ class PromptBuilder:
             )
 
         if context is not None:
-            budgeted_context = self._dedup_and_budget(context) if context else []
+            budgeted_context = await self._dedup_and_budget(context) if context else []
             if budgeted_context:
                 sources = "\n".join(
                     f'<source id="{n}">\n{_neutralize(chunk)}\n</source>'

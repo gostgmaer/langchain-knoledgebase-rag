@@ -221,7 +221,11 @@ class GraphContainer(containers.DeclarativeContainer):
     memory = providers.DependenciesContainer()
     services = providers.DependenciesContainer()
     repositories = providers.DependenciesContainer()
-    prompt_builder = providers.Singleton(PromptBuilder)
+    platform_settings = providers.DependenciesContainer()
+    prompt_builder = providers.Singleton(
+        PromptBuilder,
+        platform_settings=platform_settings.service,
+    )
 
     # NOTE: this whole chain is Factory, not Singleton, on purpose.
     # extract_memory/load_memory ultimately depend on a DB session

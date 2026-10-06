@@ -1046,6 +1046,47 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   (`test_platform_settings_api.py`, `test_dynamic_cors.py`, `test_feature_flag_tool_gating.py`) plus
   the fixed widget tests, full suite: 444 passed, 3 failed — the same pre-existing, already-excluded
   enum-casing bug.
+- **Dead config removed in the same cleanup pass**: a `.env`-var audit (every field on every
+  `pydantic_settings.BaseSettings` subclass, cross-referenced against `os.environ`/`os.getenv` usage
+  and `docker-compose.yml`) found one genuinely orphaned class, `NotificationSettings`
+  (`packages/config/notification.py`) — zero consumers anywhere. Deleted the class and its
+  `NOTIFICATION_*` block from `.env.example`. Everything else in `.env.example` was confirmed
+  genuinely needed (Postgres bootstrap vars read before this app even starts, a few ops-script-only
+  vars) — not dead, just consumed outside `pydantic-settings`.
+- **Second follow-up — two more RAG tuning knobs moved**: `RAG_CONTEXT_TOKEN_BUDGET` and
+  `RETRIEVAL_KEYWORD_WEIGHT` (`packages/config/rag.py`) moved to Platform Settings the same way,
+  as `rag_context_token_budget` / `retrieval_keyword_weight` (new `"float"` `SettingSpec` kind,
+  frontend got a matching number input). Deliberately *not* moved in this pass: `CHUNK_SIZE`/
+  `CHUNK_OVERLAP` and `EMBEDDING_RATE_LIMIT_REQUESTS_PER_MINUTE`/`_TOKENS_PER_MINUTE` — both are
+  baked into `providers.Singleton`-wired objects (`RecursiveDocumentSplitter`,
+  `EmbeddingManager`/`GoogleEmbeddingProvider`) constructed once at container/process startup, so
+  changing them on the Platform Settings page would silently do nothing until a restart — the same
+  trap already documented and fixed for the first 8 settings, not worth reintroducing. The two that
+  did move were confirmed read fresh per call (`PromptBuilder._dedup_and_budget`,
+  `HybridRetriever._reciprocal_rank_fusion`), not captured at construction, so both classes'
+  constructors now take `platform_settings: PlatformSettingsService` (threaded through
+  `RetrieverFactory.create` and the `rag`/`graph` DI containers) instead of reading
+  `packages.config.loader.settings` directly. `PromptBuilder.build`/`_dedup_and_budget` and
+  `HybridRetriever.retrieve` became `async` as part of this (both already only had async callers).
+- **"Seed the database on first run", scoped deliberately**: the user's ask was interpreted two
+  ways, and the wrong one would have been a real regression — so this was checked with the user
+  before building it. `PlatformSettingsService` already treats "no row" as "use the current
+  built-in default" (a row only exists once an admin overrides something); pre-inserting a row per
+  `SettingSpec` at first boot would permanently freeze that installation's values at whatever the
+  defaults were on day one — a future release raising a default (e.g. a rate limit) would silently
+  never reach any install that had already booted once, since a row would now "shadow" it. Decided
+  against seeding `platform_settings` itself for exactly this reason. What *did* get seeded:
+  `packages/api/lifespan.py` now eagerly calls the existing `ensure_default_model_profile`
+  (`packages/conversation/bootstrap.py`, already idempotent/get-or-create) once at startup, so the
+  default `ModelProfile` exists immediately instead of waiting for the first chat/search/document
+  request to lazily create it. `ensure_default_agent`/`ensure_default_conversation`/
+  `ensure_default_knowledge_base` were **not** also made eager — all three require a `tenant_id`,
+  and this app has no local `Tenant` table to enumerate at startup (tenants are owned by the
+  external IAM system, docs/PROVENANCE.md); they stay lazy, created on each tenant's first real use.
+  Verified live: restarted the API container, confirmed `"Default model profile ready."` in the
+  startup log with no error, confirmed `rag_context_token_budget`/`retrieval_keyword_weight` both
+  resolve through `PlatformSettingsService.get()` to their defaults, and confirmed `PromptBuilder`
+  builds a real prompt end-to-end through the new DI wiring.
 
 ---
 

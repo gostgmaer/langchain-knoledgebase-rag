@@ -49,7 +49,7 @@ class LLMNode:
         state: GraphState,
     ) -> GraphState:
 
-        prompt = self._builder.build(
+        prompt = await self._builder.build(
             system_prompt=state["system_prompt"],
             memories=state["memories"],
             context=state["context"],

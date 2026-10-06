@@ -123,6 +123,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         services=services,
         repositories=repositories,
         upload=upload,
+        platform_settings=platform_settings,
     )
 
     # Declared after `rag` — the knowledge-base/document-search tools need
@@ -157,6 +158,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         memory=memory,
         services=services,
         repositories=repositories,
+        platform_settings=platform_settings,
     )
 
     #
