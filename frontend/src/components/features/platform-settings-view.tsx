@@ -26,7 +26,7 @@ export function PlatformSettingsView() {
     <div>
       <PageHeader
         title="Platform settings"
-        description="Operational knobs, platform-wide — not per-tenant. A field left at its default (shown as the placeholder/hint) stays on the .env value. Changes apply within about 30 seconds, no restart needed."
+        description="Operational knobs, platform-wide — not per-tenant. A field left at its default (shown as the placeholder/hint) stays on the built-in value. Changes apply within about 30 seconds, no restart needed."
       />
       {isError ? (
         <QueryError error={error} onRetry={() => void refetch()} />
@@ -103,7 +103,7 @@ function SettingField({
         <div className="flex items-center gap-2">
           {!isDefault && <Badge variant="outline">overridden</Badge>}
           {!isDefault && (
-            <Button type="button" variant="ghost" size="icon" title="Reset to .env default" onClick={() => onChange(null)}>
+            <Button type="button" variant="ghost" size="icon" title="Reset to the built-in default" onClick={() => onChange(null)}>
               <RotateCcw className="h-3.5 w-3.5" />
             </Button>
           )}
@@ -117,7 +117,7 @@ function SettingField({
           min={item.minimum ?? undefined}
           max={item.maximum ?? undefined}
           value={isDefault ? "" : String(value)}
-          placeholder={`${item.env_default} (.env default)`}
+          placeholder={`${item.default} (default)`}
           onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
           aria-label={item.label}
         />
@@ -125,9 +125,9 @@ function SettingField({
 
       {item.kind === "bool" && (
         <div className="flex items-center gap-2">
-          {isDefault && <Badge variant="outline">default ({String(item.env_default)})</Badge>}
+          {isDefault && <Badge variant="outline">default ({String(item.default)})</Badge>}
           <Switch
-            checked={isDefault ? Boolean(item.env_default) : Boolean(value)}
+            checked={isDefault ? Boolean(item.default) : Boolean(value)}
             onCheckedChange={(next) => onChange(next)}
             aria-label={item.label}
           />
@@ -137,7 +137,7 @@ function SettingField({
       {item.kind === "string_list" && (
         <StringListField
           value={isDefault ? null : (value as string[] | null)}
-          envDefault={item.env_default as string[]}
+          defaultValue={item.default as string[]}
           onChange={onChange}
         />
       )}
@@ -147,21 +147,21 @@ function SettingField({
 
 function StringListField({
   value,
-  envDefault,
+  defaultValue,
   onChange,
 }: {
   value: string[] | null;
-  envDefault: string[];
+  defaultValue: string[];
   onChange: (value: string[]) => void;
 }) {
   const [draftEntry, setDraftEntry] = useState("");
-  const items = value ?? envDefault;
+  const items = value ?? defaultValue;
   const usingDefault = value === null;
 
   function add() {
     const entry = draftEntry.trim();
     if (!entry) return;
-    const base = usingDefault ? envDefault : items;
+    const base = usingDefault ? defaultValue : items;
     if (!base.includes(entry)) onChange([...base, entry]);
     setDraftEntry("");
   }

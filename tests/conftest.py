@@ -84,7 +84,7 @@ class _InMemoryPlatformSettingsService:
     async def get(self, key: str):
         if key in self._overrides:
             return self._overrides[key]
-        return self._specs[key].env_default()
+        return self._specs[key].default
 
     async def set(self, key: str, value, *, updated_by=None) -> None:
         if value is None:

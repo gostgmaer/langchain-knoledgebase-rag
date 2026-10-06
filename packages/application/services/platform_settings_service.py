@@ -9,7 +9,6 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from packages.config.loader import settings
 from packages.infrastructure.repositories.platform_setting import PlatformSettingRepository
 
 _CACHE_TTL_SECONDS = 30.0
@@ -17,13 +16,22 @@ _CACHE_TTL_SECONDS = 30.0
 
 @dataclass(frozen=True, slots=True)
 class SettingSpec:
-    """One known operational knob: its type, validation range, and `.env` fallback."""
+    """
+    One known operational knob: its type, validation range, and built-in default.
+
+    `default` is a plain value, not read from `packages.config.*` — these 8 keys used to be
+    `.env`-configurable fields on `AppSettings`/`APISettings`/`RAGSettings`, but docs/BUGS.md item
+    38's own follow-up removed that path entirely (not just added the database as an alternative):
+    the database is now the *only* way to override one of these, so the fallback can't be sourced
+    from an env-bindable field either — any field on a `pydantic_settings.BaseSettings` subclass
+    is inherently settable via its env var by that class's own machinery, defeating the point.
+    """
 
     key: str
     label: str
     kind: str
     """int | bool | string_list"""
-    env_default: Callable[[], Any]
+    default: Any
     minimum: float | None = None
     maximum: float | None = None
     help: str | None = None
@@ -47,55 +55,64 @@ class SettingSpec:
 
 
 # The operational knobs admins can change without a redeploy (docs/BUGS.md item 38) — rate
-# limits, CORS origins, retention windows and the like. Deliberately NOT here: secrets (API keys,
-# JWT_SECRET, DB/Redis URLs — needed before this table is even reachable, or genuinely
-# shouldn't live in a DB column a settings UI reads back), and security-boundary fields
-# (AUTH_REQUIRED, admin_roles, tenant_override_roles) — those stay `.env`-only on purpose; see
-# docs/BUGS.md item 38's own writeup for the reasoning.
+# limits, CORS origins, retention windows and the like. These used to double as `.env` fields
+# too (a database override, env var as fallback); a follow-up removed that path, so the database
+# is now the only way to change one of these — the literal below is the sole built-in default.
+# Deliberately NOT here: secrets (API keys, JWT_SECRET, DB/Redis URLs — needed before this table
+# is even reachable, or genuinely shouldn't live in a DB column a settings UI reads back), and
+# security-boundary fields (AUTH_REQUIRED, admin_roles, tenant_override_roles) — those stay
+# `.env`-only on purpose; see docs/BUGS.md item 38's own writeup for the reasoning.
 SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         "rate_limit_requests_per_minute", "General rate limit (requests/min)", "int",
-        lambda: settings.api.rate_limit_requests_per_minute, minimum=0,
+        300, minimum=0,
         help="Per-tenant (or per-IP) cap across all routes. 0 disables it.",
     ),
     SettingSpec(
         "rate_limit_expensive_requests_per_minute", "Expensive-route rate limit (requests/min)", "int",
-        lambda: settings.api.rate_limit_expensive_requests_per_minute, minimum=0,
+        60, minimum=0,
         help="Tighter cap layered on top of the general one, for /chat, /search and document uploads. 0 disables just this tighter cap.",
     ),
     SettingSpec(
         "cors_origins", "Allowed browser origins (admin app)", "string_list",
-        lambda: list(settings.api.cors_origins),
+        ["http://localhost:3000", "http://127.0.0.1:3000"],
         help="Origins allowed to call this API directly from a browser (the admin frontend's own origin). Not the embeddable widget — that's per-agent, configured on the Agents page.",
     ),
     SettingSpec(
         "session_expiry_days", "Conversation session expiry (days)", "int",
-        lambda: settings.app.session_expiry_days, minimum=1,
+        30, minimum=1,
         help="An ACTIVE conversation with no activity for this long is swept as expired.",
     ),
     SettingSpec(
         "retention_retrieval_log_days", "Retrieval log retention (days)", "int",
-        lambda: settings.rag.retention_retrieval_log_days, minimum=0,
+        90, minimum=0,
         help="Retrieval logs older than this are purged. 0 keeps them forever.",
     ),
     SettingSpec(
         "retention_audit_days", "Audit trail retention (days)", "int",
-        lambda: settings.rag.retention_audit_days, minimum=0,
+        365, minimum=0,
         help="Audit events older than this are purged. 0 keeps them forever.",
     ),
     SettingSpec(
         "reindex_stale_after_days", "Re-index documents after (days)", "int",
-        lambda: settings.rag.reindex_stale_after_days, minimum=1,
+        90, minimum=1,
         help="A document not re-embedded in this many days becomes a candidate for the weekly re-index sweep.",
     ),
     SettingSpec(
         "connector_sync_concurrency", "Knowledge source sync concurrency", "int",
-        lambda: settings.rag.connector_sync_concurrency, minimum=1, maximum=16,
+        4, minimum=1, maximum=16,
         help="How many documents a single source sync processes in flight at once.",
     ),
 )
 
 _SPEC_BY_KEY: dict[str, SettingSpec] = {spec.key: spec for spec in SETTINGS}
+
+
+def default_value(key: str) -> Any:
+    """A known setting's built-in default, for the rare caller with no container to read
+    `PlatformSettingsService` from at all (packages/application/services/retention_service.py's
+    `purge_expired`, when nothing passes it an explicit value — e.g. a test)."""
+    return _SPEC_BY_KEY[key].default
 
 
 class PlatformSettingsService:
@@ -123,7 +140,10 @@ class PlatformSettingsService:
             repo = PlatformSettingRepository(session)
             row = await repo.get_by_key(key)
 
-        value = row.value if row is not None else spec.env_default()
+        # A copy for a list default (cors_origins): SettingSpec is frozen, but that doesn't deep-
+        # freeze a contained list — returning the registry's own list would let a caller's in-place
+        # mutation corrupt the built-in default for every future read, for the rest of the process.
+        value = row.value if row is not None else (list(spec.default) if isinstance(spec.default, list) else spec.default)
         self._cache[key] = (value, time.monotonic())
         return value
 
@@ -135,7 +155,7 @@ class PlatformSettingsService:
         return {spec.key: await self.get(spec.key) for spec in SETTINGS}
 
     async def set(self, key: str, value: Any, *, updated_by: UUID | None) -> None:
-        """`value=None` reverts the key to its `.env` default (deletes the override row)."""
+        """`value=None` reverts the key to its built-in default (deletes the override row)."""
         from packages.domain.models.platform_setting import PlatformSetting
 
         async with self._session_factory() as session:

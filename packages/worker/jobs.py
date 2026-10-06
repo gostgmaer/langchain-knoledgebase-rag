@@ -197,8 +197,8 @@ async def purge_expired_logs_job(ctx: dict[str, Any]) -> dict[str, int]:
 async def reindex_stale_documents_job(ctx: dict[str, Any]) -> dict[str, int]:
     """
     Weekly sweep re-embedding documents not touched in
-    the platform's reindex_stale_after_days setting (docs/BUGS.md item 38;
-    env default settings.rag.reindex_stale_after_days) — Scheduled Re-indexing
+    the platform's reindex_stale_after_days setting (docs/BUGS.md item 38 —
+    admin-configurable, not an env var) — Scheduled Re-indexing
     (docs/mvpRAG.md v1.1), picking up embedding model changes or
     quality improvements without waiting for a manual re-upload. Each
     document is caught and logged independently so one bad document
@@ -312,8 +312,8 @@ async def cleanup_orphaned_chunks_job(ctx: dict[str, Any]) -> dict[str, int]:
 
 async def expire_stale_conversations_job(ctx: dict[str, Any]) -> dict[str, int]:
     """
-    Archives ACTIVE conversations with no activity for
-    `settings.app.session_expiry_days`, and frees their LangGraph
+    Archives ACTIVE conversations with no activity for the platform's session_expiry_days
+    setting (docs/BUGS.md item 38 — admin-configurable, not an env var), and frees their LangGraph
     checkpoint data. The worker's own `ApplicationContainer` does not
     have the real Postgres checkpointer wired the way
     packages/api/lifespan.py wires it for the API process — this opens

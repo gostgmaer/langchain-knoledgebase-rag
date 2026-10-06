@@ -32,7 +32,6 @@ async def _response(service: PlatformSettingsService) -> PlatformSettingsRespons
     items = []
     for spec in SETTINGS:
         value = await service.get(spec.key)
-        env_default = spec.env_default()
         items.append(
             PlatformSettingItemSchema(
                 key=spec.key,
@@ -42,8 +41,8 @@ async def _response(service: PlatformSettingsService) -> PlatformSettingsRespons
                 minimum=spec.minimum,
                 maximum=spec.maximum,
                 value=value,
-                env_default=env_default,
-                is_overridden=value != env_default,
+                default=spec.default,
+                is_overridden=value != spec.default,
             )
         )
     return PlatformSettingsResponseSchema(settings=items)
@@ -56,8 +55,9 @@ async def _response(service: PlatformSettingsService) -> PlatformSettingsRespons
     summary="Platform operational settings",
     description=(
         "Every operational knob an admin can change without a redeploy — rate limits, CORS "
-        "origins, retention windows — each with its current effective value, the `.env` default, "
-        "and whether it's currently overridden. Secrets and security-boundary settings (API keys, "
+        "origins, retention windows — each with its current effective value, its built-in "
+        "default, and whether it's currently overridden. These are database-only settings, not "
+        "env vars (docs/BUGS.md item 38). Secrets and security-boundary settings (API keys, "
         "AUTH_REQUIRED, admin roles) are never listed here; they stay `.env`-only."
     ),
 )
@@ -76,8 +76,8 @@ async def get_platform_settings(
     summary="Change one or more platform settings",
     description=(
         "Partial update, keyed by setting key. A key mapped to `null` reverts that setting to its "
-        "`.env` default. Takes effect within about 30 seconds (the service's in-process cache TTL) "
-        "and is audited."
+        "built-in default. Takes effect within about 30 seconds (the service's in-process cache "
+        "TTL) and is audited."
     ),
 )
 async def update_platform_settings(

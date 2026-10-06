@@ -983,10 +983,22 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
 `packages/config/features.py`'s 10 `enable_*` booleans that turned out to have a real consumer.
 - **New `PlatformSetting` model/service** (`packages/application/services/platform_settings_service.py`):
   one JSONB-valued table, keyed by setting name, same in-process ~30s TTL cache as the existing
-  `FeatureFlagService` (no row = `.env` default; a row is an admin's override). A typed `SETTINGS`
-  registry (key, label, kind, min/max, help, `.env` fallback) drives both the API's validation and
-  the frontend's generic form — adding a new settable knob later is one registry entry, not a
-  migration.
+  `FeatureFlagService` (no row = built-in default; a row is an admin's override). A typed
+  `SETTINGS` registry (key, label, kind, min/max, help, built-in default) drives both the API's
+  validation and the frontend's generic form — adding a new settable knob later is one registry
+  entry, not a migration.
+- **Follow-up, same session**: the 8 moved settings' original design still kept them as real
+  `.env`-bindable fields on `AppSettings`/`APISettings`/`RAGSettings` too (database override, env
+  var as fallback) — the user explicitly asked for the env vars themselves to go, not just an
+  alternative. Any field on a `pydantic_settings.BaseSettings` subclass is inherently settable via
+  its own env var by that class's machinery, so "remove the env var" meant removing the field
+  entirely, not just dropping its `alias=`. Did that for all 8 (`packages/config/api.py`, `app.py`,
+  `rag.py`), moved each one's built-in default to a plain literal directly in the `SETTINGS`
+  registry (the new single source of truth), and updated `.env`/`.env.example`/the docs that
+  described them. The one real consumption-site fallout: `retention_service.py`'s `purge_expired`
+  had a `settings.rag.retention_*` fallback for callers with no container (tests) — added a small
+  `default_value(key)` accessor to `platform_settings_service.py` so that fallback has a home that
+  doesn't require re-adding the removed fields.
 - **Real bug found wiring it up**: every consumer (`RateLimitMiddleware`, the global CORS
   middleware, retention/reindex/session-expiry jobs, connector sync) previously read its value
   *once*, at process/middleware-construction time — meaning even the existing `.env` values already

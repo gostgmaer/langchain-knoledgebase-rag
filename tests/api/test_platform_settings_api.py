@@ -15,7 +15,7 @@ pytestmark = pytest.mark.api
 
 
 @pytest.mark.asyncio
-async def test_list_returns_every_known_setting_with_its_env_default(client):
+async def test_list_returns_every_known_setting_with_its_built_in_default(client):
     response = await client.get("/api/v1/platform-settings")
     assert response.status_code == 200
     settings = {s["key"]: s for s in response.json()["data"]["settings"]}
@@ -24,7 +24,7 @@ async def test_list_returns_every_known_setting_with_its_env_default(client):
     assert "cors_origins" in settings
     row = settings["rate_limit_requests_per_minute"]
     assert row["is_overridden"] is False
-    assert row["value"] == row["env_default"]
+    assert row["value"] == row["default"]
     assert row["kind"] == "int"
 
     origins = settings["cors_origins"]
@@ -49,13 +49,13 @@ async def test_patch_overrides_a_setting_and_marks_it_overridden(client):
 
 
 @pytest.mark.asyncio
-async def test_patch_null_reverts_to_the_env_default(client):
+async def test_patch_null_reverts_to_the_built_in_default(client):
     await client.patch("/api/v1/platform-settings", json={"values": {"session_expiry_days": 99}})
     reverted = await client.patch("/api/v1/platform-settings", json={"values": {"session_expiry_days": None}})
     assert reverted.status_code == 200
     row = next(s for s in reverted.json()["data"]["settings"] if s["key"] == "session_expiry_days")
     assert row["is_overridden"] is False
-    assert row["value"] == row["env_default"]
+    assert row["value"] == row["default"]
 
 
 @pytest.mark.asyncio

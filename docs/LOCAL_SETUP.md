@@ -158,7 +158,8 @@ EMBEDDING_MODEL=<embedding model id>
 EMBEDDING_DIMENSIONS=1536
 
 # --- recommended for local ---
-CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+# CORS_ORIGINS is no longer set here — it's admin-configurable from the Platform Settings page
+# (docs/BUGS.md item 38); built-in default already covers localhost:3000/127.0.0.1:3000.
 LANGCHAIN_TRACING_V2=false      # unless you have a real LangSmith key
 LOG_JSON=true
 ```

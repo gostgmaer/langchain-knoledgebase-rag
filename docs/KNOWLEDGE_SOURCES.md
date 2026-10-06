@@ -96,7 +96,8 @@ retrieval -> answer`. Every chunk's metadata carries `source_id`, `source_type`,
   consecutive failures it is quarantined until the item changes or an administrator presses Retry.
 * **Incremental change feeds** (`get_changes`, used by SharePoint/OneDrive delta): only the change set is processed; the
   delta cursor advances only when everything succeeded.
-* **Bounded work**: `CONNECTOR_SYNC_CONCURRENCY` documents at a time, each in its own transaction; progress is flushed to
+* **Bounded work**: `connector_sync_concurrency` (Platform Settings page, not an env var — docs/BUGS.md item 38) documents
+  at a time, each in its own transaction; progress is flushed to
   the run every 10 documents; a sync can be cancelled between documents.
 * **One sync per source at a time** (409 otherwise). A run that stops reporting for 20 minutes is failed by the reaper.
 
@@ -234,5 +235,5 @@ tables and columns at startup (or `alembic upgrade head`). Running the API as a 
   `tests/integration/test_source_sync.py` (`LOAD_ITEMS=5000`) against a real Postgres: ~105 docs/sec on the first sync,
   ~342 docs/sec on an unchanged repeat sync (sync-engine bookkeeping and change-detection only — this does not exercise
   real embedding generation, which is architecturally independent of connector/sync logic and has its own throughput
-  characteristics). Concurrency limits are per sync (`CONNECTOR_SYNC_CONCURRENCY`) and per worker (arq `max_jobs`); there
+  characteristics). Concurrency limits are per sync (`connector_sync_concurrency`, Platform Settings page) and per worker (arq `max_jobs`); there
   is no global per-tenant cap across sources, and the per-document record lookup is one query each.

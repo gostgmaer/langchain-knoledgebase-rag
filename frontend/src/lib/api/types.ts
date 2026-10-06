@@ -877,7 +877,7 @@ export interface PlatformSettingItem {
   minimum: number | null;
   maximum: number | null;
   value: number | boolean | string[];
-  env_default: number | boolean | string[];
+  default: number | boolean | string[];
   is_overridden: boolean;
 }
 

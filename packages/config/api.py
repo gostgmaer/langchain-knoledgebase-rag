@@ -21,20 +21,10 @@ class APISettings(BaseSettings):
 
     api_prefix: str = "/api/v1"
 
-    # The frontend/ Next.js app runs on a different origin (port) in
-    # dev, so browser fetches need real CORS headers — see
-    # packages/api/middleware/__init__.py. Comma-separated in .env.
-    cors_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"],
-        alias="CORS_ORIGINS",
-    )
-
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def _split_origins(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
-        return value
+    # cors_origins moved to the database (docs/BUGS.md item 38) — it's an admin-configurable
+    # Platform Setting now, not an env var; see packages/application/services/
+    # platform_settings_service.py's SETTINGS registry for its built-in default and
+    # packages/api/middleware/cors.py's DynamicCORSMiddleware for how it's read per request.
 
     # Real IAM enforcement. Off (default): the legacy fail-open behaviour -
     # anonymous callers get the default tenant, a rejected token is ignored.
@@ -75,23 +65,7 @@ class APISettings(BaseSettings):
     # registration email verification for anything internet-facing.
     require_verified_email: bool = Field(default=False, alias="REQUIRE_VERIFIED_EMAIL")
 
-    # Production hardening's own "Rate limiting" gap — see
-    # packages/api/middleware/rate_limit.py. Per-tenant (or per-IP
-    # fallback) sliding window, requests per 60s. Default is generous
-    # enough not to trip over normal dev/browser polling traffic (job
-    # status polling, etc.) while still enforcing a real cap; 0 disables
-    # it entirely.
-    rate_limit_requests_per_minute: int = Field(
-        default=300, alias="RATE_LIMIT_REQUESTS_PER_MINUTE"
-    )
-
-    # A tighter limit layered on top of the general one above, for routes
-    # that trigger a real LLM call or a file write (docs/BUGS.md item 12:
-    # the general limit alone doesn't distinguish a health check from
-    # POST /chat). Applies to /chat, /search, and POST /documents — see
-    # packages/api/middleware/rate_limit.py's EXPENSIVE_PREFIXES. Must not
-    # exceed the general limit; 0 disables this tighter cap specifically
-    # (the general limit above still applies).
-    rate_limit_expensive_requests_per_minute: int = Field(
-        default=60, alias="RATE_LIMIT_EXPENSIVE_REQUESTS_PER_MINUTE"
-    )
+    # rate_limit_requests_per_minute / rate_limit_expensive_requests_per_minute also moved to the
+    # database (docs/BUGS.md item 38) — see packages/api/middleware/rate_limit.py (now reads
+    # through PlatformSettingsService on every request) and platform_settings_service.py's
+    # SETTINGS registry for their built-in defaults.

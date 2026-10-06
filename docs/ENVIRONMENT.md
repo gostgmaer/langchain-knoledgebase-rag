@@ -63,7 +63,7 @@ If one of these is out of sync, the symptom is listed. This is the most common c
 | Value | Set in | Must equal | Symptom if wrong |
 |---|---|---|---|
 | Gateway public origin (`http://localhost:3301` locally) | IAM `CORS_ORIGINS`, provider OAuth redirect URIs, frontend `AUTH_GATEWAY_PUBLIC_URL` | each other | Social login fails with `Untrusted base URL override` or `redirect_uri_mismatch` |
-| Frontend origin (`http://localhost:3000`) | IAM `FRONTEND_URL` + `CORS_ORIGINS`, gateway `FRONTEND_URL` + `CORS_ORIGINS`, RAG `CORS_ORIGINS` | each other | Blocked by CORS, or the post-login redirect goes to the wrong place |
+| Frontend origin (`http://localhost:3000`) | IAM `FRONTEND_URL` + `CORS_ORIGINS`, gateway `FRONTEND_URL` + `CORS_ORIGINS`, RAG's `cors_origins` Platform Setting (no longer an env var — docs/BUGS.md item 38) | each other | Blocked by CORS, or the post-login redirect goes to the wrong place |
 | `IAM_INTROSPECTION_API_KEY` | IAM, RAG (`IAM_INTROSPECTION_API_KEY`) | same string | Only matters for IAM's session-introspection endpoint; normal request auth uses `/auth/me` and does not need it |
 | RAG `IAM_BASE_URL` | RAG | the **gateway** base (`http://host.docker.internal:3301` in Docker) | Every request 401 or 503 with `AUTH_REQUIRED=true` ("Could not reach the IAM service") |
 | `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` | IAM only signs; public key copied to every verifier | the pair | All tokens rejected after a key change |
@@ -92,9 +92,9 @@ Loaded by `docker compose` (`env_file: .env`) and by the local venv. Inside Dock
 | `DEBUG` | `false` | Verbose error behaviour. Never `true` in production. |
 | `HOST` | `0.0.0.0` | Interface uvicorn binds to inside the container. |
 | `PORT` | `8000` | Container port. Compose publishes it as host port 8088. |
-| `CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated browser origins allowed to call the API. Add every frontend origin. |
-| `RATE_LIMIT_REQUESTS_PER_MINUTE` | `300` | Sliding-window request cap per tenant (per IP if no tenant). `0` disables it. |
-| `SESSION_EXPIRY_DAYS` | `30` | An ACTIVE conversation with no activity for this long is swept as expired by the cleanup job. |
+| ~~`CORS_ORIGINS`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38) — admin-configurable from the Platform Settings page. Built-in default: `http://localhost:3000,http://127.0.0.1:3000`. |
+| ~~`RATE_LIMIT_REQUESTS_PER_MINUTE`~~ / ~~`RATE_LIMIT_EXPENSIVE_REQUESTS_PER_MINUTE`~~ | moved to DB | **No longer env vars** — same Platform Settings page. Built-in defaults: `300` / `60`. |
+| ~~`SESSION_EXPIRY_DAYS`~~ | moved to DB | **No longer an env var** — same Platform Settings page. Built-in default: `30`. |
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR`. |
 | `LOG_JSON` | `false` (`true` in `.env.example`) | Emit structured JSON logs. Each line carries `request_id`, and `trace_id` when tracing is on. |
 
@@ -142,7 +142,7 @@ The API verifies each request by sending the caller's bearer token to IAM (`GET 
 | `RAG_MAX_RESULTS` | `5` | Chunks passed to the answer step after reranking. |
 | `RAG_CONTEXT_TOKEN_BUDGET` | `4000` | Max tokens of retrieved context sent to the LLM. |
 | `RAG_MIN_RELEVANCE_SCORE` | `0.0` | Cutoff on the reranker's raw score (can be negative). The top chunk is always kept so answers are never left without a citation; lower-ranked chunks below the cutoff are dropped. |
-| `REINDEX_STALE_AFTER_DAYS` | `90` | The weekly job re-embeds current documents not indexed in this many days. |
+| ~~`REINDEX_STALE_AFTER_DAYS`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38) — admin-configurable from the Platform Settings page. Built-in default: `90`. Retention windows (`RETENTION_RETRIEVAL_LOG_DAYS` / `RETENTION_AUDIT_DAYS`, built-in defaults `90` / `365`) moved the same way. |
 
 ### 3.4a Knowledge sources (external connectors)
 
@@ -150,7 +150,7 @@ The API verifies each request by sending the caller's bearer token to IAM (`GET 
 |---|---|---|
 | `CONNECTOR_CREDENTIAL_KEYS` | unset | **Required to store any credential.** Fernet key(s), comma separated; the first encrypts, every key decrypts. Generate one: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Rotate by putting a new key first, then re-saving or rotating credentials, then removing the old key. Losing every key makes stored credentials unreadable (they must be re-entered). Never commit it. |
 | `CONNECTOR_ALLOW_PRIVATE_HOSTS` | `false` | Lets connectors call private-network addresses (an intranet Confluence, a docs site on your network). **Off by default: it is the guard against a source URL reaching the platform's own network or cloud metadata (SSRF).** Turn on only if your sources genuinely live on a private network. |
-| `CONNECTOR_SYNC_CONCURRENCY` | `4` | Documents processed in parallel within one sync (1-16). Each runs in its own transaction. |
+| ~~`CONNECTOR_SYNC_CONCURRENCY`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38) — admin-configurable from the Platform Settings page. Built-in default: `4` (range 1-16). |
 | `CONNECTOR_MAX_ERROR_DETAILS` | `100` | Failed documents listed in a sync run's error detail (counts are always exact). |
 | `CONNECTOR_RENDER_URL` | unset | Base URL of a headless-rendering service (Browserless-compatible `/content` endpoint) used when a web source has "Render JavaScript" turned on. Unset means that option is rejected at save time. See `docs/KNOWLEDGE_SOURCES.md`, "JavaScript-rendered pages". |
 | `CONNECTOR_RENDER_TOKEN` | unset | Bearer token sent to `CONNECTOR_RENDER_URL`, if the rendering service requires one. |

@@ -17,6 +17,6 @@ class AppSettings(BaseSettings):
     environment: str = Field(default="development", alias="APP_ENV")
     debug: bool = Field(default=False, alias="DEBUG")
 
-    # Cleanup Jobs completion (docs/mvpRAG.md v1.1) — an ACTIVE
-    # conversation with no activity for this long is swept as expired.
-    session_expiry_days: int = Field(default=30, alias="SESSION_EXPIRY_DAYS")
+    # session_expiry_days moved to the database (docs/BUGS.md item 38) — an admin-configurable
+    # Platform Setting now, not an env var; see platform_settings_service.py's SETTINGS registry
+    # for its built-in default and packages/worker/jobs.py for how it's read per sweep.

@@ -61,7 +61,7 @@ async def test_platform_settings_override_takes_effect_without_a_restart(client)
     default_now_rejected = await client.get("/api/v1/health", headers={"Origin": DEFAULT_ORIGIN})
     assert "access-control-allow-origin" not in default_now_rejected.headers
 
-    # Reverting restores the .env default.
+    # Reverting restores the built-in default.
     reverted = await client.patch("/api/v1/platform-settings", json={"values": {"cors_origins": None}})
     assert reverted.status_code == 200
     restored = await client.get("/api/v1/health", headers={"Origin": DEFAULT_ORIGIN})

@@ -272,9 +272,9 @@ class SyncEngine:
             snapshot.targets = None  # the connector cannot fetch single items: do a normal sync instead
 
         changes = await connector.get_changes(context) if connector.supports_changes and state else None
-        # docs/BUGS.md item 38: read through PlatformSettingsService (cached ~30s), not the
-        # static settings.rag.connector_sync_concurrency — an admin's change on the Platform
-        # Settings page applies to the next sync without a restart.
+        # docs/BUGS.md item 38: connector_sync_concurrency is admin-configurable, not an env var —
+        # read through PlatformSettingsService (cached ~30s) so a change on the Platform Settings
+        # page applies to the next sync without a restart.
         concurrency = await self._container.platform_settings.service().get("connector_sync_concurrency")
         semaphore = asyncio.Semaphore(concurrency)
         pending: set[asyncio.Task] = set()
