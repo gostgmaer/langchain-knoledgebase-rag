@@ -15,7 +15,6 @@ _PLANNED_DISPLAY = {
     "notion": "Notion",
     "github": "GitHub",
     "gitlab": "GitLab",
-    "slack": "Slack",
     "dropbox": "Dropbox",
     "box": "Box",
     "jira": "Jira",

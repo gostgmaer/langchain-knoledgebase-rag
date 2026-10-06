@@ -53,9 +53,9 @@ def test_a_wrong_key_is_a_clear_error_not_garbage():
 def test_every_builtin_connector_is_registered_and_describes_its_settings_for_the_ui():
     registry = default_registry()
     infos = {i.type: i for i in registry.infos()}
-    for available in ("web", "wikipedia", "confluence", "microsoft_teams", "sharepoint", "onedrive"):
+    for available in ("web", "wikipedia", "confluence", "microsoft_teams", "sharepoint", "onedrive", "slack"):
         assert infos[available].available and infos[available].config_schema
-    for planned in ("google_drive", "notion", "github", "slack", "s3"):
+    for planned in ("google_drive", "notion", "github", "s3"):
         assert not infos[planned].available  # named, extensible, not built
     assert "upload" not in infos  # uploads are not a connector
 

@@ -864,6 +864,50 @@ actions is what a security review asks for first.
   failures existed before this change, confirmed via `gh pr checks` on PR #5 earlier in this
   session) — no regressions.
 
+### 36. ✅ New feature — Slack as a real knowledge source connector (was a named-but-unbuilt stub)
+
+`"slack"` was already a recognized source type (`packages/connectors/models.py`'s `SOURCE_TYPES`,
+`registry.py`'s `_PLANNED_DISPLAY`) with no actual connector behind it — the Add Source wizard
+showed it greyed out as "Coming soon." Built a real one, `packages/connectors/sources/slack.py`,
+following the same contract every other connector here does (`BaseKnowledgeConnector`: discover,
+fetch, test_connection, get_permissions) and registered it in
+`packages/connectors/sources/__init__.py`. Nothing else changed — the Add Source wizard, credential
+form, and config form are all generic, driven entirely by the connector's own `config_schema` /
+`credential_kind`, exactly as `base.py`'s own docstring promises.
+- **Design**: one document per thread (root message + replies), same shape as the Teams connector.
+  Slack's Web API answers almost everything with HTTP 200 and `{"ok": false, "error": "..."}` on
+  failure rather than a 4xx status, so auth/permission failures are read from the response body,
+  not the status code, and mapped to `AuthenticationFailed` only for the auth-shaped error codes
+  (`invalid_auth`, `token_revoked`, ...) — every other `ok: false` is a plain `ConnectorHttpError`.
+  Slack "mrkdwn" (`<@U123>` mentions, `<#C123|name>` channel refs, `<url|label>` links, HTML
+  entities) is rendered to real markdown with real names, not left as raw Slack syntax. Private
+  channels become permission grants from `conversations.members`; public channels fall back to
+  the source's default visibility, matching Confluence/Teams' documented convention for a case the
+  external API can't fully enumerate.
+- **A real bug found and fixed while writing tests, not just a gap**: the channel discovery method
+  only excluded private channels through the `types` parameter sent to Slack's own API — no check
+  in this codebase's own logic. Correct behavior for the real API, but it meant a mocked or
+  misbehaving response could leak a private channel through even with
+  `include_private_channels: false`. Added an explicit `channel.get("is_private")` check as
+  defense in depth, the same belt-and-suspenders approach Teams already uses for its own
+  `membership == "private"` check — never rely solely on an external system to enforce a boolean
+  this codebase itself promises.
+- **Honesty about verification**: unlike every other connector in this codebase (Confluence, Teams,
+  SharePoint — apparently verified against real tenants earlier in this project), this one could
+  only be verified against a mocked Slack API, not a real workspace, since no Slack credentials
+  exist in this environment. 13 new unit tests (`tests/unit/connectors/test_slack_connector.py`)
+  cover connection success/failure, the private-channel defense-in-depth fix, channel
+  allow/exclude lists, thread+reply merging into one document, mrkdwn rendering, file attachments,
+  permission mapping, and credential validation — all passing — but none of that substitutes for a
+  real workspace. Flagged to the user before starting; they chose to build it now and verify later
+  against a real app/workspace rather than wait.
+- **Verified live (the part that doesn't need Slack)**: restarted the API container, confirmed
+  `default_registry().is_available("slack")` is `True` with the right `config_schema`, then loaded
+  the real running Add Source wizard and confirmed the Slack card switched from greyed-out
+  "Coming soon" to selectable with its real description, and that its Connect step renders a real
+  "Bot User OAuth Token*" field with the connector's own setup instructions — all driven generically
+  off the backend's `ConnectorInfo`, no frontend code touched. Full unit suite: 361 passed.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

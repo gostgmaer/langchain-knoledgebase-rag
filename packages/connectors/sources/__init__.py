@@ -8,6 +8,7 @@ from packages.connectors.registry import ConnectorRegistry
 def register_builtin_connectors(registry: ConnectorRegistry) -> None:
     from packages.connectors.sources.confluence import ConfluenceConnector
     from packages.connectors.sources.sharepoint import OneDriveConnector, SharePointConnector
+    from packages.connectors.sources.slack import SlackConnector
     from packages.connectors.sources.teams import TeamsConnector
     from packages.connectors.sources.web import WebConnector
     from packages.connectors.sources.wikipedia import WikipediaConnector
@@ -19,5 +20,6 @@ def register_builtin_connectors(registry: ConnectorRegistry) -> None:
         TeamsConnector,
         SharePointConnector,
         OneDriveConnector,
+        SlackConnector,
     ):
         registry.register(connector)
