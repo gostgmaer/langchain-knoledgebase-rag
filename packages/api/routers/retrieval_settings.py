@@ -21,7 +21,6 @@ from packages.application.services.retrieval_settings_service import (
     merge,
     platform_defaults,
 )
-from packages.config.loader import settings
 from packages.infrastructure.container import ApplicationContainer
 
 router = APIRouter(
@@ -45,7 +44,7 @@ class RetrievalSettingsResponseSchema(BaseModel):
     defaults: RetrievalValuesSchema
     """The platform (environment) defaults."""
     retrieval_strategy: str
-    """Fixed platform-wide (RETRIEVAL_STRATEGY); shown for information, not editable here."""
+    """Fixed platform-wide (the `retrieval_strategy` Platform Setting); shown for information, not editable here."""
 
 
 class RetrievalSettingsUpdateSchema(BaseModel):
@@ -58,7 +57,7 @@ class RetrievalSettingsUpdateSchema(BaseModel):
     reranking_enabled: bool | None = None
 
 
-def _response(overrides: RetrievalOverrides) -> RetrievalSettingsResponseSchema:
+def _response(overrides: RetrievalOverrides, retrieval_strategy: str) -> RetrievalSettingsResponseSchema:
     def values(v) -> RetrievalValuesSchema:
         return RetrievalValuesSchema(
             max_results=v.max_results, min_relevance_score=v.min_relevance_score, reranking_enabled=v.reranking_enabled
@@ -72,7 +71,7 @@ def _response(overrides: RetrievalOverrides) -> RetrievalSettingsResponseSchema:
             "reranking_enabled": overrides.reranking_enabled,
         },
         defaults=values(platform_defaults()),
-        retrieval_strategy=settings.rag.retrieval_strategy,
+        retrieval_strategy=retrieval_strategy,
     )
 
 
@@ -88,7 +87,9 @@ async def get_retrieval_settings(
 ):
     tenant_id = require_uuid_header(request, "X-Tenant-ID", default=DEFAULT_TENANT_ID)
     service = container.graph.retrieval_settings()
-    return ApiResponse(message="Retrieval settings retrieved.", data=_response(await service.get_overrides(tenant_id)))
+    overrides = await service.get_overrides(tenant_id)
+    retrieval_strategy = await container.platform_settings.service().get("retrieval_strategy")
+    return ApiResponse(message="Retrieval settings retrieved.", data=_response(overrides, retrieval_strategy))
 
 
 @router.put(
@@ -131,4 +132,5 @@ async def update_retrieval_settings(
             detail=changed,
         )
 
-    return ApiResponse(message="Retrieval settings saved.", data=_response(after))
+    retrieval_strategy = await container.platform_settings.service().get("retrieval_strategy")
+    return ApiResponse(message="Retrieval settings saved.", data=_response(after, retrieval_strategy))

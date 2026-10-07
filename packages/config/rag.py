@@ -50,9 +50,8 @@ class RAGSettings(BaseSettings):
         "",
     ]
 
-    retrieval_strategy: str = Field(default="hybrid", alias="RETRIEVAL_STRATEGY")
-    # retrieval_keyword_weight and context_token_budget moved to Platform Settings
-    # (docs/BUGS.md item 38 follow-up) — see platform_settings_service.py's SETTINGS.
+    # retrieval_strategy, retrieval_keyword_weight and context_token_budget moved to Platform
+    # Settings (docs/BUGS.md item 38 follow-up) — see platform_settings_service.py's SETTINGS.
     max_results: int = Field(default=5, alias="RAG_MAX_RESULTS")
     min_relevance_score: float = Field(default=0.0, alias="RAG_MIN_RELEVANCE_SCORE")
 

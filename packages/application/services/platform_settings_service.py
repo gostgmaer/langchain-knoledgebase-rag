@@ -30,11 +30,13 @@ class SettingSpec:
     key: str
     label: str
     kind: str
-    """int | float | bool | string_list"""
+    """int | float | bool | string_list | string"""
     default: Any
     minimum: float | None = None
     maximum: float | None = None
     help: str | None = None
+    choices: tuple[str, ...] | None = None
+    """For kind="string": the only values accepted. None means any non-empty string."""
 
     def validate(self, value: Any) -> str | None:
         """Returns an error message, or None if `value` is valid for this setting."""
@@ -58,6 +60,11 @@ class SettingSpec:
         elif self.kind == "string_list":
             if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
                 return f"'{self.label}' must be a list of non-empty text values."
+        elif self.kind == "string":
+            if not isinstance(value, str) or not value.strip():
+                return f"'{self.label}' must be non-empty text."
+            if self.choices is not None and value not in self.choices:
+                return f"'{self.label}' must be one of: {', '.join(self.choices)}."
         return None
 
 
@@ -129,6 +136,12 @@ SETTINGS: tuple[SettingSpec, ...] = (
         "max_file_size", "Max document upload size (bytes)", "int",
         10 * 1024 * 1024, minimum=1,
         help="Uploads larger than this are rejected before reaching the Upload Service. Should match that service's own MAX_FILE_SIZE, or a doomed upload just fails later instead of failing this check first.",
+    ),
+    SettingSpec(
+        "retrieval_strategy", "Retrieval algorithm", "string",
+        "hybrid",
+        choices=("similarity", "mmr", "hybrid", "self_query", "parent_document", "multi_vector", "graph_rag"),
+        help="Which retrieval algorithm chat/search uses. hybrid (dense + keyword) is the general-purpose default; the others trade it for a specific retrieval technique (see docs/mvpRAG.md).",
     ),
 )
 

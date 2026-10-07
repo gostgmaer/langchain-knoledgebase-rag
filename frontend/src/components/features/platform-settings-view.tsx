@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { usePlatformSettings, useSavePlatformSettings } from "@/hooks/use-api";
@@ -42,7 +43,7 @@ export function PlatformSettingsView() {
   );
 }
 
-type DraftValue = number | boolean | string[] | null;
+type DraftValue = number | boolean | string | string[] | null;
 
 function SettingsForm({ data }: { data: PlatformSettingsResponse }) {
   const save = useSavePlatformSettings();
@@ -132,6 +133,29 @@ function SettingField({
           value={isDefault ? "" : String(value)}
           placeholder={`${item.default} (default)`}
           onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+          aria-label={item.label}
+        />
+      )}
+
+      {item.kind === "string" && item.choices && (
+        <Select
+          value={isDefault ? (item.default as string) : (value as string)}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={item.label}
+        >
+          {item.choices.map((choice) => (
+            <option key={choice} value={choice}>
+              {choice}
+            </option>
+          ))}
+        </Select>
+      )}
+
+      {item.kind === "string" && !item.choices && (
+        <Input
+          value={isDefault ? "" : (value as string)}
+          placeholder={`${item.default} (default)`}
+          onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
           aria-label={item.label}
         />
       )}

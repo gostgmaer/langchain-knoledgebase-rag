@@ -433,7 +433,7 @@ Embeds the query text, then delegates to whichever retriever the DI container wi
 
 ### 6.3 `HybridRetriever.retrieve()` — `packages/knowledge/retrievers/providers/hybrid.py`
 
-The default retriever (`settings.rag.retrieval_strategy = "hybrid"`, selected by `RetrieverFactory.create()`), doing real reciprocal-rank-fusion of dense + keyword search:
+The default retriever (the `retrieval_strategy` Platform Setting defaults to `"hybrid"`, selected by `RetrieverFactory.create()`), doing real reciprocal-rank-fusion of dense + keyword search:
 
 1. **Dense leg**: `vector_store.similarity_search(query_embedding, filters, options)` — standard cosine-similarity vector search (Chroma or pgvector, whichever backend is configured).
 2. **Keyword leg**: fetches a bounded candidate pool via the new `vector_store.list_chunks(filters, limit=500)` method (added specifically to support this — an unranked bulk fetch, not a similarity search), tokenizes each chunk's content and the query with a simple `[a-z0-9]+` regex, and scores them with `rank_bm25.BM25Okapi.get_scores()`.
@@ -624,7 +624,7 @@ Everything not already fully covered by a lifecycle tutorial above, organized by
 - **`bootstrap.py`** — `ensure_default_knowledge_base()`, mirroring `conversation/bootstrap.py`'s idiom for `KnowledgeBase` rows.
 - **`loaders/`** — `DocumentLoaderManager` picks by extension; `pdf.py` uses `PyPDFLoader` (native `author`/`page` metadata), `docx.py` uses `Docx2txtLoader` for text plus `python-docx`'s `core_properties` for metadata (since the loader alone doesn't surface it), `markdown.py`/`html.py`/`text.py`/`json.py`/`csv.py` round out the rest.
 - **`vectorstores/`** — `BaseVectorStore` (abstract: `add`, `add_many`, `similarity_search`, `mmr_search`, `list_chunks`, `delete_chunk`, `delete_document`, `clear`, `count`, `exists`), implemented by `ChromaVectorStore` (default backend) and `PostgresVectorStore` (pgvector-backed alternative). `mmr_search` is a stub (`NotImplementedError`) in both — Maximum Marginal Relevance search was never built. `VectorStoreManager` is a thin pass-through wrapping whichever backend is configured.
-- **`retrievers/`** — `BaseRetriever` (abstract `retrieve(request) -> list[SearchResult]`), `SimilarityRetriever` (plain dense search), `MMRRetriever` (delegates to the unimplemented `mmr_search`, so it's effectively non-functional), `HybridRetriever` (§6.3), `RetrieverFactory` (strategy selection via `settings.rag.retrieval_strategy`), `RetrieverManager` (pass-through to whichever retriever the factory built).
+- **`retrievers/`** — `BaseRetriever` (abstract `retrieve(request) -> list[SearchResult]`), `SimilarityRetriever` (plain dense search), `MMRRetriever` (delegates to the unimplemented `mmr_search`, so it's effectively non-functional), `HybridRetriever` (§6.3), `RetrieverFactory` (strategy selection via the `retrieval_strategy` Platform Setting), `RetrieverManager` (pass-through to whichever retriever the factory built).
 - **`reranking/cross_encoder.py`** — `CrossEncoderReranker` (§6.4).
 - **`embeddings/manager.py`** — `EmbeddingManager`, wrapping whichever provider (Google/OpenAI/Ollama) is configured behind `.client.aembed_query()`/`.aembed_documents()`.
 - **`schemas.py`** vs. **`retrievers/schemas.py`** vs. **`vectorstores/schema.py`** — three separate `SearchResult`-family dataclasses across this package; see §6.1's note on the flat-vs-nested distinction, the one that actually matters for `RetrieveNode`.
@@ -699,11 +699,10 @@ Enums live under `packages/domain/enums/` (`AgentStatus`, `ConversationStatus`, 
 
 ## 12. Configuration Reference
 
-All settings load through `packages/config/loader.py`'s `settings` singleton, a composed `Settings` object (`packages/config/settings.py`) with one sub-settings object per concern — e.g. `settings.rag.retrieval_strategy`, `settings.ai.default_provider`. Each sub-settings class is a `pydantic_settings.BaseSettings` reading from `.env` with a documented default. The ones most relevant to the RAG pipeline specifically (`packages/config/rag.py`):
+All settings load through `packages/config/loader.py`'s `settings` singleton, a composed `Settings` object (`packages/config/settings.py`) with one sub-settings object per concern — e.g. `settings.rag.max_results`, `settings.ai.default_provider`. Each sub-settings class is a `pydantic_settings.BaseSettings` reading from `.env` with a documented default. The ones most relevant to the RAG pipeline specifically (`packages/config/rag.py`):
 
 | Setting | Default | Effect |
 |---|---|---|
-| `retrieval_strategy` | `"hybrid"` | Which `BaseRetriever` `RetrieverFactory` builds — `similarity`/`mmr`/`hybrid`. |
 | `max_results` | `5` | Final top-K count after reranking, per turn. |
 | `min_relevance_score` | `0.0` | Cross-encoder score floor — reranked results below this are dropped, not surfaced as citations. |
 | `chunk_size`/`chunk_overlap` | `1000`/`200` | Recursive splitter defaults. |

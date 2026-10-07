@@ -1127,6 +1127,32 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   also deleted outright rather than moved, since moving a setting nothing consumes adds a page
   control with no effect. Verified live: DI container still builds and resolves `IAMClient`/
   `UploadClient` with the fields gone, full suite stayed clean (see below).
+- **Fourth follow-up — `RETRIEVAL_STRATEGY` moved, a genuinely harder case than the others**:
+  unlike every setting moved so far, `RetrieverFactory.create()` (`packages/knowledge/retrievers/
+  factory.py`) sits behind `ApplicationContainer`'s plain-sync `providers.Factory` chain —
+  `container.rag.knowledge_manager()` is resolved synchronously at 2+ call sites
+  (`packages/api/routers/documents.py`, `search.py`) plus the whole LangGraph build, so an
+  `await PlatformSettingsService.get(...)` can't simply go inside the factory the way it did for
+  `HybridRetriever`/`PromptBuilder` — that would force every caller of `container.rag.*`/
+  `container.graph.*` across the app to `await` it, the same impasse `packages/tools/context.py`'s
+  own docstring already describes for custom tools. Used that exact precedent instead of a bigger
+  DI refactor: new `set_retrieval_strategy`/`current_retrieval_strategy` ContextVar pair
+  (`packages/shared/access.py`, alongside the existing `retrieval_filters` one) — the router does
+  the async `PlatformSettingsService.get()` read up front (`chat.py` ×2, `widget.py`, `search.py`)
+  and drops the already-fetched string there; `RetrieverFactory.create()` just reads it back
+  synchronously. Unset (a worker job, a script, a test that never calls the setter) falls back to
+  `"hybrid"`, the old static default, not a crash — same fail-open shape as `is_tool_enabled`.
+  New `"string"` `SettingSpec` kind (with an optional `choices` tuple the API/frontend both now
+  expose, so an invalid value is rejected before it ever reaches `RetrieverFactory`'s own
+  `ValueError`) — frontend got a matching `<select>` for a `choices`-constrained string setting.
+  Also found and fixed two consumers that would have crashed outright once the field left
+  `packages/config/rag.py`: `packages/api/routers/retrieval_settings.py`'s per-tenant Retrieval
+  Settings response (a read-only informational field showing which strategy is active) and
+  `packages/graph/nodes/retrieve.py`'s `RetrievalRecord` audit logging (which strategy actually ran,
+  for analytics) — both still compiled fine before this since `settings.rag.retrieval_strategy` was
+  removed in the same change that would have broken them; caught by grepping for the field name
+  across the whole codebase before calling the move done, not just the one call site this follow-up
+  started from.
 
 ---
 
