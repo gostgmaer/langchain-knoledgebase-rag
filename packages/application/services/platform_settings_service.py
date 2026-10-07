@@ -140,7 +140,10 @@ SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         "retrieval_strategy", "Retrieval algorithm", "string",
         "hybrid",
-        choices=("similarity", "mmr", "hybrid", "self_query", "parent_document", "multi_vector", "graph_rag"),
+        # "mmr" omitted: mmr_search() raises NotImplementedError in both vector store backends
+        # (chroma.py and pgvector.py) — it was never built. Re-add once one of them implements it
+        # (docs/ARCHITECTURE_TUTORIAL.md §12, docs/BUGS.md item 38).
+        choices=("similarity", "hybrid", "self_query", "parent_document", "multi_vector", "graph_rag"),
         help="Which retrieval algorithm chat/search uses. hybrid (dense + keyword) is the general-purpose default; the others trade it for a specific retrieval technique (see docs/mvpRAG.md).",
     ),
 )

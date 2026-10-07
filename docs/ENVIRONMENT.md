@@ -135,7 +135,7 @@ The API verifies each request by sending the caller's bearer token to IAM (`GET 
 | `CHROMA_SERVER_HOST`, `CHROMA_SERVER_PORT` | unset | Only for `chroma`: use a real `chroma run` server instead of the embedded client (needed when API and worker both use Chroma). |
 | `CHUNK_SIZE` | `1000` | Characters per chunk when splitting documents. |
 | `CHUNK_OVERLAP` | `200` | Characters shared between adjacent chunks. |
-| ~~`RETRIEVAL_STRATEGY`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38 follow-up) — admin-configurable from the Platform Settings page. Built-in default: `hybrid`. One of `similarity`/`mmr`/`hybrid`/`self_query`/`parent_document`/`multi_vector`/`graph_rag`. |
+| ~~`RETRIEVAL_STRATEGY`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38 follow-up) — admin-configurable from the Platform Settings page. Built-in default: `hybrid`. One of `similarity`/`hybrid`/`self_query`/`parent_document`/`multi_vector`/`graph_rag` (`mmr` omitted — `mmr_search` is unimplemented in every vector store backend, see docs/BUGS.md item 38). |
 | `RAG_MAX_RESULTS` | `5` | Chunks passed to the answer step after reranking. |
 | ~~`RETRIEVAL_KEYWORD_WEIGHT`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38 follow-up) — admin-configurable from the Platform Settings page. Built-in default: `1.0` (range 0.0-2.0). Weight of BM25 keyword matches relative to vector search in hybrid retrieval. |
 | ~~`RAG_CONTEXT_TOKEN_BUDGET`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38 follow-up) — admin-configurable from the Platform Settings page. Built-in default: `4000`. Max tokens of retrieved context sent to the LLM. |

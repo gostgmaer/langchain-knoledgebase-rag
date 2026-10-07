@@ -1153,6 +1153,19 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   removed in the same change that would have broken them; caught by grepping for the field name
   across the whole codebase before calling the move done, not just the one call site this follow-up
   started from.
+- **Fifth follow-up — live-testing every `retrieval_strategy` choice found `mmr` was already dead**:
+  after Docker Desktop came back up, re-ran the full suite (503 passed, same 3 pre-existing
+  `modelprovider` enum-casing failures, zero new regressions) and live-verified the setting over real
+  HTTP — `GET /platform-settings` shows it as the 13th entry with its 7 `choices`; overriding it via
+  `PATCH` and hitting `/search`/`/chat` confirmed `similarity`, `hybrid`, `self_query`,
+  `parent_document`, `multi_vector`, and `graph_rag` all complete end-to-end. Selecting `mmr`
+  instead 500s every time — `mmr_search()` raises `NotImplementedError` in *both* vector store
+  backends (`chroma.py` and `pgvector.py`; `docs/ARCHITECTURE_TUTORIAL.md` §12 already noted this —
+  "Maximum Marginal Relevance search was never built" — but it wasn't tracked here, and before this
+  move it was an unvalidated env var nobody had actually tried setting to `mmr`). Not a regression
+  from the move itself, but the move turned a typo-only-reachable env var into a one-click dropdown
+  choice, so removed `"mmr"` from `SETTINGS`'s `choices` tuple rather than ship a selectable option
+  that always breaks retrieval. Re-add it once either backend implements `mmr_search` for real.
 
 ---
 
