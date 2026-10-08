@@ -1245,6 +1245,32 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   correct `token`/`citations`/`done` SSE events, and the conversation's status correctly returned
   to `ACTIVE` afterward (not stuck in `PROCESSING`).
 
+### 41. ✅ `HybridRetriever` crashed on any knowledge base written in a non-Latin script
+- Found auditing `packages/knowledge/retrievers/` — `hybrid.py` is the default retrieval strategy
+  (every chat/search call that doesn't explicitly choose another one) and had no dedicated unit
+  test file, unlike its siblings (`self_query`, `parent_document`, `multi_vector`, `graph_rag` all
+  do).
+- **Root cause:** `_tokenize()`'s pattern is `[a-z0-9]+` — after lowercasing, it matches ASCII
+  letters and digits only, nothing else. `_bm25_rank()` then builds a `BM25Okapi` index straight
+  from those tokenized candidates with no check that any of them actually produced tokens.
+  `BM25Okapi` itself divides by the corpus's average document length while indexing, with no guard
+  of its own — confirmed directly against the real `rank_bm25` library, not just inferred:
+  `BM25Okapi([[], [], []])` raises a bare `ZeroDivisionError`.
+- **Impact:** any candidate pool where every chunk tokenizes to nothing — in practice, any tenant
+  whose knowledge base content is written entirely in a non-Latin script (Japanese, Chinese,
+  Korean, Arabic, Cyrillic, ...), not just a contrived all-punctuation corpus — would crash every
+  single hybrid-strategy `/chat` or `/search` call with an unhandled 500, since nothing between
+  `HybridRetriever.retrieve()` and the API's generic exception handler catches it.
+- **Fixed:** `_bm25_rank()` now checks whether the tokenized corpus is entirely empty before
+  constructing `BM25Okapi`, and short-circuits to `[]` (no keyword signal to contribute) exactly
+  like the existing "no candidates at all" branch above it — reciprocal rank fusion already
+  handles an empty `keyword_results` list correctly, falling back to the vector ranking alone.
+- **Verified:** new `tests/unit/test_hybrid_retriever.py` — one test reproduces the exact crash
+  against a real (unmocked) `BM25Okapi` call with Japanese-only candidate content, confirmed to
+  fail against the pre-fix code and pass against the fix; a second confirms a mixed-language pool
+  still ranks correctly by keyword when at least one candidate has matchable terms. Full suite
+  re-run clean (508 passed — 506 plus these 2 new tests — 0 regressions).
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

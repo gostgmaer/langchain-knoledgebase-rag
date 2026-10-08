@@ -93,6 +93,18 @@ class HybridRetriever(BaseRetriever):
             _tokenize(candidate.chunk.content) for candidate in candidates
         ]
 
+        # BM25Okapi divides by the corpus's average document length while indexing, with no guard
+        # of its own — a corpus where every document tokenizes to zero terms makes that average
+        # zero too, raising a real ZeroDivisionError (confirmed directly against the library, not
+        # just inferred). _TOKEN_PATTERN only matches [a-z0-9], so this isn't just a hypothetical
+        # all-punctuation edge case: any candidate pool written entirely in a non-Latin script
+        # (Japanese, Chinese, Korean, Arabic, Cyrillic, ...) tokenizes to nothing at all, which
+        # would otherwise crash hybrid retrieval - the default strategy - on every single call for
+        # that tenant. Keyword matching has nothing to contribute here either way, so this falls
+        # back to vector-only results exactly like the "no candidates" branch above.
+        if not any(tokenized_corpus):
+            return []
+
         bm25 = BM25Okapi(tokenized_corpus)
 
         scores = bm25.get_scores(_tokenize(query))
