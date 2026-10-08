@@ -1219,6 +1219,32 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   Full suite re-run clean afterward (506 passed, 0 failed, 0 regressions); all test data cleaned up
   and the real seeded `default` profile's flag restored.
 
+### 40. ✅ `ChatService.stream()` committed PROCESSING before building graph state, unlike `chat()`
+- Found auditing `packages/application/` for correctness, specifically chosen because it's
+  fully load-bearing (item 20) with near-zero direct unit test coverage — `ChatService`, the
+  biggest file in the package, had no direct unit tests at all before this.
+- **The asymmetry:** `chat()` calls `_build_state()` (reads the conversation's `agent`, builds
+  prompt history) *before* `_mark_processing()` + the durable commit, so a failure there rolls
+  back cleanly — nothing was ever durably marked PROCESSING. `stream()` had the opposite order:
+  it committed PROCESSING first, then only called `_build_state()` afterward, buried inside
+  `_stream_runtime()`. A failure in state-building during a streaming call would leave the
+  conversation durably stuck in PROCESSING with no corresponding graph checkpoint —
+  `recover_stuck_conversations_job` would eventually self-heal it (no pending work found, just
+  clears the flag), but only after a delay, and the caller still gets an unexplained 500 instead
+  of a clean rollback.
+- Not currently reachable in practice — `_build_state()` only fails today if `conversation.agent_id`
+  resolves to no row, and nothing in the app can currently delete an agent — but the inconsistency
+  is a real latent bug, not a hypothetical one: it only takes one future code path (agent
+  soft-delete, a transient context-builder failure) to trigger it.
+- **Fixed:** `stream()` now builds `state` before `_mark_processing()`/commit, matching `chat()`'s
+  ordering exactly; `_stream_runtime()` takes the pre-built `state` as a parameter instead of
+  building it internally (and dropped its unused `conversation`/`message` parameters — `message`
+  was already unused before this change).
+- **Verified:** full suite re-run clean (506 passed, 0 regressions) after the refactor; live
+  end-to-end streaming chat call over real HTTP (`POST /chat` with `stream: true`) produced
+  correct `token`/`citations`/`done` SSE events, and the conversation's status correctly returned
+  to `ACTIVE` afterward (not stuck in `PROCESSING`).
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

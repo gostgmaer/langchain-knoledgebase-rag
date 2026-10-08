@@ -348,6 +348,16 @@ class ChatService:
             citations: list[dict[str, Any]] = []
             stream_meta: dict[str, Any] = {}
 
+            # Built before the durable mark below, same ordering as chat()'s own
+            # state = await self._build_state(...) before _mark_processing() —
+            # a failure here (e.g. the conversation's agent no longer exists)
+            # rolls back cleanly instead of leaving the conversation durably
+            # committed as PROCESSING with no corresponding graph checkpoint for
+            # recover_stuck_conversations_job to find (it would only ever
+            # self-heal that by noticing no pending work and clearing it, not by
+            # actually completing the turn).
+            state = await self._build_state(conversation, stream=True)
+
             # Same reasoning as chat()/resume()'s own committed mark —
             # durably persisted before the potentially-crashing
             # streaming call, not just flushed (docs/mvpRAG.md v2.0).
@@ -359,7 +369,7 @@ class ChatService:
             started = time.perf_counter()
 
             async for token in self._stream_runtime(
-                conversation, user_message, raw_response, pending_approval, usage, citations, stream_meta
+                state, raw_response, pending_approval, usage, citations, stream_meta
             ):
                 chunks.append(token)
                 yield {"type": "token", "content": token}
@@ -477,8 +487,7 @@ class ChatService:
 
     async def _stream_runtime(
         self,
-        conversation: ConversationResponse,
-        message: Message,
+        state: dict,
         raw_response: dict,
         pending_approval: dict,
         usage: dict,
@@ -489,7 +498,9 @@ class ChatService:
         Runs the real LangGraph pipeline (planner, retrieval, tools,
         memory extraction) for this conversation, yielding each token
         chunk pushed by LLMNode's stream writer as it arrives, instead
-        of waiting for the full graph run to finish. `raw_response` is
+        of waiting for the full graph run to finish. `state` is built by
+        the caller (stream()), before the durable PROCESSING commit — see
+        stream()'s own comment for why. `raw_response` is
         mutated in place with the one "metadata" event LLMNode emits
         after the token loop ends — stream_mode="custom" never
         surfaces the final graph state directly, so this is the only
@@ -504,8 +515,6 @@ class ChatService:
         v1.2 — previously a documented gap: streaming never surfaced
         retrieval citations at all).
         """
-
-        state = await self._build_state(conversation, stream=True)
 
         async for event in self._graph.stream(state):
             if not isinstance(event, dict):
