@@ -86,6 +86,25 @@ class PostgresMemoryStore(MemoryStore):
             for request in requests
         ]
 
+    async def upsert_summary(
+        self,
+        request: CreateMemoryRequest,
+    ) -> MemoryFact:
+
+        assert request.type == MemoryType.SUMMARY, "upsert_summary is only for MemoryType.SUMMARY"
+
+        row = await self._repository.upsert_summary(
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            conversation_id=request.conversation_id,
+            content=request.content,
+            importance=request.importance,
+            vector=await self._embed(request.content),
+            metadata=request.metadata,
+        )
+
+        return self._to_fact(row)
+
     # ---------------------------------------------------------
     # Read
     # ---------------------------------------------------------

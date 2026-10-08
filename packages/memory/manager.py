@@ -35,7 +35,6 @@ from packages.memory.retrieval import MemoryRetriever
 from packages.memory.schemas import (
     CreateMemoryRequest,
     MemoryFact,
-    MemoryType,
     SearchMemoryRequest,
     SearchMemoryResponse,
     UpdateMemoryRequest,
@@ -180,21 +179,20 @@ class MemoryManager:
             messages=messages,
         )
 
+        # `upsert_summary()` is a single atomic database operation (a real `ON CONFLICT DO
+        # UPDATE`, backed by a partial unique index — packages/infrastructure/repositories/
+        # memory.py's own docstring), not a second check-then-act layered under the lock below.
+        # The lock alone never actually closed the race it was built for: its critical section
+        # only covered the check-then-act, released before this transaction's eventual commit at
+        # the caller's own session boundary (packages/api/routers/chat.py's
+        # `_extract_memory_in_background`) — a second call could still acquire the lock, query,
+        # and see "no row yet" in the window between the first call's release and its commit.
+        # Kept here anyway as cheap, harmless defense in depth against redundant DB round-trips
+        # under real contention, not because it's load-bearing for correctness anymore.
         async with _redis.lock(f"summary_lock:{conversation_id}", timeout=30):
-            existing = await self._store.get_by_conversation_and_type(
-                conversation_id,
-                MemoryType.SUMMARY,
+            await self._store.upsert_summary(
+                self._to_create_request(summary)
             )
-
-            if existing is not None:
-                await self._store.update(
-                    existing.id,
-                    UpdateMemoryRequest(content=summary.content),
-                )
-            else:
-                await self._store.create(
-                    self._to_create_request(summary)
-                )
 
         return summary
 

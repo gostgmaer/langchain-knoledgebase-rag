@@ -116,6 +116,23 @@ UPGRADES: tuple[str, ...] = (
     "WHERE is_default = true "
     "AND id <> (SELECT id FROM model_profiles WHERE is_default = true ORDER BY created_at ASC, id ASC LIMIT 1)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_model_profile_single_default ON model_profiles (is_default) WHERE is_default = true",
+    # memories: "one SUMMARY row per conversation" was an application-level invariant only — no DB
+    # constraint backed it. MemoryManager.summarize()'s Redis lock guarded the check-then-act, but
+    # its critical section was released before the transaction that actually persisted the create
+    # was committed (commit happens later, at the caller's own session boundary), so two calls
+    # close together could still both see "no row yet" and both insert one. The repository's own
+    # get_by_conversation_and_type() already tolerated this defensively (picks the most-recently-
+    # updated row rather than crashing on a duplicate), so this was never a crash in practice — just
+    # silent duplicate rows accumulating. Fixed at the source with a real atomic upsert
+    # (packages/infrastructure/repositories/memory.py's upsert_summary()); this cleans up any
+    # duplicates a pre-fix database already has (keeps the most recently updated one per
+    # conversation, same tie-break the repository's own defensive read already used) before the
+    # unique index it needs can be created.
+    "DELETE FROM memories m USING memories m2 "
+    "WHERE m.type = 'SUMMARY' AND m2.type = 'SUMMARY' "
+    "AND m.conversation_id = m2.conversation_id "
+    "AND (m.updated_at, m.id) < (m2.updated_at, m2.id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_conversation_summary ON memories (conversation_id, type) WHERE type = 'SUMMARY'",
 )
 
 # Row-level security: defence in depth behind the query-layer tenant filters. The policy applies

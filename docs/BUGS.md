@@ -1303,6 +1303,52 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
 - **Not a regression**: this gap predates this session's audit; nothing fixed elsewhere this
   session touches it.
 
+### 43. ✅ Conversation-summary memory could still end up duplicated — the Redis lock never actually closed the race it was built for
+- Found auditing `packages/memory/` — `MemoryManager.summarize()`'s own extensive comment already
+  documented the original race (two background memory-extraction tasks for the same conversation
+  both seeing "no summary yet") and the Redis distributed lock built to close it.
+- **The lock didn't actually close it.** Its critical section (`async with _redis.lock(...)`) only
+  covered the check (`get_by_conversation_and_type`) and the act (`create`/`update`) — both of
+  which only `flush()`, never `commit()` (by design: `MemoryManager` deliberately doesn't know
+  about Postgres or sessions, per its own module docstring; the actual commit happens later, at the
+  caller's session boundary in `packages/api/routers/chat.py`'s `_extract_memory_in_background`).
+  The lock released before that commit landed, so a second call could still acquire it, query, and
+  see "no row yet" in the gap — the exact race the lock was supposed to prevent, just with a much
+  narrower window than before the lock existed.
+- **Why this was never a crash:** `MemoryRepository.get_by_conversation_and_type()`'s own docstring
+  already acknowledges "one per conversation" was an app-level invariant, not a DB one, and
+  defensively takes the most-recently-updated row via `scalars()` rather than
+  `scalar_one_or_none()` — so a duplicate from this race degraded silently into dead, orphaned
+  rows rather than ever raising `MultipleResultsFound`. Real, but lower severity than
+  `MemoryManager`'s own comment implied.
+- **Fixed with a real atomic operation, not a bigger lock:** `MemoryStore.upsert_summary()` (new
+  abstract method) + `MemoryRepository.upsert_summary()` (new, Postgres-specific) do the
+  create-or-replace as one `INSERT ... ON CONFLICT DO UPDATE` statement against a new partial
+  unique index, `uq_memory_conversation_summary` on `(conversation_id, type) WHERE type =
+  'SUMMARY'` — so two concurrent calls can never both see "no row yet"; Postgres itself serializes
+  them. The idempotent migration first collapses any duplicates a pre-fix database already has down
+  to the most-recently-updated one (same tie-break the repository's own defensive read already
+  used) before creating the index. The Redis lock stays in place around the call — no longer
+  load-bearing for correctness, but harmless as cheap protection against redundant DB round-trips
+  under real contention.
+- **Two real bugs caught while building this, neither of them the race itself:**
+  1. `stmt.excluded.metadata_` raised `AttributeError` — `Memory.metadata_` is the ORM attribute
+     name; the actual column is `"metadata"` (`mapped_column("metadata", ...)`, since bare
+     `metadata` collides with SQLAlchemy's own declarative API), and `Insert.excluded` is keyed by
+     real column names, not ORM attribute names.
+  2. A second upsert's `RETURNING` row came back with the *first* call's stale content — SQLAlchemy
+     matched the returned primary key against the session's identity map (already populated by the
+     first call's own result) and handed back the cached pre-update object instead of refreshing
+     it. Fixed with `execution_options={"populate_existing": True}` on the execute call. The
+     underlying database row was always correct; only the in-session Python object was stale — but
+     anything in the same session reading that identity-mapped row afterward would have seen it too.
+- **Verified:** new `tests/integration/test_memory_summary_upsert.py` against real Postgres (3
+  tests: create, replace-not-duplicate, per-conversation isolation) — the replace test is what
+  caught bug 2 above. Full suite re-run clean (511 passed — 508 plus these 3 — 0 regressions).
+  Live end-to-end over real HTTP: a real chat turn naming a preference and a location produced
+  exactly one `SUMMARY` row (plus real `PREFERENCE`/`PROFILE` facts) through the actual
+  `MemoryManager.summarize()` → `upsert_summary()` path, real LLM calls included, not a mock.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
