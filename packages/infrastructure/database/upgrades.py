@@ -97,6 +97,12 @@ UPGRADES: tuple[str, ...] = (
     "ALTER TABLE agents ADD COLUMN IF NOT EXISTS widget_public_id varchar(32)",
     "ALTER TABLE agents ADD COLUMN IF NOT EXISTS widget_allowed_origins json NOT NULL DEFAULT '[]'",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_agent_widget_public_id ON agents (widget_public_id) WHERE widget_public_id IS NOT NULL",
+    # model_profiles.provider: was a native Postgres enum (uppercase labels only), which rejected
+    # any caller sending a differently-cased but valid provider name (e.g. "google") with a raw DB
+    # error instead of a clean 422 — validation now lives at the API boundary instead, case-
+    # insensitively, so the column just needs to hold whatever string the caller sent. Safe to
+    # rerun: ALTER COLUMN TYPE to the type a column already has is a no-op.
+    "ALTER TABLE model_profiles ALTER COLUMN provider TYPE varchar(50) USING provider::text",
 )
 
 # Row-level security: defence in depth behind the query-layer tenant filters. The policy applies

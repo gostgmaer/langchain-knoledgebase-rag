@@ -1166,6 +1166,30 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   from the move itself, but the move turned a typo-only-reachable env var into a one-click dropdown
   choice, so removed `"mmr"` from `SETTINGS`'s `choices` tuple rather than ship a selectable option
   that always breaks retrieval. Re-add it once either backend implements `mmr_search` for real.
+- **Sixth follow-up — fixed a longer-standing, previously-worked-around bug while live-testing:**
+  `model_profiles.provider` was a native Postgres enum (`Enum(ModelProvider)`, uppercase labels
+  only — `GOOGLE`, not `google`), but `CreateModelProfileRequestSchema.provider`/
+  `UpdateModelProfileRequestSchema.provider` were plain, unvalidated `str` fields. Any caller
+  sending a differently-cased but valid provider name (`"google"`, the natural casing, not
+  `"GOOGLE"`) passed Pydantic validation and then failed at INSERT with a raw
+  `asyncpg.exceptions.InvalidTextRepresentationError`, surfaced to the API as an unhandled 500 —
+  `tests/api/test_model_profiles_api.py::test_create_then_list_then_get_model_profile`,
+  `test_create_duplicate_name_returns_409`, and `test_agents_api.py::test_create_then_list_then_get_agent`
+  (which creates a model profile as setup) all hit this; `tests/api/test_widget_api.py` had already
+  worked around it by hardcoding `"GOOGLE"` uppercase in its own test fixture, with a comment
+  explicitly flagging it as a known, deliberately-excluded failure. Fixed at the root instead of
+  re-documenting the workaround: `ModelProfile.provider` is now a plain `String(50)` column (an
+  idempotent `ALTER COLUMN ... TYPE varchar(50) USING provider::text` added to
+  `packages/infrastructure/database/upgrades.py`, converting existing uppercase enum values to
+  text with no data loss), and both schemas gained a `field_validator` that checks the value
+  case-insensitively against `ModelProvider` — valid, differently-cased input is now accepted and
+  round-trips in the caller's own casing (satisfying the existing tests' `created["provider"] ==
+  "google"` assertion), while a genuinely unknown provider now gets a clean 422 instead of a raw
+  500. Also fixed the one real consumer that depended on `.provider` being an actual enum instance:
+  `packages/infrastructure/ai/config.py`'s `build_llm_config_from_profile()` called
+  `profile.provider.value.lower()`, which would have raised `AttributeError` on a plain string —
+  found via the same full-codebase-grep discipline as the `RETRIEVAL_STRATEGY` follow-up above, not
+  by accident.
 
 ---
 

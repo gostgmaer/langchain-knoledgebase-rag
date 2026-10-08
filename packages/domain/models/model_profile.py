@@ -19,7 +19,6 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from packages.config.loader import settings
-from packages.domain.enums.model_provider import ModelProvider
 from packages.domain.enums.model_status import ModelStatus
 from packages.domain.models.base import BaseModel
 
@@ -70,10 +69,17 @@ class ModelProfile(BaseModel):
         comment="Friendly profile name",
     )
 
-    provider: Mapped[ModelProvider] = mapped_column(
-        Enum(ModelProvider),
+    provider: Mapped[str] = mapped_column(
+        String(50),
         nullable=False,
     )
+    """
+    Validated against `ModelProvider` (case-insensitively) at the API boundary
+    (packages/api/schemas/model_profile.py), but stored as plain text so the caller's own
+    casing round-trips unchanged — a native Postgres enum column here rejected any caller
+    that sent a provider name in a different case than the enum's own uppercase labels
+    (docs/BUGS.md item 38 follow-up).
+    """
 
     model: Mapped[str] = mapped_column(
         String(150),

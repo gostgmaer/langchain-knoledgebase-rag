@@ -693,7 +693,7 @@ Every table is multi-tenant — `tenant_id` is present and indexed on nearly all
 | `Embedding` | `embeddings` | `chunk_id`, `model_profile_id`, `vector` (pgvector) | Used only by the `PostgresVectorStore` backend — irrelevant when `ChromaVectorStore` (the default) is configured. |
 | `Memory` | `memories` | `tenant_id`, `user_id`, `conversation_id` (nullable — memory outlives any one conversation), `type`, `content`, `importance`, `vector` (pgvector) | Long-term memory storage (§7). |
 
-Enums live under `packages/domain/enums/` (`AgentStatus`, `ConversationStatus`, `DocumentStatus`, `MessageRole`, `MessageStatus`, `ModelProvider`, `ModelStatus`, `KnowledgeBaseStatus`, `SearchType`, `SimilarityMetric`, and others) — one file per enum, all plain `StrEnum`/`Enum` classes mapped via SQLAlchemy's `Enum(...)` column type.
+Enums live under `packages/domain/enums/` (`AgentStatus`, `ConversationStatus`, `DocumentStatus`, `MessageRole`, `MessageStatus`, `ModelProvider`, `ModelStatus`, `KnowledgeBaseStatus`, `SearchType`, `SimilarityMetric`, and others) — one file per enum, all plain `StrEnum`/`Enum` classes, mostly mapped via SQLAlchemy's `Enum(...)` column type. `ModelProvider` is the one exception: `ModelProfile.provider` is a plain `String` column validated case-insensitively at the API boundary instead (docs/BUGS.md item 38 follow-up) — a native Postgres enum there rejected any caller whose casing didn't match the enum's own uppercase labels.
 
 ---
 
