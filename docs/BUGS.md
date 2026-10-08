@@ -1271,6 +1271,38 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   still ranks correctly by keyword when at least one candidate has matchable terms. Full suite
   re-run clean (508 passed — 506 plus these 2 new tests — 0 regressions).
 
+### 42. 🔴 `ResilientHttpClient`'s SSRF protection has a DNS-rebinding TOCTOU gap — documented, not fixed
+- Found auditing `packages/tools/webhook.py` (the CUSTOM-tool webhook executor) and its underlying
+  shared HTTP client, `packages/connectors/http.py`'s `ResilientHttpClient` — used by every
+  connector (web, Wikipedia, Confluence, SharePoint/OneDrive, Teams, Slack) and the webhook tool,
+  explicitly built to be "the one HTTP client every connector uses, so ... SSRF protection [is]
+  written once." The redirect-hop handling is solid — redirects are followed manually
+  (`follow_redirects=False` + a hand-rolled loop) specifically so every hop gets re-validated, which
+  correctly closes the "validate the first URL, then silently follow a redirect to a private
+  address" bypass.
+- **The actual gap:** `assert_public_url()` resolves the hostname itself via `loop.getaddrinfo()`
+  to check the IP is public, then returns — the *caller* (`_send_once()`) separately hands the same
+  URL string to `httpx.AsyncClient.request()`, which does its own, independent DNS resolution when
+  it actually opens the connection. Nothing binds the validated IP to the IP the connection
+  actually lands on. A hostname whose DNS server returns a public address for the validation lookup
+  and a private/internal one (loopback, a cloud metadata address, an internal service) moments
+  later for the real connection — classic DNS rebinding — passes the check and still reaches the
+  private address.
+- **Why not fixed in this pass:** a correct fix means pinning the actual TCP connection to the
+  already-validated IP while still presenting the right `Host` header and TLS SNI for certificate
+  validation — a transport-level change to how `httpx.AsyncClient` connects (a custom transport or
+  resolver override), not a small patch, and every connector plus the webhook tool depends on this
+  one client. Getting it subtly wrong (e.g. breaking SNI/cert validation) would be a worse, harder-
+  to-notice regression than the gap itself. Raised with the user and deliberately deferred rather
+  than rushed; this entry has the detail needed to act on it later.
+- **Real-world severity, scoped down:** every current caller's URL is admin-configured — both
+  knowledge-source connector setup and custom webhook tool creation require `require_admin()`. The
+  realistic threat is a malicious tenant admin, or a legitimate admin's external domain later having
+  its DNS compromised by a third party, not an arbitrary unauthenticated attacker supplying the URL
+  directly.
+- **Not a regression**: this gap predates this session's audit; nothing fixed elsewhere this
+  session touches it.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
