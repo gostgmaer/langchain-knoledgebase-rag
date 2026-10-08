@@ -103,6 +103,19 @@ UPGRADES: tuple[str, ...] = (
     # insensitively, so the column just needs to hold whatever string the caller sent. Safe to
     # rerun: ALTER COLUMN TYPE to the type a column already has is a no-op.
     "ALTER TABLE model_profiles ALTER COLUMN provider TYPE varchar(50) USING provider::text",
+    # model_profiles.is_default: nothing enforced "exactly one default profile" — create/update
+    # could mark a second profile as default with no error, and get_default()'s `.limit(1)` with no
+    # deterministic ordering would then silently pick either one, each call independently (confirmed
+    # live: two profiles both ended up is_default=true via ordinary PATCH calls). Application code
+    # now clears every other profile's flag before setting a new default (packages/infrastructure/
+    # repositories/model_profile.py's clear_default(), called from packages/api/routers/models.py),
+    # but a database that already has duplicates from before this fix needs cleaning up before the
+    # new unique index below can be created. Keeps the oldest duplicate; arbitrary but deterministic,
+    # and no worse than the pre-existing nondeterministic .limit(1) behavior (docs/BUGS.md item 39).
+    "UPDATE model_profiles SET is_default = false "
+    "WHERE is_default = true "
+    "AND id <> (SELECT id FROM model_profiles WHERE is_default = true ORDER BY created_at ASC, id ASC LIMIT 1)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_model_profile_single_default ON model_profiles (is_default) WHERE is_default = true",
 )
 
 # Row-level security: defence in depth behind the query-layer tenant filters. The policy applies

@@ -1191,6 +1191,34 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   found via the same full-codebase-grep discipline as the `RETRIEVAL_STRATEGY` follow-up above, not
   by accident.
 
+### 39. ✅ `ModelProfile.is_default` had no "exactly one" invariant — two profiles could both be the default
+- Found during a general code-level audit (no prior report), not a QA/test failure — nothing in the
+  existing test suite exercised `is_default` at all.
+- **Root cause:** `POST /model-profiles` and `PATCH /model-profiles/{id}` both accept `is_default`
+  and write it straight through via `setattr()`, with no check for any other profile already holding
+  it. No unique constraint existed on the column either. `ModelProfileRepository.get_default()`
+  reads it back with `.limit(1)` and no `ORDER BY` — with two true rows, Postgres can return either
+  one, independently, on each call.
+- **Confirmed live:** `POST`ing two ordinary model profiles with `"is_default": true` left **three**
+  profiles (the original seeded `default` plus both new ones) simultaneously marked
+  `is_default=true` in the real dev database — no error, no warning, both requests returned `201`.
+- **Why it matters:** `get_default()` is the fallback the document ingestion pipeline
+  (`packages/knowledge/pipelines/ingestion.py`) uses to pick an embedding model when none is
+  specified — with the invariant broken, which profile's provider/dimensions got used could
+  silently flip between calls, a genuine (if quiet) data-consistency risk, not just a cosmetic one.
+- **Fixed:** `ModelProfileRepository.clear_default()` (new) unsets every profile's flag; both routes
+  call it first, inside the same request-scoped transaction, whenever the incoming payload sets
+  `is_default: true` — so exactly one profile ends up true, same request. A new idempotent migration
+  (`packages/infrastructure/database/upgrades.py`) first collapses any pre-existing duplicates down
+  to the oldest one, then adds `uq_model_profile_single_default`, a partial unique index on
+  `(is_default) WHERE is_default = true` — a database-level backstop, not just application
+  discipline, in case a future code path writes the column directly.
+- **Verified live, both routes:** `POST` a second/third default correctly demoted the previous
+  one(s) every time, confirmed by re-listing and counting `is_default=true` rows after each call;
+  `PATCH` an existing non-default profile to `is_default: true` likewise left exactly one default.
+  Full suite re-run clean afterward (506 passed, 0 failed, 0 regressions); all test data cleaned up
+  and the real seeded `default` profile's flag restored.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
