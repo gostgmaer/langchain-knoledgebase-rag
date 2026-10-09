@@ -133,6 +133,19 @@ UPGRADES: tuple[str, ...] = (
     "AND m.conversation_id = m2.conversation_id "
     "AND (m.updated_at, m.id) < (m2.updated_at, m2.id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_conversation_summary ON memories (conversation_id, type) WHERE type = 'SUMMARY'",
+    # One active (queued/running) sync run per source: packages/connectors/scheduling.py's
+    # create_run() used to rely solely on a check-then-insert (SELECT active runs, then INSERT) with
+    # no row lock, so two concurrent callers (a manual "sync now" double-click, a scheduled sync
+    # racing a webhook notification) could both pass the check and both insert a queued run. This
+    # index gives create_run() something atomic to conflict against instead. Cleans up any existing
+    # duplicates first (cancels every active run but the most recently updated one per source), same
+    # tie-break as the memory-summary cleanup above, so the index can actually be created.
+    "UPDATE source_sync_runs r SET status = 'cancelled', completed_at = now() "
+    "FROM source_sync_runs r2 "
+    "WHERE r.status IN ('queued', 'running') AND r2.status IN ('queued', 'running') "
+    "AND r.source_id = r2.source_id "
+    "AND (r.updated_at, r.id) < (r2.updated_at, r2.id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_source_sync_runs_active ON source_sync_runs (source_id) WHERE status IN ('queued', 'running')",
 )
 
 # Row-level security: defence in depth behind the query-layer tenant filters. The policy applies

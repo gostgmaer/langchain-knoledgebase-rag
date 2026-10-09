@@ -1349,6 +1349,42 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   exactly one `SUMMARY` row (plus real `PREFERENCE`/`PROFILE` facts) through the actual
   `MemoryManager.summarize()` → `upsert_summary()` path, real LLM calls included, not a mock.
 
+### 44. ✅ Two syncs could run at once for the same source — `create_run()`'s "already active?" check was a SELECT, not a lock
+- Found auditing `packages/connectors/`. `scheduling.py`'s own module docstring states "Only one
+  run per source may be queued or running," but nothing in the schema backed that: `create_run()`
+  did a plain SELECT for an active (`queued`/`running`) run, and if none was found, inserted a new
+  one — classic check-then-act, with no row lock on either the `KnowledgeSource` or any existing
+  `SourceSyncRun`.
+- **Reachable in practice, not just in theory** — four call sites hit `create_run()`: a manual
+  "Sync now" button (`POST /{source_id}/sync`, double-clickable), a scheduled sync
+  (`schedule_due()`), a webhook notification, and the post-sync drain of targets that arrived
+  mid-run (`_drain_pending()`). A scheduled sync firing at the same moment a webhook notification
+  arrives for the same source is an ordinary occurrence, not an edge case.
+- **Consequence of two runs racing:** both read `source.sync_state` (delta tokens/cursors)
+  independently before either commits its own updated state back — whichever run finishes last
+  silently overwrites the other's progress, which can skip changes the other run's state advance
+  was supposed to cover next time. Also doubles load against the external source and produces
+  confusing duplicate "running" syncs in the UI.
+- **Fixed the same way as item 43:** a partial unique index, `uq_source_sync_runs_active` on
+  `source_sync_runs (source_id) WHERE status IN ('queued', 'running')`
+  (`packages/infrastructure/database/upgrades.py`), gives Postgres something atomic to enforce.
+  `create_run()` now catches the `IntegrityError` the index raises on a losing insert and converts
+  it to the `SyncAlreadyRunning` exception every caller already handles — no behavior change for
+  callers, just an actual guarantee behind it. The migration first cancels every duplicate active
+  run but the most-recently-updated one per source, same tie-break pattern as item 43's cleanup,
+  so the index can be created on a pre-fix database.
+- **Verified with real concurrency, not just sequential calls:** `tests/integration/test_source_sync.py`
+  uses a fixture that commits for real (unlike the single-transaction `db_session` fixture used
+  elsewhere, which can't express genuine cross-connection races). Added two tests:
+  1. `test_concurrent_sync_requests_for_the_same_source_only_one_wins` — five real concurrent
+     `create_run()` calls via `asyncio.gather`; exactly one succeeds, the other four raise
+     `SyncAlreadyRunning`.
+  2. `test_a_stale_but_still_queued_run_is_not_silently_duplicated` — a queued run whose
+     `updated_at` is pushed past the staleness window the app-level SELECT filters on (but before
+     the separate reaper would catch it) still blocks a second insert, because the unique index has
+     no notion of staleness.
+  Full `test_source_sync.py` (26 tests) and the full suite (513 passed, 0 regressions) both clean.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
