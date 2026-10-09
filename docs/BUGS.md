@@ -1434,6 +1434,35 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   `test_slack_connector.py` (14 tests) and the full suite (514 passed, 0 regressions) both clean.
 - **Files:** `packages/connectors/sources/slack.py`, `tests/unit/connectors/test_slack_connector.py`.
 
+### 47. ✅ Manually adding an identity mapping for an external *user* silently saved it as a *group*, so it never matched
+- Found auditing `frontend/src/components/sources/permissions-tab.tsx`'s general "Identity mappings"
+  form (the free-form Add-mapping control, distinct from the per-row "Map" button next to an
+  auto-discovered principal in the "Not mapped yet" table above it).
+- **The bug:** the free-form form's input is labelled/placeholder'd `"external group or user id"`,
+  but its submit handler called `map("group", draft.key.trim(), draft.internalType, draft.internalId)`
+  — the principal type was hard-coded to the literal string `"group"` regardless of what the admin
+  actually typed or intended. The per-row form right above it does this correctly
+  (`onMap(principal.principal_type, ...)`, using the real discovered type), so the bug was only in the
+  general-purpose form meant for pre-provisioning a mapping before the source has run a sync yet.
+- **Impact:** this is not just a labelling issue. `packages/connectors/access.py`'s `derive_access()`
+  looks up a mapping by the exact key `(kind, external_id)` where `kind` is derived from the stored
+  `IdentityMapping.principal_type` (`"group" if m.principal_type != "user" else "user"`). A mapping an
+  admin added for an external **user** id through this form was persisted with
+  `principal_type: "group"`, so it could never match a document permission rule carrying
+  `principal_type: "user"` for that same id — the lookup key mismatches (`("group", id)` stored vs.
+  `("user", id)` looked up). The admin saw "Mapped. Access on existing documents was updated." (a false
+  success) and the mapping appeared in the table, but any document restricted to that external user
+  stayed unmapped/administrator-only forever, with no error ever surfacing.
+- **Fixed:** added an explicit "external principal type" selector (`group` / `user`) to the free-form
+  draft state, submitted as the real selected type instead of the hard-coded `"group"`.
+- **Verified:** `npx tsc --noEmit` clean (aside from one pre-existing, unrelated error in
+  `platform-settings-view.tsx` confirmed via `git status` to predate this change), `npx eslint` clean
+  on the changed file, and the existing frontend suite (`npx vitest run`, 29 tests) passes with 0
+  regressions. No component-level test harness (mocked `react-query` + API client) exists yet for any
+  `components/sources/*` file to extend without inventing one from scratch; noting that gap here
+  rather than building new test scaffolding for a single fix.
+- **Files:** `frontend/src/components/sources/permissions-tab.tsx`.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
