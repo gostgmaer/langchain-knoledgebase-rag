@@ -185,9 +185,12 @@ class SlackConnector(BaseKnowledgeConnector):
             if channel.get("is_private") and not include_private:
                 continue  # defence in depth: never rely solely on the `types` request param
             name = str(channel.get("name", "")).lower()
-            if wanted and name not in wanted and channel["id"] not in wanted:
+            # `wanted`/`excluded` are lower-cased, but Slack channel ids are upper-case (e.g. "C0123456789"):
+            # comparing the raw id against them never matched, silently breaking id-based allow/exclude lists.
+            channel_id = str(channel.get("id", "")).lower()
+            if wanted and name not in wanted and channel_id not in wanted:
                 continue
-            if name in excluded or channel["id"] in excluded:
+            if name in excluded or channel_id in excluded:
                 continue
             out.append(channel)
         return out

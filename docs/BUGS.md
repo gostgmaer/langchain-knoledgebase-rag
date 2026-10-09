@@ -1411,6 +1411,29 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   (`[{"clientState": "s3cret"}, "not-a-dict"]`). Full `test_events_render_files.py` (15 tests) and
   the full suite (513 passed, 0 regressions) both clean.
 
+### 46. ✅ Slack channel allow/exclude lists silently never matched a channel configured by id
+- Found auditing `packages/connectors/sources/slack.py`'s `_channels()`, which turns the admin's
+  `channels`/`exclude_channels` settings (documented as accepting "Channel names (without #) or ids")
+  into the set of channels actually read.
+- **The bug:** `wanted`/`excluded` are built by lower-casing every configured entry
+  (`{c.lower().lstrip("#") for c in ...}`), and channel **names** from the Slack API are lower-cased
+  the same way before comparison — but the raw channel **id** (`channel["id"]`, always upper-case,
+  e.g. `"C0123456789"`) was compared directly against those lower-cased sets, so it could never match.
+- **Impact:** configuring either list by channel id (rather than name) silently did nothing useful:
+  an id-only `channels` allow-list matched zero channels (the source discovered and indexed nothing,
+  with no error), and an id-only `exclude_channels` entry never excluded anything — a channel an
+  admin explicitly tried to keep out of the knowledge base (e.g. an HR/legal channel, referenced by
+  id because its name changed or was ambiguous) stayed in and got indexed anyway.
+- **Fixed:** lower-case the channel id the same way as the name before comparing, in a local
+  `channel_id` variable (the channel dict itself, used elsewhere for the real Slack API calls, is
+  left untouched).
+- **Verified:** reproduced against pre-fix code (`git stash`) — filtering `channels: ["C1"]` returned
+  zero documents instead of `C1`'s thread. New test
+  `test_channel_allowlist_and_excludelist_also_work_by_channel_id` covers both the allow-list and
+  exclude-list id paths; confirmed it fails on pre-fix code and passes with the fix. Full
+  `test_slack_connector.py` (14 tests) and the full suite (514 passed, 0 regressions) both clean.
+- **Files:** `packages/connectors/sources/slack.py`, `tests/unit/connectors/test_slack_connector.py`.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
