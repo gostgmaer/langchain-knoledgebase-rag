@@ -1385,6 +1385,32 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
      no notion of staleness.
   Full `test_source_sync.py` (26 tests) and the full suite (513 passed, 0 regressions) both clean.
 
+### 45. ✅ Webhook authentication bypass — a crafted Microsoft Graph payload skipped the secret check entirely
+- Found auditing `packages/connectors/webhooks.py`, the per-source webhook authentication used by
+  `POST /webhooks/sources/{source_id}` (`packages/api/routers/knowledge_sources.py`'s
+  `source_webhook`) — the endpoint a real external system (or, as it turned out, anyone) calls to
+  notify the platform of a change, gated by a per-source secret instead of a user token.
+- **The bug:** `authenticated()`'s Microsoft Graph path (secret carried as each notification's
+  `clientState`, since Graph can't send custom headers) built `states` by filtering `body["value"]`
+  down to dict entries only (`[v.get("clientState") for v in values if isinstance(v, dict)]`), then
+  checked `all(... for s in states)`. `all()` over an **empty** sequence is vacuously `True` in
+  Python — so a payload like `{"value": ["anything"]}` (a non-empty list whose entries are all
+  non-dicts) got entirely filtered out of `states`, leaving it empty, and `authenticated()` returned
+  `True` without ever comparing anything against the real secret.
+- **Impact:** a complete authentication bypass for any source with `webhook_secret_hash` set (i.e.
+  exactly the sources that had the security feature turned on) — no header, no valid `clientState`,
+  no knowledge of the secret required. An attacker who knows (or enumerates) a `source_id` could
+  trigger a real sync job on demand, at will, for resource exhaustion against both this platform and
+  the external source, with none of the intended gating.
+- **Fixed:** require every entry in `value` to actually be a dict before trusting `states` at all
+  (`isinstance(values, list) and values and all(isinstance(v, dict) for v in values)`), so a
+  malformed/crafted payload fails closed instead of silently emptying the set being checked.
+- **Verified:** reproduced the bypass directly against pre-fix code (`git stash`) —
+  `authenticated(digest, None, {"value": ["not-a-dict"]})` returned `True` with no secret supplied —
+  confirmed the fix returns `False` for that payload and for a mixed valid/invalid list
+  (`[{"clientState": "s3cret"}, "not-a-dict"]`). Full `test_events_render_files.py` (15 tests) and
+  the full suite (513 passed, 0 regressions) both clean.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
