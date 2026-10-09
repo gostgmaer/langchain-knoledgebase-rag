@@ -1495,6 +1495,31 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   47) and `npx eslint` on the changed files all clean, 0 regressions.
 - **Files:** `frontend/src/lib/auth/gateway.ts`, `frontend/src/lib/auth/gateway.test.ts`.
 
+### 49. ✅ The embeddable chat widget's own public script, `widget.js`, was blocked for the anonymous visitors it exists for
+- Found while verifying the new Documentation page below: fetching any `public/` static asset
+  without a session cookie (tested directly: `/widget.js`, `/vercel.svg`) returned a `307` redirect
+  to `/` instead of the file. Traced to `frontend/src/proxy.ts` — its matcher
+  (`"/((?!api|_next/static|_next/image|favicon.ico).*)"`) intercepts every path except those four,
+  and its handler redirects any request without `ACCESS_COOKIE` straight to `/` unless the path is
+  in a small literal `PUBLIC_PATHS` allowlist (`/`, `/register`, `/accept-invite`,
+  `/auth/callback`) — `widget.js` was never in it.
+- **Impact:** `frontend/public/widget.js` is item 37's embeddable chat widget's entire client — the
+  file's own docstring: *"a customer drops this on their own site as a plain `<script>` tag"*,
+  loaded by anonymous visitors on third-party websites who have never signed into this app and
+  never will. Every one of those requests got this app's own login-page HTML back instead of the
+  script, so the `<script>` tag silently failed everywhere the widget was embedded — not a
+  hypothetical edge case, the widget's one and only real-world use.
+- **Fixed:** added `/widget.js` to `proxy.ts`'s `PUBLIC_PATHS` allowlist, the same mechanism
+  already used for the other handful of pages that must work before any session exists.
+- **Verified:** reproduced against pre-fix code (`git stash`) with a new
+  `frontend/src/proxy.test.ts` — an anonymous request to `/widget.js` returned `307` before the fix,
+  `200` after; a real protected page (`/admin/dashboard`) still redirects an anonymous request and
+  still lets a logged-in one through, both unchanged. Confirmed live against the running dev server
+  too (`curl` with no cookie: `/widget.js` → `200` after the fix, was `307`). Full frontend suite
+  (`npx vitest run`, 35 tests) and `npx tsc --noEmit` (clean aside from the same pre-existing,
+  unrelated `platform-settings-view.tsx` error noted in items 47-48) both clean, 0 regressions.
+- **Files:** `frontend/src/proxy.ts`, `frontend/src/proxy.test.ts`.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
