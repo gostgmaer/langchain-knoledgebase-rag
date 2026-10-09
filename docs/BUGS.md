@@ -1463,6 +1463,38 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   rather than building new test scaffolding for a single fix.
 - **Files:** `frontend/src/components/sources/permissions-tab.tsx`.
 
+### 48. ✅ Concurrent requests near access-token expiry could each independently refresh, racing the refresh token
+- Found auditing the frontend's own token-refresh logic: `frontend/src/app/api/auth/session/route.ts`
+  and `frontend/src/app/api/rag/[...path]/route.ts` each independently implement "is the access token
+  expired? if so, use the refresh-token cookie to get a new pair" (`validAccessToken` / the inline
+  equivalent in `session/route.ts`), with no coordination between them.
+- **The bug:** a single page load fires `GET /api/auth/session` (session check) alongside several
+  `GET/POST /api/rag/*` calls (page data) essentially simultaneously. If the access token is within
+  its expiry skew window when any of these land, **every one of them** independently reads the same
+  (still valid, not-yet-rotated) refresh-token cookie and calls `gatewayRefresh()` concurrently —
+  there was no in-process de-duplication of concurrent refreshes for the same refresh token.
+- **Impact:** at minimum, redundant duplicate calls to the auth gateway on every token expiry under
+  concurrent load. More seriously: if the gateway rotates/invalidates a refresh token on use (a common,
+  recommended anti-theft practice for refresh tokens), one of the concurrent callers wins and the
+  others receive a stale-token error for a refresh token that had just been legitimately consumed —
+  and each loser's catch block (`clearAuthCookies`) wipes the user's session cookies outright. A user
+  could be spontaneously logged out by their own page load's unrelated concurrent requests, despite
+  having a perfectly valid, just-refreshed session.
+- **Fixed:** `gatewayRefresh()` (`frontend/src/lib/auth/gateway.ts`) now coalesces concurrent calls for
+  the same refresh-token value into one shared in-flight promise (a module-level `Map`, cleared once
+  the call settles), so every concurrent caller awaits and receives the result of the single real
+  gateway call instead of each firing and racing its own. Calls for different refresh tokens (different
+  sessions) are unaffected; a new call after a prior one has settled starts a fresh gateway request as
+  before.
+- **Verified:** new `frontend/src/lib/auth/gateway.test.ts` — reproduced against pre-fix code (`git
+  stash`): two concurrent `gatewayRefresh()` calls for the same token triggered 2 real `fetch` calls
+  instead of 1; confirmed the fix brings it to 1, that both callers receive the same resolved tokens,
+  that different refresh tokens are never coalesced together, and that a later call after settlement
+  issues its own fresh request. Full frontend suite (`npx vitest run`, 32 tests), `npx tsc --noEmit`
+  (clean aside from the same pre-existing, unrelated `platform-settings-view.tsx` error noted in item
+  47) and `npx eslint` on the changed files all clean, 0 regressions.
+- **Files:** `frontend/src/lib/auth/gateway.ts`, `frontend/src/lib/auth/gateway.test.ts`.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

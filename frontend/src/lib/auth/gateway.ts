@@ -144,12 +144,27 @@ export function gatewayLogin(email: string, password: string, origin: string): P
   );
 }
 
+// Keyed by the refresh token itself, so concurrent requests that read the same not-yet-rotated
+// cookie (e.g. a page load's GET /api/auth/session racing several GET /api/rag/* calls right as
+// the access token expires) share one in-flight gateway call instead of each firing their own.
+// Without this, a gateway that rotates/invalidates a refresh token on use would let one of those
+// concurrent refreshes succeed and the other(s) fail with a stale-token error, spuriously clearing
+// a session that had just been refreshed correctly moments earlier by a sibling request.
+const pendingRefreshes = new Map<string, Promise<GatewayTokens>>();
+
 export function gatewayRefresh(refreshToken: string, origin: string): Promise<GatewayTokens> {
-  return gatewayFetch(
+  const pending = pendingRefreshes.get(refreshToken);
+  if (pending) return pending;
+
+  const promise = gatewayFetch(
     "/api/auth/refresh",
     { method: "POST", body: JSON.stringify({ refreshToken }) },
     origin,
-  );
+  ).finally(() => {
+    pendingRefreshes.delete(refreshToken);
+  });
+  pendingRefreshes.set(refreshToken, promise);
+  return promise;
 }
 
 export async function gatewayLogout(
