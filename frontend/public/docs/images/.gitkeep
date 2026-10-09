@@ -1,0 +1,3 @@
+Drop screenshots here — see docs/BUGS.md-style naming in usability-guide.md's image references
+(e.g. chat-overview.png, knowledge-sources-list.png). This file only exists so Git tracks the
+otherwise-empty folder; delete it once real images are added, or leave it, it's harmless.

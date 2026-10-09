@@ -1520,6 +1520,35 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   unrelated `platform-settings-view.tsx` error noted in items 47-48) both clean, 0 regressions.
 - **Files:** `frontend/src/proxy.ts`, `frontend/src/proxy.test.ts`.
 
+### 50. ✅ New feature — an in-app Documentation page, a usability guide for every role
+- A full usability guide covering every feature in the product (Chat, Knowledge Bases, Knowledge
+  Sources and their permissions/identity mappings, Documents, Search, Agents, the embeddable widget,
+  Model Profiles, Prompts, Tools, Retrieval Log/Settings, Analytics/Usage/Observability/Feedback,
+  Upload Jobs, Team, API Keys, Settings, and the Admin-only Tenants/Feature Flags/Platform Settings)
+  organized by task rather than by menu order, with role-specific notes (Customer/Tenant Admin/Admin)
+  and a troubleshooting/FAQ section grounded in this session's own findings (e.g. the identity-mapping
+  user/group pitfall from item 47).
+- **Content:** `frontend/public/docs/usability-guide.md`, written from the real UI copy of every
+  `components/features/*-view.tsx` file (titles, descriptions, field placeholders) rather than
+  invented terminology, so it describes what the product actually says. Image references
+  (`/docs/images/*.png`) are in place throughout but the images themselves are not — intentionally
+  left for later, each one rendering as a labeled placeholder (not a browser broken-image icon)
+  naming the expected file, until it's added to `frontend/public/docs/images/`.
+- **UI:** a new `DocsView` (`frontend/src/components/features/docs-view.tsx`) fetches and renders
+  that file with `react-markdown` + `remark-gfm` (matching the chat bubble's existing Markdown
+  rendering approach), reachable as **Documentation** in every role's sidebar
+  (`/customer/docs`, `/tenant-admin/docs`, `/admin/docs` — `frontend/src/app/[role]/docs/page.tsx`,
+  wired into `frontend/src/app/[role]/layout.tsx`'s `NAV_BY_ROLE`).
+- **Verified:** `npx vitest run` (35 passed), `npx tsc --noEmit` and `npx eslint` on the new/changed
+  files clean, and `npx next build`'s compile step succeeds (its type-check step fails only on the
+  same pre-existing, unrelated `platform-settings-view.tsx` error noted in items 47-49). Confirmed
+  live against the running dev server that the markdown file itself is reachable once a session
+  cookie is present (matching every other page in the app — the Documentation page is an in-app
+  help page, not a public one) and that `widget.js` discovering this gate led directly to item 49.
+- **Files:** `frontend/public/docs/usability-guide.md`, `frontend/public/docs/images/.gitkeep`,
+  `frontend/src/components/features/docs-view.tsx`, `frontend/src/app/[role]/docs/page.tsx`,
+  `frontend/src/app/[role]/layout.tsx`.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
