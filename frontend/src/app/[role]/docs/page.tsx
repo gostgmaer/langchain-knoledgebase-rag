@@ -1,7 +1,7 @@
 "use client";
 
-import { DocsView } from "@/components/features/docs-view";
+import { DocsIndexView } from "@/components/features/docs-index-view";
 
 export default function DocsPage() {
-  return <DocsView />;
+  return <DocsIndexView />;
 }

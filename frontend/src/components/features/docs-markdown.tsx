@@ -1,22 +1,10 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { ImageOff } from "lucide-react";
+import { useParams } from "next/navigation";
 import { isValidElement, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-
-import { PageHeader } from "@/components/shared/page-header";
-import { QueryError } from "@/components/shared/query-error";
-import { Skeleton } from "@/components/ui/skeleton";
-
-const GUIDE_URL = "/docs/usability-guide.md";
-
-async function fetchGuide(): Promise<string> {
-  const res = await fetch(GUIDE_URL);
-  if (!res.ok) throw new Error(`Could not load the usability guide (HTTP ${res.status}).`);
-  return res.text();
-}
 
 function textOf(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -70,7 +58,8 @@ function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
   );
 }
 
-const COMPONENTS: Components = {
+function buildComponents(role: string): Components {
+  return {
   h1: heading("h1", "mt-8 text-2xl"),
   h2: heading("h2", "mt-8 text-xl"),
   h3: heading("h3", "mt-6 text-lg"),
@@ -83,9 +72,13 @@ const COMPONENTS: Components = {
   li: ({ children }) => <li className="leading-relaxed">{children}</li>,
   a: ({ children, href }) => {
     const external = /^https?:\/\//.test(href ?? "");
+    // Cross-topic links are authored role-agnostic (e.g. "/docs/settings"); this is the one place
+    // that knows which role's doc tree is actually being read, so it's the one place that can
+    // correctly resolve them to "/{role}/docs/settings" rather than baking a role into every file.
+    const resolved = !external && href?.startsWith("/docs/") ? `/${role}${href}` : href;
     return (
       <a
-        href={href}
+        href={resolved}
         target={external ? "_blank" : undefined}
         rel={external ? "noreferrer noopener" : undefined}
         className="font-medium underline underline-offset-2 hover:no-underline"
@@ -129,34 +122,16 @@ const COMPONENTS: Components = {
   ),
   hr: () => <hr className="my-8 border-neutral-200 dark:border-neutral-800" />,
   img: ({ src, alt }) => <MarkdownImage src={typeof src === "string" ? src : undefined} alt={alt} />,
-};
+  };
+}
 
-export function DocsView() {
-  const { data, isError, error, isLoading, refetch } = useQuery({
-    queryKey: ["usability-guide"],
-    queryFn: fetchGuide,
-  });
-
+export function DocsMarkdown({ content }: { content: string }) {
+  const { role } = useParams<{ role: string }>();
   return (
-    <div>
-      <PageHeader title="Documentation" description="How to use every part of Meridian, by what you're trying to do." />
-
-      {isError ? (
-        <QueryError error={error} onRetry={() => void refetch()} />
-      ) : isLoading || !data ? (
-        <div className="space-y-3">
-          <Skeleton className="h-8 w-2/3" />
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-3/4" />
-        </div>
-      ) : (
-        <article className="max-w-3xl text-sm text-neutral-700 dark:text-neutral-300">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
-            {data}
-          </ReactMarkdown>
-        </article>
-      )}
-    </div>
+    <article className="max-w-3xl text-sm text-neutral-700 dark:text-neutral-300">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={buildComponents(role)}>
+        {content}
+      </ReactMarkdown>
+    </article>
   );
 }
