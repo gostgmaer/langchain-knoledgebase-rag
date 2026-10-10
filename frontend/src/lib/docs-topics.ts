@@ -30,9 +30,13 @@ export const DOCS_TOPICS: DocsTopic[] = [
   { slug: "prompts", title: "Prompts", description: "Versioned system-prompt templates.", section: "Build" },
   { slug: "tools", title: "Tools", description: "Built-in tools, and custom webhook tools.", section: "Build" },
 
-  { slug: "retrieval", title: "Retrieval Log and Retrieval Settings", description: "See what retrieval found, and tune how it behaves.", section: "Operations" },
-  { slug: "operations", title: "Analytics, Usage, Observability and Feedback", description: "How the workspace is actually performing.", section: "Operations", roleNote: "Tenant Admin and Admin" },
-  { slug: "upload-jobs", title: "Upload Jobs", description: "Real-time progress for every document upload.", section: "Operations" },
+  { slug: "analytics", title: "Analytics", description: "Queries per day, feedback trends, and the most-flagged responses.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "retrieval", title: "Retrieval Log", description: "See exactly what retrieval found for a given query, and why.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "retrieval-settings", title: "Retrieval Settings", description: "Tune how many chunks feed an answer and how strict reranking is.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "observability", title: "Observability", description: "Retrieval health, document health, and an audit trail.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "usage", title: "Usage", description: "Token consumption and estimated cost, by day.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "feedback", title: "Feedback", description: "Every thumbs up/down left on an assistant response.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "upload-jobs", title: "Upload Jobs", description: "Real-time progress for every document upload.", section: "Operations", roleNote: "Tenant Admin and Admin" },
 
   { slug: "team", title: "Team", description: "Members and pending invitations.", section: "Administration" },
   { slug: "api-keys", title: "API Keys", description: "Call the platform's API outside a browser session.", section: "Administration" },

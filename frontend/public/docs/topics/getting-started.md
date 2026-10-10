@@ -19,8 +19,8 @@ link in your invitation email — it attaches you to the right workspace automat
 
 Once signed in, the left sidebar is your menu, grouped by what each section is for: **Overview**
 (Dashboard, Chat), **Knowledge** (Knowledge Bases, Knowledge Sources, Documents, Search), **Build**
-(Agents, Model Profiles, Prompts, Tools), **Operations** (Analytics, Retrieval, Observability,
-Usage, Feedback, Upload Jobs), and **Administration** (Team, API Keys, Settings, and, for Admins,
-Tenants, Feature Flags and Platform Settings).
+(Agents, Model Profiles, Prompts, Tools), **Operations** (Analytics, Retrieval Log, Retrieval
+Settings, Observability, Usage, Feedback, Upload Jobs), and **Administration** (Team, API Keys,
+Settings, and, for Admins, Tenants, Feature Flags and Platform Settings).
 
 ![Signed-in sidebar, showing the grouped menu](/docs/images/sidebar-overview.png)

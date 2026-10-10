@@ -1664,6 +1664,41 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   `frontend/next.config.ts`, `frontend/src/app/api/healthz/route.ts`, `docker-compose.prod.yml`,
   `scripts/build_prod_image.sh`, `docs/DEPLOYMENT.md`.
 
+### 53. ✅ Split the in-app usability guide's two combined topics into one page per route
+- Item 50's guide had two topics each covering several sidebar routes at once: "operations"
+  (Analytics, Usage, Observability, Feedback — four separate nav items under one page) and
+  "retrieval" (Retrieval Log and Retrieval Settings — two nav items under one page). Every other
+  topic in the guide is already one page per route; these two were the exception, not a deliberate
+  design choice, and the combined "operations" page in particular undersold what each of its four
+  pages actually does (e.g. Observability's re-index action and searchable audit trail weren't
+  mentioned at all).
+- **Fixed:** replaced `operations.md` with four dedicated pages — `analytics.md`, `usage.md`,
+  `observability.md`, `feedback.md` — and split `retrieval.md` into `retrieval.md` (Retrieval Log
+  only) plus a new `retrieval-settings.md`. Each page's content was written against the real
+  component it documents (`analytics-view.tsx`, `usage-view.tsx`, `observability-view.tsx`,
+  `feedback-view.tsx`, `retrieval-view.tsx`, `retrieval-settings-view.tsx`), not the prior
+  higher-level summary — e.g. corrected `feedback.md` to say a feedback row's message id is plain
+  text, not a link back to the message (the old `operations.md` claimed it linked back; the
+  component never made it a `<Link>`), and documented Observability's "Re-index outdated" action
+  and the audit trail's filter/pagination, neither of which `operations.md` mentioned at all.
+  `frontend/src/lib/docs-topics.ts` now lists all six Operations-section routes individually
+  (`analytics`, `retrieval`, `retrieval-settings`, `observability`, `usage`, `feedback`,
+  `upload-jobs`), each tagged "Tenant Admin and Admin" — `upload-jobs` was previously untagged,
+  itself a small accuracy gap since it's equally absent from the Customer nav.
+- Updated the two cross-links into the removed/renamed slugs: `chat.md`'s feedback mention now
+  points at `/docs/analytics` and `/docs/feedback` (was one link to `/docs/operations`), and
+  `troubleshooting.md`'s relevance-threshold tip now points at `/docs/retrieval-settings` (was
+  `/docs/retrieval`, which is now the log, not the settings, page). `getting-started.md`'s sidebar
+  overview now names "Retrieval Log" and "Retrieval Settings" as the two separate items they are,
+  rather than one "Retrieval".
+- **Verified:** `npx vitest run` (35 passed, unchanged) and `npx tsc --noEmit` clean. Confirmed by
+  count that `frontend/public/docs/topics/*.md` (27 files) matches `DOCS_TOPICS.length` exactly (23
+  from item 50, minus the one removed `operations.md`, plus the five new files), and that no
+  remaining reference to `/docs/operations` exists anywhere in `frontend/public` or `frontend/src`.
+- **Files:** `frontend/src/lib/docs-topics.ts`, `frontend/public/docs/topics/analytics.md`,
+  `usage.md`, `observability.md`, `feedback.md`, `retrieval-settings.md`, `retrieval.md` (rewritten),
+  `chat.md`, `troubleshooting.md`, `getting-started.md` — `operations.md` removed.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

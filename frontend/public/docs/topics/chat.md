@@ -8,8 +8,8 @@ knowledge, so answers stay grounded in your own content.
   a page number or section when one applies, and when it was last updated. Click a citation to
   open the original.
 - **Feedback.** Use the thumbs up / thumbs down under an assistant's reply to rate it. This feeds
-  [Analytics](/docs/operations) and the Feedback list, so a Tenant Admin can see which answers are
-  landing and which aren't.
+  [Analytics](/docs/analytics) and the [Feedback](/docs/feedback) list, so a Tenant Admin can see
+  which answers are landing and which aren't.
 - **Formatting.** Assistant answers render Markdown — headings, lists, tables, code blocks, bold
   and italic text all show up formatted, not as raw symbols.
 
