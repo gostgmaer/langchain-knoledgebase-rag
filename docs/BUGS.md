@@ -1582,6 +1582,18 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
 - **Files:** `frontend/src/lib/api/types.ts`.
 
 ### 52. ✅ New feature — a CI/CD pipeline that builds both images, pushes them, and deploys on every merge
+- **Path-filtered per request**: a new `changes` job (`dorny/paths-filter@v3`, comparing against
+  `github.event.before` — its default for a `push` event) runs first and decides which image(s) a
+  given push actually needs: a change touching only `frontend/**` builds and deploys only the
+  frontend; a change touching only backend-relevant paths (`apps/**`, `packages/**`, `alembic/**`,
+  `alembic.ini`, `pyproject.toml`, `uv.lock`, `scripts/**` — all genuinely part of the backend
+  image's build context per `COPY --chown=app:app . .` in `docker/Dockerfile`, or
+  `docker/Dockerfile.worker`/`docker/Dockerfile` themselves) builds and deploys only the backend; a
+  change touching both builds and deploys both. `build-and-deploy` skips entirely
+  (`if: needs.changes.outputs.backend == 'true' || ... frontend ...`) if neither path list matches
+  (e.g. a docs-only or `.github/**`-only change). The build and deploy steps for each image are
+  gated by the same two booleans individually, so a backend-only push's frontend build/deploy steps
+  just don't run (and vice versa) rather than redundantly rebuilding/redeploying an unchanged image.
 - No automation existed past CI (`.github/workflows/ci.yml` only ran tests) — every real deploy was
   a human running `scripts/build_prod_image.sh`/`scripts/deploy_blue_green.sh` by hand
   (`docs/DEPLOYMENT.md` §6-7), and the frontend had no production image or deploy path at all.
