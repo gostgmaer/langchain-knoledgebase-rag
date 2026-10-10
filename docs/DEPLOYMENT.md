@@ -44,9 +44,9 @@ curl http://localhost:8000/api/v1/health
 The `Makefile`'s `dev`/`prod` targets pointed at `docker/compose/docker-compose.dev.yml` / `docker/compose/docker-compose.prod.yml` — paths that have never existed; the real files live at the repo root (`docker-compose.dev.yml`, `docker-compose.prod.yml`). **Fixed the path** (`Makefile` now points at the real locations), but that just exposes the deeper problem:
 
 - **`docker-compose.dev.yml` is an empty placeholder file** — zero services defined. `make dev` will now at least *run* without a "file not found" error, but it won't start anything. If you want a dev-specific compose override (hot-reload volume mounts, debug ports, etc.), it needs to actually be written — there's no existing content to build from.
-- **`docker-compose.prod.yml` has real, complete content**, but assumes a **pre-built, already-tagged image** (`image: easydev/ai-platform:${VERSION:-latest}`) rather than building from `docker/Dockerfile` directly — so `make prod` will fail immediately with an image-not-found error unless you first run something like:
+- **`docker-compose.prod.yml` has real, complete content**, but assumes a **pre-built, already-tagged image** (`image: ghcr.io/gostgmaer/ai-platform:${VERSION:-latest}`) rather than building from `docker/Dockerfile` directly — so `make prod` will fail immediately with an image-not-found error unless you first run something like:
   ```bash
-  docker build -t easydev/ai-platform:latest -f docker/Dockerfile .
+  docker build -t ghcr.io/gostgmaer/ai-platform:latest -f docker/Dockerfile .
   ```
   It also had a broken `env_file: ../../.env` path (assuming the compose file lived two directories deeper than it actually does) — fixed to `.env`.
 
@@ -171,9 +171,17 @@ to guess at from this repo alone.
 ## 6. Building and deploying the production image
 
 `docs/BUGS.md` item 7: `docker-compose.prod.yml` requires a pre-built, already-tagged
-`easydev/ai-platform:${VERSION}` image (deliberately, not a floating `latest` — see the compose
-file's own comment on why), but nothing in the repo built one, so `docker compose -f
+`ghcr.io/gostgmaer/ai-platform:${VERSION}` image (deliberately, not a floating `latest` — see the
+compose file's own comment on why), but nothing in the repo built one, so `docker compose -f
 docker-compose.prod.yml up` failed immediately with an image-not-found error.
+
+**Since item 52, `.github/workflows/ci.yml`'s `build-and-deploy` job does this automatically** on
+every push to `main`/`master` — it builds, tags, and pushes to GitHub Container Registry
+(`ghcr.io`, authenticated via the workflow's own `GITHUB_TOKEN`; no registry secret to create or
+rotate) whenever backend-relevant paths change. The manual path below is still correct for a local
+build or a registry push outside CI; just be aware GHCR packages default to **private** — the
+deploy host needs `docker login ghcr.io` with a PAT that has `read:packages`, or the packages need
+to be made public, or `docker compose pull` will fail there with an auth error.
 
 ```bash
 # Build and tag locally:

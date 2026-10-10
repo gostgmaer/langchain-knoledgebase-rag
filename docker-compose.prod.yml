@@ -44,7 +44,7 @@ services:
   # so a production `docker compose up` enforces RLS by default instead
   # of it being a manual step someone has to remember to run first.
   migrate:
-    image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
+    image: ghcr.io/gostgmaer/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
 
     entrypoint: ["sh", "scripts/docker_secrets_entrypoint.sh"]
     command: ["sh", "-c", "alembic upgrade head && PYTHONPATH=. python scripts/create_app_role.py"]
@@ -103,7 +103,7 @@ services:
   # deploy work at all). Only one is normally running at a time; scripts/deploy_blue_green.sh
   # controls which. Neither publishes a host port directly — Traefik is the only public entrypoint.
   api_blue:
-    image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
+    image: ghcr.io/gostgmaer/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
 
     # No command: override — Docker passes the image's own default CMD (uvicorn ...) through as
     # this entrypoint's args, same as api_blue/api_green always ran, just via the secrets wrapper.
@@ -147,7 +147,7 @@ services:
       - backend
 
   api_green:
-    image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
+    image: ghcr.io/gostgmaer/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
 
     entrypoint: ["sh", "scripts/docker_secrets_entrypoint.sh"]
 
@@ -189,7 +189,7 @@ services:
       - backend
 
   worker:
-    image: easydev/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
+    image: ghcr.io/gostgmaer/ai-platform:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
 
     entrypoint: ["sh", "scripts/docker_secrets_entrypoint.sh"]
     # Exec form, not the previous shell-form string — unambiguous once entrypoint: is also set
@@ -313,7 +313,7 @@ services:
   # its own to get right, and nothing has asked for that same investment here yet. Revisit once a
   # real deploy step/versioning scheme (docs/BUGS.md) lands for this service.
   frontend:
-    image: easydev/ai-platform-frontend:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
+    image: ghcr.io/gostgmaer/ai-platform-frontend:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
 
     restart: always
 
