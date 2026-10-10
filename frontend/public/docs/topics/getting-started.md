@@ -27,4 +27,5 @@ Settings, and, for Admins, Tenants, Feature Flags and Platform Settings).
 
 ![Signed-in sidebar, showing the grouped menu](/docs/images/sidebar-overview.png)
 
-New to terms like "chunk" or "reranking"? See the [Glossary](/docs/glossary).
+New to terms like "chunk" or "reranking"? See the [Glossary](/docs/glossary). Wondering what's
+changed recently? See the [Changelog](/docs/changelog).
