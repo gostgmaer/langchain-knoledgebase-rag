@@ -1559,6 +1559,28 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   `frontend/src/app/[role]/docs/page.tsx`, `frontend/src/app/[role]/docs/[slug]/page.tsx`,
   `frontend/src/app/[role]/layout.tsx`.
 
+### 51. ✅ `PlatformSettingsUpdate.values`'s type silently excluded `string`, blocking `next build` outright
+- Found while building the frontend's first production Docker image (item 52 below) — `pnpm build`
+  runs `next build`'s own type-check step, which fails the whole build (not just a lint warning) on
+  any type error. `platform-settings-view.tsx` passes its `draft` state (legitimately typed
+  `Record<string, number | boolean | string | string[] | null>` — the `kind === "string"` branch,
+  both the plain-text `Input` and the `Select`/`choices` dropdown, both produce real `string`
+  values) into `save.mutateAsync({ values: draft })`, whose parameter type,
+  `PlatformSettingsUpdate.values` (`frontend/src/lib/api/types.ts`), was
+  `Record<string, number | boolean | string[] | null>` — missing `string` entirely.
+- **Impact:** this had been flagged (items 47-50) as a pre-existing, unrelated error to leave out of
+  scope, on the assumption it only broke `next build`'s type-check step in isolation. It turned out
+  to block something concrete once something actually needed `next build` to succeed: the
+  production frontend Docker image (`frontend/Dockerfile`) runs `pnpm build` as its one build step,
+  so every image build — and therefore every merge through the new CI/CD pipeline (item 52) — would
+  have failed here, every time, on a page nobody was even touching.
+- **Fixed:** added `string` to the union, matching what the UI actually sends.
+- **Verified:** reproduced via `npx tsc --noEmit` and `pnpm build` both failing with this exact error
+  pre-fix; both clean after. Full frontend suite (`pnpm test`, 35 passed) and a complete
+  `pnpm build` (standalone output, confirmed `.next/standalone/server.js` and `.next/static` land
+  where `frontend/Dockerfile` expects them) both verified post-fix.
+- **Files:** `frontend/src/lib/api/types.ts`.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

@@ -888,7 +888,7 @@ export interface PlatformSettingsResponse {
 
 export interface PlatformSettingsUpdate {
   /** key -> new value, or null to revert that one key to its built-in default. */
-  values: Record<string, number | boolean | string[] | null>;
+  values: Record<string, number | boolean | string | string[] | null>;
 }
 
 export interface ChatFilters {
