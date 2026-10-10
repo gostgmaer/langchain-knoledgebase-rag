@@ -1768,6 +1768,34 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
 
 ---
 
+### 56. ✅ New feature — a versioned Changelog page in the usability guide
+- The repository has never cut a tagged release — `git tag` is empty, and `pyproject.toml`/
+  `frontend/package.json` are both still frozen at `0.1.0`. "What changed, by version" had no page
+  despite being asked for, and inventing semver tags that don't exist anywhere else in the project
+  would have been inaccurate. Instead, `changelog.md` (Help section) says up front that the version
+  numbers are groupings this guide assigns to the real commit history, not formal tags, then
+  presents five real version groupings (v0.1.0 through v0.5.0) derived directly from `git log`,
+  newest first — each one's bullets are paraphrased straight from real commit subjects in that date
+  range, not invented:
+  - v0.5.0 (2026-10-04 to 2026-10-10): Platform Settings, API Keys, the embeddable widget, the Slack
+    connector, the audit trail expansion, the rebuilt CI/CD pipeline, and this Documentation guide
+    itself.
+  - v0.4.0 (2026-09-30 to 2026-10-03): real branding, fine-grained RBAC, Postgres RLS, scheduled
+    backups, zero-downtime deploys, real frontend/load-test coverage.
+  - v0.3.0 (2026-09-24 to 2026-09-26): IAM enforcement platform-wide, the first full QA pass (the
+    dozen findings `docs/QA_REPORT.md` documents), retrieval logging/provenance, external knowledge
+    source connectors.
+  - v0.2.0 (2026-07-26 to 2026-08-08) and v0.1.0 (2026-07-18 to 2026-07-23): the original
+    architecture and its first stabilization pass.
+- `getting-started.md` gained one more closing-line cross-link, alongside the existing Glossary one.
+- **Verified:** re-ran the parse/link-consistency script — 31 `DOCS_TOPICS` entries, 31 files on
+  disk, every file parses through the real `remark-gfm` pipeline, every internal `/docs/<slug>` link
+  resolves. `npx tsc --noEmit` and `npx vitest run` (35 passed) both clean.
+- **Files:** `frontend/src/lib/docs-topics.ts`, `frontend/public/docs/topics/changelog.md` (new),
+  `getting-started.md` (cross-link added).
+
+---
+
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
 
 These aren't bugs; `docs/BUILD_STATUS.md` contained claims that no longer matched the code. Listed

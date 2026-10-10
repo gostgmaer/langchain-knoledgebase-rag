@@ -49,6 +49,7 @@ export const DOCS_TOPICS: DocsTopic[] = [
   { slug: "glossary", title: "Glossary", description: "Quick definitions for terms used throughout this guide.", section: "Help" },
   { slug: "data-privacy", title: "Data handling and privacy", description: "What actually gets stored, in plain terms.", section: "Help" },
   { slug: "troubleshooting", title: "Troubleshooting and FAQ", description: "Common issues, and how to resolve them.", section: "Help" },
+  { slug: "changelog", title: "Changelog", description: "What's changed, grouped into versions, newest first.", section: "Help" },
 ];
 
 export const DOCS_SECTIONS: DocsTopic["section"][] = ["Overview", "Knowledge", "Build", "Operations", "Administration", "Help"];
