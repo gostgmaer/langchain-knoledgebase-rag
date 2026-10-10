@@ -178,7 +178,12 @@ docker-compose.prod.yml up` failed immediately with an image-not-found error.
 **Since item 52, `.github/workflows/ci.yml`'s `build-and-deploy` job does this automatically** on
 every push to `main`/`master` — it builds, tags, and pushes to GitHub Container Registry
 (`ghcr.io`, authenticated via the workflow's own `GITHUB_TOKEN`; no registry secret to create or
-rotate) whenever backend-relevant paths change. The manual path below is still correct for a local
+rotate) whenever backend-relevant paths change, then tags the repo itself `v<short-sha>` (same SHA
+used for the image tag) and pushes that tag too, so each deployed image has a matching release tag
+to check out or diff against later. The job can also be run by hand from the Actions tab
+(`workflow_dispatch`) — a manual run always builds the backend and, unless you check
+`skip_frontend`, the frontend too; it skips the push-diff logic entirely and does not create a
+release tag (only an actual merge does that). The manual path below is still correct for a local
 build or a registry push outside CI; just be aware GHCR packages default to **private** — the
 deploy host needs `docker login ghcr.io` with a PAT that has `read:packages`, or the packages need
 to be made public, or `docker compose pull` will fail there with an auth error.

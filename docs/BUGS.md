@@ -1641,6 +1641,16 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   repo variable — none exist yet. Until they're added under Settings → Secrets and variables →
   Actions, the build/push steps now succeed on their own and the deploy steps fail at the SSH
   connection instead.
+- **Release tag on merge, manual dispatch added**: `build-and-deploy` now also tags the repo itself
+  — `git tag v<short-sha> && git push origin v<short-sha>`, matching the same short-SHA scheme
+  already used for the two image tags — right after resolving `VERSION`, only on an actual `push`
+  (not on a manual run, which could land on a commit whose tag already exists). Needed
+  `permissions: contents: write` on the job (was `read`); still uses `actions/checkout`'s own
+  `GITHUB_TOKEN` credentials, no new secret. Also added `workflow_dispatch` so the pipeline can be
+  run by hand: the `changes` job now branches on `github.event_name` — a `push` still goes through
+  `dorny/paths-filter` as before, but a manual run skips the filter entirely (there's no meaningful
+  "before" commit to diff against) and always treats the backend as needed, with a `skip_frontend`
+  checkbox input controlling whether the frontend image builds/deploys too (default: build both).
 - **Verified:** `docker compose -f docker-compose.prod.yml config` resolves cleanly with the new
   `frontend` service. `.github/workflows/ci.yml` parses as valid YAML. `pnpm build` (the exact
   command `frontend/Dockerfile` runs) succeeds end to end with `output: "standalone"` and produces
