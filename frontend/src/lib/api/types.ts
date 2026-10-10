@@ -872,12 +872,13 @@ export interface ReindexResult {
 export interface PlatformSettingItem {
   key: string;
   label: string;
-  kind: "int" | "float" | "bool" | "string_list";
+  kind: "int" | "float" | "bool" | "string_list" | "string";
   help: string | null;
   minimum: number | null;
   maximum: number | null;
-  value: number | boolean | string[];
-  default: number | boolean | string[];
+  choices: string[] | null;
+  value: number | boolean | string | string[];
+  default: number | boolean | string | string[];
   is_overridden: boolean;
 }
 
@@ -887,7 +888,7 @@ export interface PlatformSettingsResponse {
 
 export interface PlatformSettingsUpdate {
   /** key -> new value, or null to revert that one key to its built-in default. */
-  values: Record<string, number | boolean | string[] | null>;
+  values: Record<string, number | boolean | string | string[] | null>;
 }
 
 export interface ChatFilters {

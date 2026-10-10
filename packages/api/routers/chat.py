@@ -17,7 +17,7 @@ from packages.api.dependencies import (
     require_uuid_header,
 )
 from packages.api.responses import ApiResponse
-from packages.shared.access import set_retrieval_filters
+from packages.shared.access import set_retrieval_filters, set_retrieval_strategy
 from packages.tools.context import fetch_enabled_tools, set_custom_tools, set_enabled_tools
 from packages.tools.webhook import load_custom_tools
 from packages.api.schemas.chat import (
@@ -68,6 +68,7 @@ async def chat(
     user_id = require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID)
     set_custom_tools(await load_custom_tools(container.repositories.tool(), tenant_id))
     set_enabled_tools(await fetch_enabled_tools(container.feature_flags.service(), tenant_id))
+    set_retrieval_strategy(await container.platform_settings.service().get("retrieval_strategy"))
     if payload.filters:
         chosen = payload.filters.model_dump()
         chosen["source_types"] = chosen.pop("sources")  # the API says "sources", retrieval says "source_types"
@@ -217,6 +218,7 @@ async def resume(
     user_id = require_uuid_header(request, "X-User-ID", default=DEFAULT_USER_ID)
     set_custom_tools(await load_custom_tools(container.repositories.tool(), tenant_id))
     set_enabled_tools(await fetch_enabled_tools(container.feature_flags.service(), tenant_id))
+    set_retrieval_strategy(await container.platform_settings.service().get("retrieval_strategy"))
 
     conversations = container.repositories.conversation()
     conversation = await conversations.get(conversation_id)

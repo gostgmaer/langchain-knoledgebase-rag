@@ -118,12 +118,13 @@ async def upload_document(
     # UploadFile.size isn't reliably populated for every upload
     # transport (multipart streaming can leave it None), but the
     # actual bytes read are always the real, correct length.
-    if len(content) > settings.storage.max_file_size:
+    max_file_size = await container.platform_settings.service().get("max_file_size")
+    if len(content) > max_file_size:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=(
                 f"File is {len(content)} bytes, exceeding the "
-                f"{settings.storage.max_file_size}-byte limit."
+                f"{max_file_size}-byte limit."
             ),
         )
 

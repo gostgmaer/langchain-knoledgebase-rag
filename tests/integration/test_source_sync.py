@@ -6,9 +6,10 @@ parallel on separate connections, which the single-transaction `db_session` fixt
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -398,6 +399,52 @@ async def test_rejected_credentials_disconnect_the_source_and_are_reported_clear
     source = await env["source"]()
     assert source.status == "disconnected" and source.health["authentication"] == "invalid"
     assert source.last_sync_status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_sync_requests_for_the_same_source_only_one_wins(env, world):
+    """
+    create_run()'s "is a sync already active" check is a SELECT, not a lock: nothing serialised
+    concurrent callers before uq_source_sync_runs_active (packages/infrastructure/database/upgrades.py)
+    was added. A double-clicked "sync now", a scheduled run racing a webhook notification, could all
+    pass the check and all insert a queued run. This test exercises real concurrency (this file's env
+    fixture commits for real, unlike the single-transaction db_session fixture used elsewhere), not
+    just the sequential check.
+    """
+    from packages.connectors.scheduling import SyncAlreadyRunning, create_run
+
+    world.put("a")
+    results = await asyncio.gather(
+        *(
+            create_run(env["container"], env["source_id"], env["tenant_id"], trigger="manual", actor_id=None)
+            for _ in range(5)
+        ),
+        return_exceptions=True,
+    )
+    successes = [r for r in results if isinstance(r, UUID)]
+    failures = [r for r in results if isinstance(r, SyncAlreadyRunning)]
+    assert len(successes) == 1
+    assert len(failures) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_stale_but_still_queued_run_is_not_silently_duplicated(env, world):
+    """
+    The active-run check excludes runs whose updated_at is older than STALE_RUN_MINUTES (a crashed
+    worker's run is reaped separately, by reap_stale_runs()). Between a run going stale and the
+    reaper catching it, create_run()'s own SELECT would say "nothing active" and attempt to insert a
+    second queued run for the same source - this is exactly the gap uq_source_sync_runs_active closes:
+    the unique index has no notion of staleness, so the insert still conflicts.
+    """
+    from packages.connectors.scheduling import SyncAlreadyRunning, _stale_cutoff, create_run
+
+    first_run_id = await create_run(env["container"], env["source_id"], env["tenant_id"], trigger="manual", actor_id=None)
+    async with request_scoped_session(env["container"]) as session:
+        run = await session.get(SourceSyncRun, first_run_id)
+        run.updated_at = _stale_cutoff() - timedelta(minutes=1)
+
+    with pytest.raises(SyncAlreadyRunning):
+        await create_run(env["container"], env["source_id"], env["tenant_id"], trigger="manual", actor_id=None)
 
 
 @pytest.mark.asyncio

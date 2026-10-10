@@ -66,13 +66,13 @@ def build_llm_config_from_profile(profile: ModelProfile) -> LLMConfig | None:
     """
 
     try:
-        provider = LLMProvider(profile.provider.value.lower())
+        provider = LLMProvider(profile.provider.lower())
     except ValueError:
         logger.warning(
             "Model profile references a provider LLMFactory doesn't implement yet — "
             "falling back to the global default for this request",
             profile_id=str(profile.id),
-            profile_provider=profile.provider.value,
+            profile_provider=profile.provider,
         )
         return None
 

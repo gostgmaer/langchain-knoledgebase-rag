@@ -32,8 +32,11 @@ def authenticated(expected_hash: str | None, header_secret: str | None, body: An
     if header_secret and secrets.compare_digest(secret_hash(header_secret), expected_hash):
         return True
     values = body.get("value") if isinstance(body, dict) else None
-    if isinstance(values, list) and values:
-        states = [v.get("clientState") for v in values if isinstance(v, dict)]
+    # Every entry must be a dict carrying a clientState: `all(...)` over `states` is vacuously True
+    # on an empty sequence, so silently dropping non-dict entries (e.g. a crafted `{"value": ["x"]}`)
+    # used to leave `states` empty and authenticate the request without checking the secret at all.
+    if isinstance(values, list) and values and all(isinstance(v, dict) for v in values):
+        states = [v.get("clientState") for v in values]
         return all(isinstance(s, str) and secrets.compare_digest(secret_hash(s), expected_hash) for s in states)
     return False
 

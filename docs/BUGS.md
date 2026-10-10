@@ -1108,6 +1108,539 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   (`packages/infrastructure/repositories/feature_flag.py`), confirmed the change took effect via a
   fresh `FeatureFlagService.get_effective()` read. No code change; an operational action, logged
   here since it changes this environment's standing security posture.
+- **Third follow-up — two more settings moved, plus 6 genuinely dead fields found and removed**:
+  `CONNECTOR_MAX_ERROR_DETAILS` (`packages/config/rag.py`) and `MAX_FILE_SIZE`
+  (`packages/config/storage.py`) moved to Platform Settings the same way, as
+  `connector_max_error_details`/`max_file_size`. Both are read fresh at call time (`Counters.
+  add_error` in `packages/connectors/sync.py`, the `POST /documents` upload-size check in
+  `packages/api/routers/documents.py`), not baked into a Singleton. While investigating candidates,
+  found `IAMSettings.timeout`/`max_retries`/`verify_ssl` (`packages/config/iam.py`) and
+  `UploadServiceSettings.timeout`/`signed_url_expiry`/`verify_ssl`
+  (`packages/config/upload_service.py`) were never actually read anywhere — both SDK clients share
+  the one generic `create_http_client()` (`packages/infrastructure/http/client.py`), which hardcodes
+  its own timeout and doesn't take per-service overrides at all. `.env.example`/`.env`/
+  `docs/ENVIRONMENT.md` all described these 6 as if they did something (one comment literally said
+  "Seconds per IAM request, retries on transient failures, and TLS verification"); removed the
+  fields and every doc claim along with them rather than leave a config knob that silently does
+  nothing — the same standard as the `NotificationSettings` dead-class removal earlier this item.
+  `StorageSettings.signed_url_expiry` was dead for the same reason (nothing ever read it) and was
+  also deleted outright rather than moved, since moving a setting nothing consumes adds a page
+  control with no effect. Verified live: DI container still builds and resolves `IAMClient`/
+  `UploadClient` with the fields gone, full suite stayed clean (see below).
+- **Fourth follow-up — `RETRIEVAL_STRATEGY` moved, a genuinely harder case than the others**:
+  unlike every setting moved so far, `RetrieverFactory.create()` (`packages/knowledge/retrievers/
+  factory.py`) sits behind `ApplicationContainer`'s plain-sync `providers.Factory` chain —
+  `container.rag.knowledge_manager()` is resolved synchronously at 2+ call sites
+  (`packages/api/routers/documents.py`, `search.py`) plus the whole LangGraph build, so an
+  `await PlatformSettingsService.get(...)` can't simply go inside the factory the way it did for
+  `HybridRetriever`/`PromptBuilder` — that would force every caller of `container.rag.*`/
+  `container.graph.*` across the app to `await` it, the same impasse `packages/tools/context.py`'s
+  own docstring already describes for custom tools. Used that exact precedent instead of a bigger
+  DI refactor: new `set_retrieval_strategy`/`current_retrieval_strategy` ContextVar pair
+  (`packages/shared/access.py`, alongside the existing `retrieval_filters` one) — the router does
+  the async `PlatformSettingsService.get()` read up front (`chat.py` ×2, `widget.py`, `search.py`)
+  and drops the already-fetched string there; `RetrieverFactory.create()` just reads it back
+  synchronously. Unset (a worker job, a script, a test that never calls the setter) falls back to
+  `"hybrid"`, the old static default, not a crash — same fail-open shape as `is_tool_enabled`.
+  New `"string"` `SettingSpec` kind (with an optional `choices` tuple the API/frontend both now
+  expose, so an invalid value is rejected before it ever reaches `RetrieverFactory`'s own
+  `ValueError`) — frontend got a matching `<select>` for a `choices`-constrained string setting.
+  Also found and fixed two consumers that would have crashed outright once the field left
+  `packages/config/rag.py`: `packages/api/routers/retrieval_settings.py`'s per-tenant Retrieval
+  Settings response (a read-only informational field showing which strategy is active) and
+  `packages/graph/nodes/retrieve.py`'s `RetrievalRecord` audit logging (which strategy actually ran,
+  for analytics) — both still compiled fine before this since `settings.rag.retrieval_strategy` was
+  removed in the same change that would have broken them; caught by grepping for the field name
+  across the whole codebase before calling the move done, not just the one call site this follow-up
+  started from.
+- **Fifth follow-up — live-testing every `retrieval_strategy` choice found `mmr` was already dead**:
+  after Docker Desktop came back up, re-ran the full suite (503 passed, same 3 pre-existing
+  `modelprovider` enum-casing failures, zero new regressions) and live-verified the setting over real
+  HTTP — `GET /platform-settings` shows it as the 13th entry with its 7 `choices`; overriding it via
+  `PATCH` and hitting `/search`/`/chat` confirmed `similarity`, `hybrid`, `self_query`,
+  `parent_document`, `multi_vector`, and `graph_rag` all complete end-to-end. Selecting `mmr`
+  instead 500s every time — `mmr_search()` raises `NotImplementedError` in *both* vector store
+  backends (`chroma.py` and `pgvector.py`; `docs/ARCHITECTURE_TUTORIAL.md` §12 already noted this —
+  "Maximum Marginal Relevance search was never built" — but it wasn't tracked here, and before this
+  move it was an unvalidated env var nobody had actually tried setting to `mmr`). Not a regression
+  from the move itself, but the move turned a typo-only-reachable env var into a one-click dropdown
+  choice, so removed `"mmr"` from `SETTINGS`'s `choices` tuple rather than ship a selectable option
+  that always breaks retrieval. Re-add it once either backend implements `mmr_search` for real.
+- **Sixth follow-up — fixed a longer-standing, previously-worked-around bug while live-testing:**
+  `model_profiles.provider` was a native Postgres enum (`Enum(ModelProvider)`, uppercase labels
+  only — `GOOGLE`, not `google`), but `CreateModelProfileRequestSchema.provider`/
+  `UpdateModelProfileRequestSchema.provider` were plain, unvalidated `str` fields. Any caller
+  sending a differently-cased but valid provider name (`"google"`, the natural casing, not
+  `"GOOGLE"`) passed Pydantic validation and then failed at INSERT with a raw
+  `asyncpg.exceptions.InvalidTextRepresentationError`, surfaced to the API as an unhandled 500 —
+  `tests/api/test_model_profiles_api.py::test_create_then_list_then_get_model_profile`,
+  `test_create_duplicate_name_returns_409`, and `test_agents_api.py::test_create_then_list_then_get_agent`
+  (which creates a model profile as setup) all hit this; `tests/api/test_widget_api.py` had already
+  worked around it by hardcoding `"GOOGLE"` uppercase in its own test fixture, with a comment
+  explicitly flagging it as a known, deliberately-excluded failure. Fixed at the root instead of
+  re-documenting the workaround: `ModelProfile.provider` is now a plain `String(50)` column (an
+  idempotent `ALTER COLUMN ... TYPE varchar(50) USING provider::text` added to
+  `packages/infrastructure/database/upgrades.py`, converting existing uppercase enum values to
+  text with no data loss), and both schemas gained a `field_validator` that checks the value
+  case-insensitively against `ModelProvider` — valid, differently-cased input is now accepted and
+  round-trips in the caller's own casing (satisfying the existing tests' `created["provider"] ==
+  "google"` assertion), while a genuinely unknown provider now gets a clean 422 instead of a raw
+  500. Also fixed the one real consumer that depended on `.provider` being an actual enum instance:
+  `packages/infrastructure/ai/config.py`'s `build_llm_config_from_profile()` called
+  `profile.provider.value.lower()`, which would have raised `AttributeError` on a plain string —
+  found via the same full-codebase-grep discipline as the `RETRIEVAL_STRATEGY` follow-up above, not
+  by accident.
+
+### 39. ✅ `ModelProfile.is_default` had no "exactly one" invariant — two profiles could both be the default
+- Found during a general code-level audit (no prior report), not a QA/test failure — nothing in the
+  existing test suite exercised `is_default` at all.
+- **Root cause:** `POST /model-profiles` and `PATCH /model-profiles/{id}` both accept `is_default`
+  and write it straight through via `setattr()`, with no check for any other profile already holding
+  it. No unique constraint existed on the column either. `ModelProfileRepository.get_default()`
+  reads it back with `.limit(1)` and no `ORDER BY` — with two true rows, Postgres can return either
+  one, independently, on each call.
+- **Confirmed live:** `POST`ing two ordinary model profiles with `"is_default": true` left **three**
+  profiles (the original seeded `default` plus both new ones) simultaneously marked
+  `is_default=true` in the real dev database — no error, no warning, both requests returned `201`.
+- **Why it matters:** `get_default()` is the fallback the document ingestion pipeline
+  (`packages/knowledge/pipelines/ingestion.py`) uses to pick an embedding model when none is
+  specified — with the invariant broken, which profile's provider/dimensions got used could
+  silently flip between calls, a genuine (if quiet) data-consistency risk, not just a cosmetic one.
+- **Fixed:** `ModelProfileRepository.clear_default()` (new) unsets every profile's flag; both routes
+  call it first, inside the same request-scoped transaction, whenever the incoming payload sets
+  `is_default: true` — so exactly one profile ends up true, same request. A new idempotent migration
+  (`packages/infrastructure/database/upgrades.py`) first collapses any pre-existing duplicates down
+  to the oldest one, then adds `uq_model_profile_single_default`, a partial unique index on
+  `(is_default) WHERE is_default = true` — a database-level backstop, not just application
+  discipline, in case a future code path writes the column directly.
+- **Verified live, both routes:** `POST` a second/third default correctly demoted the previous
+  one(s) every time, confirmed by re-listing and counting `is_default=true` rows after each call;
+  `PATCH` an existing non-default profile to `is_default: true` likewise left exactly one default.
+  Full suite re-run clean afterward (506 passed, 0 failed, 0 regressions); all test data cleaned up
+  and the real seeded `default` profile's flag restored.
+
+### 40. ✅ `ChatService.stream()` committed PROCESSING before building graph state, unlike `chat()`
+- Found auditing `packages/application/` for correctness, specifically chosen because it's
+  fully load-bearing (item 20) with near-zero direct unit test coverage — `ChatService`, the
+  biggest file in the package, had no direct unit tests at all before this.
+- **The asymmetry:** `chat()` calls `_build_state()` (reads the conversation's `agent`, builds
+  prompt history) *before* `_mark_processing()` + the durable commit, so a failure there rolls
+  back cleanly — nothing was ever durably marked PROCESSING. `stream()` had the opposite order:
+  it committed PROCESSING first, then only called `_build_state()` afterward, buried inside
+  `_stream_runtime()`. A failure in state-building during a streaming call would leave the
+  conversation durably stuck in PROCESSING with no corresponding graph checkpoint —
+  `recover_stuck_conversations_job` would eventually self-heal it (no pending work found, just
+  clears the flag), but only after a delay, and the caller still gets an unexplained 500 instead
+  of a clean rollback.
+- Not currently reachable in practice — `_build_state()` only fails today if `conversation.agent_id`
+  resolves to no row, and nothing in the app can currently delete an agent — but the inconsistency
+  is a real latent bug, not a hypothetical one: it only takes one future code path (agent
+  soft-delete, a transient context-builder failure) to trigger it.
+- **Fixed:** `stream()` now builds `state` before `_mark_processing()`/commit, matching `chat()`'s
+  ordering exactly; `_stream_runtime()` takes the pre-built `state` as a parameter instead of
+  building it internally (and dropped its unused `conversation`/`message` parameters — `message`
+  was already unused before this change).
+- **Verified:** full suite re-run clean (506 passed, 0 regressions) after the refactor; live
+  end-to-end streaming chat call over real HTTP (`POST /chat` with `stream: true`) produced
+  correct `token`/`citations`/`done` SSE events, and the conversation's status correctly returned
+  to `ACTIVE` afterward (not stuck in `PROCESSING`).
+
+### 41. ✅ `HybridRetriever` crashed on any knowledge base written in a non-Latin script
+- Found auditing `packages/knowledge/retrievers/` — `hybrid.py` is the default retrieval strategy
+  (every chat/search call that doesn't explicitly choose another one) and had no dedicated unit
+  test file, unlike its siblings (`self_query`, `parent_document`, `multi_vector`, `graph_rag` all
+  do).
+- **Root cause:** `_tokenize()`'s pattern is `[a-z0-9]+` — after lowercasing, it matches ASCII
+  letters and digits only, nothing else. `_bm25_rank()` then builds a `BM25Okapi` index straight
+  from those tokenized candidates with no check that any of them actually produced tokens.
+  `BM25Okapi` itself divides by the corpus's average document length while indexing, with no guard
+  of its own — confirmed directly against the real `rank_bm25` library, not just inferred:
+  `BM25Okapi([[], [], []])` raises a bare `ZeroDivisionError`.
+- **Impact:** any candidate pool where every chunk tokenizes to nothing — in practice, any tenant
+  whose knowledge base content is written entirely in a non-Latin script (Japanese, Chinese,
+  Korean, Arabic, Cyrillic, ...), not just a contrived all-punctuation corpus — would crash every
+  single hybrid-strategy `/chat` or `/search` call with an unhandled 500, since nothing between
+  `HybridRetriever.retrieve()` and the API's generic exception handler catches it.
+- **Fixed:** `_bm25_rank()` now checks whether the tokenized corpus is entirely empty before
+  constructing `BM25Okapi`, and short-circuits to `[]` (no keyword signal to contribute) exactly
+  like the existing "no candidates at all" branch above it — reciprocal rank fusion already
+  handles an empty `keyword_results` list correctly, falling back to the vector ranking alone.
+- **Verified:** new `tests/unit/test_hybrid_retriever.py` — one test reproduces the exact crash
+  against a real (unmocked) `BM25Okapi` call with Japanese-only candidate content, confirmed to
+  fail against the pre-fix code and pass against the fix; a second confirms a mixed-language pool
+  still ranks correctly by keyword when at least one candidate has matchable terms. Full suite
+  re-run clean (508 passed — 506 plus these 2 new tests — 0 regressions).
+
+### 42. 🔴 `ResilientHttpClient`'s SSRF protection has a DNS-rebinding TOCTOU gap — documented, not fixed
+- Found auditing `packages/tools/webhook.py` (the CUSTOM-tool webhook executor) and its underlying
+  shared HTTP client, `packages/connectors/http.py`'s `ResilientHttpClient` — used by every
+  connector (web, Wikipedia, Confluence, SharePoint/OneDrive, Teams, Slack) and the webhook tool,
+  explicitly built to be "the one HTTP client every connector uses, so ... SSRF protection [is]
+  written once." The redirect-hop handling is solid — redirects are followed manually
+  (`follow_redirects=False` + a hand-rolled loop) specifically so every hop gets re-validated, which
+  correctly closes the "validate the first URL, then silently follow a redirect to a private
+  address" bypass.
+- **The actual gap:** `assert_public_url()` resolves the hostname itself via `loop.getaddrinfo()`
+  to check the IP is public, then returns — the *caller* (`_send_once()`) separately hands the same
+  URL string to `httpx.AsyncClient.request()`, which does its own, independent DNS resolution when
+  it actually opens the connection. Nothing binds the validated IP to the IP the connection
+  actually lands on. A hostname whose DNS server returns a public address for the validation lookup
+  and a private/internal one (loopback, a cloud metadata address, an internal service) moments
+  later for the real connection — classic DNS rebinding — passes the check and still reaches the
+  private address.
+- **Why not fixed in this pass:** a correct fix means pinning the actual TCP connection to the
+  already-validated IP while still presenting the right `Host` header and TLS SNI for certificate
+  validation — a transport-level change to how `httpx.AsyncClient` connects (a custom transport or
+  resolver override), not a small patch, and every connector plus the webhook tool depends on this
+  one client. Getting it subtly wrong (e.g. breaking SNI/cert validation) would be a worse, harder-
+  to-notice regression than the gap itself. Raised with the user and deliberately deferred rather
+  than rushed; this entry has the detail needed to act on it later.
+- **Real-world severity, scoped down:** every current caller's URL is admin-configured — both
+  knowledge-source connector setup and custom webhook tool creation require `require_admin()`. The
+  realistic threat is a malicious tenant admin, or a legitimate admin's external domain later having
+  its DNS compromised by a third party, not an arbitrary unauthenticated attacker supplying the URL
+  directly.
+- **Not a regression**: this gap predates this session's audit; nothing fixed elsewhere this
+  session touches it.
+
+### 43. ✅ Conversation-summary memory could still end up duplicated — the Redis lock never actually closed the race it was built for
+- Found auditing `packages/memory/` — `MemoryManager.summarize()`'s own extensive comment already
+  documented the original race (two background memory-extraction tasks for the same conversation
+  both seeing "no summary yet") and the Redis distributed lock built to close it.
+- **The lock didn't actually close it.** Its critical section (`async with _redis.lock(...)`) only
+  covered the check (`get_by_conversation_and_type`) and the act (`create`/`update`) — both of
+  which only `flush()`, never `commit()` (by design: `MemoryManager` deliberately doesn't know
+  about Postgres or sessions, per its own module docstring; the actual commit happens later, at the
+  caller's session boundary in `packages/api/routers/chat.py`'s `_extract_memory_in_background`).
+  The lock released before that commit landed, so a second call could still acquire it, query, and
+  see "no row yet" in the gap — the exact race the lock was supposed to prevent, just with a much
+  narrower window than before the lock existed.
+- **Why this was never a crash:** `MemoryRepository.get_by_conversation_and_type()`'s own docstring
+  already acknowledges "one per conversation" was an app-level invariant, not a DB one, and
+  defensively takes the most-recently-updated row via `scalars()` rather than
+  `scalar_one_or_none()` — so a duplicate from this race degraded silently into dead, orphaned
+  rows rather than ever raising `MultipleResultsFound`. Real, but lower severity than
+  `MemoryManager`'s own comment implied.
+- **Fixed with a real atomic operation, not a bigger lock:** `MemoryStore.upsert_summary()` (new
+  abstract method) + `MemoryRepository.upsert_summary()` (new, Postgres-specific) do the
+  create-or-replace as one `INSERT ... ON CONFLICT DO UPDATE` statement against a new partial
+  unique index, `uq_memory_conversation_summary` on `(conversation_id, type) WHERE type =
+  'SUMMARY'` — so two concurrent calls can never both see "no row yet"; Postgres itself serializes
+  them. The idempotent migration first collapses any duplicates a pre-fix database already has down
+  to the most-recently-updated one (same tie-break the repository's own defensive read already
+  used) before creating the index. The Redis lock stays in place around the call — no longer
+  load-bearing for correctness, but harmless as cheap protection against redundant DB round-trips
+  under real contention.
+- **Two real bugs caught while building this, neither of them the race itself:**
+  1. `stmt.excluded.metadata_` raised `AttributeError` — `Memory.metadata_` is the ORM attribute
+     name; the actual column is `"metadata"` (`mapped_column("metadata", ...)`, since bare
+     `metadata` collides with SQLAlchemy's own declarative API), and `Insert.excluded` is keyed by
+     real column names, not ORM attribute names.
+  2. A second upsert's `RETURNING` row came back with the *first* call's stale content — SQLAlchemy
+     matched the returned primary key against the session's identity map (already populated by the
+     first call's own result) and handed back the cached pre-update object instead of refreshing
+     it. Fixed with `execution_options={"populate_existing": True}` on the execute call. The
+     underlying database row was always correct; only the in-session Python object was stale — but
+     anything in the same session reading that identity-mapped row afterward would have seen it too.
+- **Verified:** new `tests/integration/test_memory_summary_upsert.py` against real Postgres (3
+  tests: create, replace-not-duplicate, per-conversation isolation) — the replace test is what
+  caught bug 2 above. Full suite re-run clean (511 passed — 508 plus these 3 — 0 regressions).
+  Live end-to-end over real HTTP: a real chat turn naming a preference and a location produced
+  exactly one `SUMMARY` row (plus real `PREFERENCE`/`PROFILE` facts) through the actual
+  `MemoryManager.summarize()` → `upsert_summary()` path, real LLM calls included, not a mock.
+
+### 44. ✅ Two syncs could run at once for the same source — `create_run()`'s "already active?" check was a SELECT, not a lock
+- Found auditing `packages/connectors/`. `scheduling.py`'s own module docstring states "Only one
+  run per source may be queued or running," but nothing in the schema backed that: `create_run()`
+  did a plain SELECT for an active (`queued`/`running`) run, and if none was found, inserted a new
+  one — classic check-then-act, with no row lock on either the `KnowledgeSource` or any existing
+  `SourceSyncRun`.
+- **Reachable in practice, not just in theory** — four call sites hit `create_run()`: a manual
+  "Sync now" button (`POST /{source_id}/sync`, double-clickable), a scheduled sync
+  (`schedule_due()`), a webhook notification, and the post-sync drain of targets that arrived
+  mid-run (`_drain_pending()`). A scheduled sync firing at the same moment a webhook notification
+  arrives for the same source is an ordinary occurrence, not an edge case.
+- **Consequence of two runs racing:** both read `source.sync_state` (delta tokens/cursors)
+  independently before either commits its own updated state back — whichever run finishes last
+  silently overwrites the other's progress, which can skip changes the other run's state advance
+  was supposed to cover next time. Also doubles load against the external source and produces
+  confusing duplicate "running" syncs in the UI.
+- **Fixed the same way as item 43:** a partial unique index, `uq_source_sync_runs_active` on
+  `source_sync_runs (source_id) WHERE status IN ('queued', 'running')`
+  (`packages/infrastructure/database/upgrades.py`), gives Postgres something atomic to enforce.
+  `create_run()` now catches the `IntegrityError` the index raises on a losing insert and converts
+  it to the `SyncAlreadyRunning` exception every caller already handles — no behavior change for
+  callers, just an actual guarantee behind it. The migration first cancels every duplicate active
+  run but the most-recently-updated one per source, same tie-break pattern as item 43's cleanup,
+  so the index can be created on a pre-fix database.
+- **Verified with real concurrency, not just sequential calls:** `tests/integration/test_source_sync.py`
+  uses a fixture that commits for real (unlike the single-transaction `db_session` fixture used
+  elsewhere, which can't express genuine cross-connection races). Added two tests:
+  1. `test_concurrent_sync_requests_for_the_same_source_only_one_wins` — five real concurrent
+     `create_run()` calls via `asyncio.gather`; exactly one succeeds, the other four raise
+     `SyncAlreadyRunning`.
+  2. `test_a_stale_but_still_queued_run_is_not_silently_duplicated` — a queued run whose
+     `updated_at` is pushed past the staleness window the app-level SELECT filters on (but before
+     the separate reaper would catch it) still blocks a second insert, because the unique index has
+     no notion of staleness.
+  Full `test_source_sync.py` (26 tests) and the full suite (513 passed, 0 regressions) both clean.
+
+### 45. ✅ Webhook authentication bypass — a crafted Microsoft Graph payload skipped the secret check entirely
+- Found auditing `packages/connectors/webhooks.py`, the per-source webhook authentication used by
+  `POST /webhooks/sources/{source_id}` (`packages/api/routers/knowledge_sources.py`'s
+  `source_webhook`) — the endpoint a real external system (or, as it turned out, anyone) calls to
+  notify the platform of a change, gated by a per-source secret instead of a user token.
+- **The bug:** `authenticated()`'s Microsoft Graph path (secret carried as each notification's
+  `clientState`, since Graph can't send custom headers) built `states` by filtering `body["value"]`
+  down to dict entries only (`[v.get("clientState") for v in values if isinstance(v, dict)]`), then
+  checked `all(... for s in states)`. `all()` over an **empty** sequence is vacuously `True` in
+  Python — so a payload like `{"value": ["anything"]}` (a non-empty list whose entries are all
+  non-dicts) got entirely filtered out of `states`, leaving it empty, and `authenticated()` returned
+  `True` without ever comparing anything against the real secret.
+- **Impact:** a complete authentication bypass for any source with `webhook_secret_hash` set (i.e.
+  exactly the sources that had the security feature turned on) — no header, no valid `clientState`,
+  no knowledge of the secret required. An attacker who knows (or enumerates) a `source_id` could
+  trigger a real sync job on demand, at will, for resource exhaustion against both this platform and
+  the external source, with none of the intended gating.
+- **Fixed:** require every entry in `value` to actually be a dict before trusting `states` at all
+  (`isinstance(values, list) and values and all(isinstance(v, dict) for v in values)`), so a
+  malformed/crafted payload fails closed instead of silently emptying the set being checked.
+- **Verified:** reproduced the bypass directly against pre-fix code (`git stash`) —
+  `authenticated(digest, None, {"value": ["not-a-dict"]})` returned `True` with no secret supplied —
+  confirmed the fix returns `False` for that payload and for a mixed valid/invalid list
+  (`[{"clientState": "s3cret"}, "not-a-dict"]`). Full `test_events_render_files.py` (15 tests) and
+  the full suite (513 passed, 0 regressions) both clean.
+
+### 46. ✅ Slack channel allow/exclude lists silently never matched a channel configured by id
+- Found auditing `packages/connectors/sources/slack.py`'s `_channels()`, which turns the admin's
+  `channels`/`exclude_channels` settings (documented as accepting "Channel names (without #) or ids")
+  into the set of channels actually read.
+- **The bug:** `wanted`/`excluded` are built by lower-casing every configured entry
+  (`{c.lower().lstrip("#") for c in ...}`), and channel **names** from the Slack API are lower-cased
+  the same way before comparison — but the raw channel **id** (`channel["id"]`, always upper-case,
+  e.g. `"C0123456789"`) was compared directly against those lower-cased sets, so it could never match.
+- **Impact:** configuring either list by channel id (rather than name) silently did nothing useful:
+  an id-only `channels` allow-list matched zero channels (the source discovered and indexed nothing,
+  with no error), and an id-only `exclude_channels` entry never excluded anything — a channel an
+  admin explicitly tried to keep out of the knowledge base (e.g. an HR/legal channel, referenced by
+  id because its name changed or was ambiguous) stayed in and got indexed anyway.
+- **Fixed:** lower-case the channel id the same way as the name before comparing, in a local
+  `channel_id` variable (the channel dict itself, used elsewhere for the real Slack API calls, is
+  left untouched).
+- **Verified:** reproduced against pre-fix code (`git stash`) — filtering `channels: ["C1"]` returned
+  zero documents instead of `C1`'s thread. New test
+  `test_channel_allowlist_and_excludelist_also_work_by_channel_id` covers both the allow-list and
+  exclude-list id paths; confirmed it fails on pre-fix code and passes with the fix. Full
+  `test_slack_connector.py` (14 tests) and the full suite (514 passed, 0 regressions) both clean.
+- **Files:** `packages/connectors/sources/slack.py`, `tests/unit/connectors/test_slack_connector.py`.
+
+### 47. ✅ Manually adding an identity mapping for an external *user* silently saved it as a *group*, so it never matched
+- Found auditing `frontend/src/components/sources/permissions-tab.tsx`'s general "Identity mappings"
+  form (the free-form Add-mapping control, distinct from the per-row "Map" button next to an
+  auto-discovered principal in the "Not mapped yet" table above it).
+- **The bug:** the free-form form's input is labelled/placeholder'd `"external group or user id"`,
+  but its submit handler called `map("group", draft.key.trim(), draft.internalType, draft.internalId)`
+  — the principal type was hard-coded to the literal string `"group"` regardless of what the admin
+  actually typed or intended. The per-row form right above it does this correctly
+  (`onMap(principal.principal_type, ...)`, using the real discovered type), so the bug was only in the
+  general-purpose form meant for pre-provisioning a mapping before the source has run a sync yet.
+- **Impact:** this is not just a labelling issue. `packages/connectors/access.py`'s `derive_access()`
+  looks up a mapping by the exact key `(kind, external_id)` where `kind` is derived from the stored
+  `IdentityMapping.principal_type` (`"group" if m.principal_type != "user" else "user"`). A mapping an
+  admin added for an external **user** id through this form was persisted with
+  `principal_type: "group"`, so it could never match a document permission rule carrying
+  `principal_type: "user"` for that same id — the lookup key mismatches (`("group", id)` stored vs.
+  `("user", id)` looked up). The admin saw "Mapped. Access on existing documents was updated." (a false
+  success) and the mapping appeared in the table, but any document restricted to that external user
+  stayed unmapped/administrator-only forever, with no error ever surfacing.
+- **Fixed:** added an explicit "external principal type" selector (`group` / `user`) to the free-form
+  draft state, submitted as the real selected type instead of the hard-coded `"group"`.
+- **Verified:** `npx tsc --noEmit` clean (aside from one pre-existing, unrelated error in
+  `platform-settings-view.tsx` confirmed via `git status` to predate this change), `npx eslint` clean
+  on the changed file, and the existing frontend suite (`npx vitest run`, 29 tests) passes with 0
+  regressions. No component-level test harness (mocked `react-query` + API client) exists yet for any
+  `components/sources/*` file to extend without inventing one from scratch; noting that gap here
+  rather than building new test scaffolding for a single fix.
+- **Files:** `frontend/src/components/sources/permissions-tab.tsx`.
+
+### 48. ✅ Concurrent requests near access-token expiry could each independently refresh, racing the refresh token
+- Found auditing the frontend's own token-refresh logic: `frontend/src/app/api/auth/session/route.ts`
+  and `frontend/src/app/api/rag/[...path]/route.ts` each independently implement "is the access token
+  expired? if so, use the refresh-token cookie to get a new pair" (`validAccessToken` / the inline
+  equivalent in `session/route.ts`), with no coordination between them.
+- **The bug:** a single page load fires `GET /api/auth/session` (session check) alongside several
+  `GET/POST /api/rag/*` calls (page data) essentially simultaneously. If the access token is within
+  its expiry skew window when any of these land, **every one of them** independently reads the same
+  (still valid, not-yet-rotated) refresh-token cookie and calls `gatewayRefresh()` concurrently —
+  there was no in-process de-duplication of concurrent refreshes for the same refresh token.
+- **Impact:** at minimum, redundant duplicate calls to the auth gateway on every token expiry under
+  concurrent load. More seriously: if the gateway rotates/invalidates a refresh token on use (a common,
+  recommended anti-theft practice for refresh tokens), one of the concurrent callers wins and the
+  others receive a stale-token error for a refresh token that had just been legitimately consumed —
+  and each loser's catch block (`clearAuthCookies`) wipes the user's session cookies outright. A user
+  could be spontaneously logged out by their own page load's unrelated concurrent requests, despite
+  having a perfectly valid, just-refreshed session.
+- **Fixed:** `gatewayRefresh()` (`frontend/src/lib/auth/gateway.ts`) now coalesces concurrent calls for
+  the same refresh-token value into one shared in-flight promise (a module-level `Map`, cleared once
+  the call settles), so every concurrent caller awaits and receives the result of the single real
+  gateway call instead of each firing and racing its own. Calls for different refresh tokens (different
+  sessions) are unaffected; a new call after a prior one has settled starts a fresh gateway request as
+  before.
+- **Verified:** new `frontend/src/lib/auth/gateway.test.ts` — reproduced against pre-fix code (`git
+  stash`): two concurrent `gatewayRefresh()` calls for the same token triggered 2 real `fetch` calls
+  instead of 1; confirmed the fix brings it to 1, that both callers receive the same resolved tokens,
+  that different refresh tokens are never coalesced together, and that a later call after settlement
+  issues its own fresh request. Full frontend suite (`npx vitest run`, 32 tests), `npx tsc --noEmit`
+  (clean aside from the same pre-existing, unrelated `platform-settings-view.tsx` error noted in item
+  47) and `npx eslint` on the changed files all clean, 0 regressions.
+- **Files:** `frontend/src/lib/auth/gateway.ts`, `frontend/src/lib/auth/gateway.test.ts`.
+
+### 49. ✅ The embeddable chat widget's own public script, `widget.js`, was blocked for the anonymous visitors it exists for
+- Found while verifying the new Documentation page below: fetching any `public/` static asset
+  without a session cookie (tested directly: `/widget.js`, `/vercel.svg`) returned a `307` redirect
+  to `/` instead of the file. Traced to `frontend/src/proxy.ts` — its matcher
+  (`"/((?!api|_next/static|_next/image|favicon.ico).*)"`) intercepts every path except those four,
+  and its handler redirects any request without `ACCESS_COOKIE` straight to `/` unless the path is
+  in a small literal `PUBLIC_PATHS` allowlist (`/`, `/register`, `/accept-invite`,
+  `/auth/callback`) — `widget.js` was never in it.
+- **Impact:** `frontend/public/widget.js` is item 37's embeddable chat widget's entire client — the
+  file's own docstring: *"a customer drops this on their own site as a plain `<script>` tag"*,
+  loaded by anonymous visitors on third-party websites who have never signed into this app and
+  never will. Every one of those requests got this app's own login-page HTML back instead of the
+  script, so the `<script>` tag silently failed everywhere the widget was embedded — not a
+  hypothetical edge case, the widget's one and only real-world use.
+- **Fixed:** added `/widget.js` to `proxy.ts`'s `PUBLIC_PATHS` allowlist, the same mechanism
+  already used for the other handful of pages that must work before any session exists.
+- **Verified:** reproduced against pre-fix code (`git stash`) with a new
+  `frontend/src/proxy.test.ts` — an anonymous request to `/widget.js` returned `307` before the fix,
+  `200` after; a real protected page (`/admin/dashboard`) still redirects an anonymous request and
+  still lets a logged-in one through, both unchanged. Confirmed live against the running dev server
+  too (`curl` with no cookie: `/widget.js` → `200` after the fix, was `307`). Full frontend suite
+  (`npx vitest run`, 35 tests) and `npx tsc --noEmit` (clean aside from the same pre-existing,
+  unrelated `platform-settings-view.tsx` error noted in items 47-48) both clean, 0 regressions.
+- **Files:** `frontend/src/proxy.ts`, `frontend/src/proxy.test.ts`.
+
+### 50. ✅ New feature — a multi-page in-app Documentation section, a usability guide for every role
+- A full usability guide covering every feature in the product (Chat, Knowledge Bases, Knowledge
+  Sources and their permissions/identity mappings, Documents, Search, Agents, the embeddable widget,
+  Model Profiles, Prompts, Tools, Retrieval Log/Settings, Analytics/Usage/Observability/Feedback,
+  Upload Jobs, Team, API Keys, Settings, and the Admin-only Tenants/Feature Flags/Platform Settings)
+  as 23 separate topic pages (not one long scrolling page), with role-specific notes
+  (Customer/Tenant Admin/Admin) and a troubleshooting/FAQ page grounded in this session's own
+  findings (e.g. the identity-mapping user/group pitfall from item 47).
+- **Content:** one Markdown file per topic under `frontend/public/docs/topics/<slug>.md`, written
+  from the real UI copy of every `components/features/*-view.tsx` file (titles, descriptions, field
+  placeholders) rather than invented terminology, so it describes what the product actually says.
+  Topics cross-link each other with role-agnostic `/docs/<slug>` links, resolved to the viewer's
+  actual role at render time. Image references (`/docs/images/*.png`) are in place throughout but
+  the images themselves are not — intentionally left for later, each one rendering as a labeled
+  placeholder (not a browser broken-image icon) naming the expected file, until it's added to
+  `frontend/public/docs/images/`.
+- **UI:** an index page (`DocsIndexView`) lists every topic as a card, grouped into the same
+  Overview/Knowledge/Build/Operations/Administration sections the sidebar itself uses, so the two
+  stay recognizable as the same map of the product; each card links to its own page
+  (`DocsArticleView`, with Previous/Next navigation between topics) at
+  `/{role}/docs/{slug}` (`frontend/src/app/[role]/docs/page.tsx` and
+  `frontend/src/app/[role]/docs/[slug]/page.tsx`). Both share one Markdown renderer
+  (`frontend/src/components/features/docs-markdown.tsx`, extracted from the first, single-page
+  version of this feature) built on `react-markdown` + `remark-gfm`, matching the chat bubble's
+  existing Markdown rendering approach. Reachable as **Documentation** in every role's sidebar,
+  wired into `frontend/src/app/[role]/layout.tsx`'s `NAV_BY_ROLE`.
+- **Verified:** `npx vitest run` (35 passed), `npx tsc --noEmit` and `npx eslint` on the new/changed
+  files clean, and `npx next build`'s compile step succeeds (its type-check step fails only on the
+  same pre-existing, unrelated `platform-settings-view.tsx` error noted in items 47-49). Confirmed
+  live against the running dev server that a topic's markdown file is reachable once a session
+  cookie is present (matching every other page in the app — the Documentation section is an in-app
+  help page, not a public one) and that `widget.js` discovering this gate led directly to item 49.
+- **Files:** `frontend/public/docs/topics/*.md` (23 files), `frontend/public/docs/images/.gitkeep`,
+  `frontend/src/lib/docs-topics.ts`, `frontend/src/components/features/docs-markdown.tsx`,
+  `frontend/src/components/features/docs-index-view.tsx`,
+  `frontend/src/components/features/docs-article-view.tsx`,
+  `frontend/src/app/[role]/docs/page.tsx`, `frontend/src/app/[role]/docs/[slug]/page.tsx`,
+  `frontend/src/app/[role]/layout.tsx`.
+
+### 51. ✅ `PlatformSettingsUpdate.values`'s type silently excluded `string`, blocking `next build` outright
+- Found while building the frontend's first production Docker image (item 52 below) — `pnpm build`
+  runs `next build`'s own type-check step, which fails the whole build (not just a lint warning) on
+  any type error. `platform-settings-view.tsx` passes its `draft` state (legitimately typed
+  `Record<string, number | boolean | string | string[] | null>` — the `kind === "string"` branch,
+  both the plain-text `Input` and the `Select`/`choices` dropdown, both produce real `string`
+  values) into `save.mutateAsync({ values: draft })`, whose parameter type,
+  `PlatformSettingsUpdate.values` (`frontend/src/lib/api/types.ts`), was
+  `Record<string, number | boolean | string[] | null>` — missing `string` entirely.
+- **Impact:** this had been flagged (items 47-50) as a pre-existing, unrelated error to leave out of
+  scope, on the assumption it only broke `next build`'s type-check step in isolation. It turned out
+  to block something concrete once something actually needed `next build` to succeed: the
+  production frontend Docker image (`frontend/Dockerfile`) runs `pnpm build` as its one build step,
+  so every image build — and therefore every merge through the new CI/CD pipeline (item 52) — would
+  have failed here, every time, on a page nobody was even touching.
+- **Fixed:** added `string` to the union, matching what the UI actually sends.
+- **Verified:** reproduced via `npx tsc --noEmit` and `pnpm build` both failing with this exact error
+  pre-fix; both clean after. Full frontend suite (`pnpm test`, 35 passed) and a complete
+  `pnpm build` (standalone output, confirmed `.next/standalone/server.js` and `.next/static` land
+  where `frontend/Dockerfile` expects them) both verified post-fix.
+- **Files:** `frontend/src/lib/api/types.ts`.
+
+### 52. ✅ New feature — a CI/CD pipeline that builds both images, pushes them, and deploys on every merge
+- **Path-filtered per request**: a new `changes` job (`dorny/paths-filter@v3`, comparing against
+  `github.event.before` — its default for a `push` event) runs first and decides which image(s) a
+  given push actually needs: a change touching only `frontend/**` builds and deploys only the
+  frontend; a change touching only backend-relevant paths (`apps/**`, `packages/**`, `alembic/**`,
+  `alembic.ini`, `pyproject.toml`, `uv.lock`, `scripts/**` — all genuinely part of the backend
+  image's build context per `COPY --chown=app:app . .` in `docker/Dockerfile`, or
+  `docker/Dockerfile.worker`/`docker/Dockerfile` themselves) builds and deploys only the backend; a
+  change touching both builds and deploys both. `build-and-deploy` skips entirely
+  (`if: needs.changes.outputs.backend == 'true' || ... frontend ...`) if neither path list matches
+  (e.g. a docs-only or `.github/**`-only change). The build and deploy steps for each image are
+  gated by the same two booleans individually, so a backend-only push's frontend build/deploy steps
+  just don't run (and vice versa) rather than redundantly rebuilding/redeploying an unchanged image.
+- No automation existed past CI (`.github/workflows/ci.yml` only ran tests) — every real deploy was
+  a human running `scripts/build_prod_image.sh`/`scripts/deploy_blue_green.sh` by hand
+  (`docs/DEPLOYMENT.md` §6-7), and the frontend had no production image or deploy path at all.
+- **Backend:** unchanged — still `docker/Dockerfile`, now built and pushed by CI instead of by hand.
+- **Frontend, built for the first time:** `frontend/Dockerfile` (3-stage: pnpm install, `next build`,
+  a slim `node:22-slim` runtime running the `output: "standalone"` server as a non-root user on
+  `:3000`), `frontend/.dockerignore`, `output: "standalone"` added to `frontend/next.config.ts`, and
+  a new `frontend/src/app/api/healthz/route.ts` for the container `HEALTHCHECK` — under `/api/`, so
+  `proxy.ts`'s auth gate never intercepts it (the same reachable-without-a-cookie mechanism item 49
+  added for `widget.js`), no change to `PUBLIC_PATHS` needed. `docker-compose.prod.yml` gained a
+  `frontend` service (`easydev/ai-platform-frontend:${VERSION}`) — deliberately v1-simple: single
+  instance, host port 3000 published directly, no Traefik routing or blue-green yet. The backend's
+  zero-downtime mechanism (item 9) took a whole pass of its own; nothing has asked for that same
+  investment here yet, and this isn't it.
+- **Pipeline:** one new job, `build-and-deploy`, appended to the existing `.github/workflows/ci.yml`
+  — originally gated behind `needs: [dependency-audit, test, frontend-test]` so it only ran after a
+  real merge whose tests already passed. **Those three test jobs, and the `needs:` gate, were then
+  removed on explicit request** ("remove all test pipeline from ci as we are not focusing it for
+  now") — `ci.yml` now has exactly one job, runs on every push to `main`/`master` with no test gate
+  at all, and the `pull_request` trigger was dropped too (nothing left for a PR push to run). A
+  broken build or a real regression can now reach the registry and the deploy host without
+  anything catching it first — a deliberate, explicit tradeoff, not an oversight; the removed jobs'
+  exact content is recoverable from git history (`git show <commit>^:.github/workflows/ci.yml`)
+  whenever testing becomes a priority again. Tags both images with the merge commit's short SHA
+  plus a floating `latest`, pushes both to Docker Hub, then SSHes into the deploy host and runs the
+  same scripts a human would (`scripts/deploy_blue_green.sh` for the backend, `docker compose ... up
+  -d frontend` for the new service) with `VERSION` pinned to that SHA. Deliberately one combined
+  job, not split into a separate deploy-status or version-bump step — that split, and any real
+  versioning scheme beyond "the commit SHA that built it," is flagged to come later, not an
+  oversight here.
+- **Not yet wired up (needs real values, not placeholders):** `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`
+  and `DEPLOY_HOST`/`DEPLOY_USER`/`DEPLOY_SSH_KEY`/`DEPLOY_PATH` as repo secrets, and (optionally)
+  `NEXT_PUBLIC_WIDGET_API_URL` as a repo variable — none exist yet. Until they're added under
+  Settings → Secrets and variables → Actions, the job runs, builds both images locally in the
+  runner, and fails cleanly at the registry-login step; nothing it does before that point touches
+  any real external system.
+- **Verified:** `docker compose -f docker-compose.prod.yml config` resolves cleanly with the new
+  `frontend` service. `.github/workflows/ci.yml` parses as valid YAML. `pnpm build` (the exact
+  command `frontend/Dockerfile` runs) succeeds end to end with `output: "standalone"` and produces
+  `.next/standalone/server.js` + `.next/static` in the shape the Dockerfile's `COPY` lines expect.
+  `npx tsc --noEmit` and `pnpm test` (35 passed) both clean. A real `docker build` of either image
+  was not run (Docker Desktop unavailable in this environment, same gap noted in
+  `docs/DEPLOYMENT.md` §7) — the frontend Dockerfile mirrors the already-live-verified structure of
+  `docker/Dockerfile` (non-root user, `--chown` at `COPY` time, cache-mounted installs) closely
+  enough that this is a real, known gap to close on first real use, not a blind guess.
+- **Files:** `.github/workflows/ci.yml`, `frontend/Dockerfile`, `frontend/.dockerignore`,
+  `frontend/next.config.ts`, `frontend/src/app/api/healthz/route.ts`, `docker-compose.prod.yml`.
 
 ---
 

@@ -14,6 +14,7 @@ from uuid import UUID
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from packages.api.dependencies import request_scoped_session
 from packages.connectors.sync import STALE_RUN_MINUTES
@@ -40,34 +41,42 @@ def _stale_cutoff() -> datetime:
 
 async def create_run(container: ApplicationContainer, source_id: UUID, tenant_id: UUID, *, trigger: str, actor_id: UUID | None, targets: list[str] | None = None) -> UUID:
     """Creates a queued run, or raises SyncAlreadyRunning / SourceNotSyncable / LookupError."""
-    async with request_scoped_session(container) as session:
-        source = await session.get(KnowledgeSource, source_id)
-        if source is None or source.tenant_id != tenant_id or source.is_deleted:
-            raise LookupError("Knowledge source not found.")
-        if source.status == "paused" and trigger != "manual":
-            raise SourceNotSyncable("The source is paused.")
+    try:
+        async with request_scoped_session(container) as session:
+            source = await session.get(KnowledgeSource, source_id)
+            if source is None or source.tenant_id != tenant_id or source.is_deleted:
+                raise LookupError("Knowledge source not found.")
+            if source.status == "paused" and trigger != "manual":
+                raise SourceNotSyncable("The source is paused.")
 
-        active = (
-            await session.execute(
-                select(SourceSyncRun).where(
-                    SourceSyncRun.source_id == source_id,
-                    SourceSyncRun.status.in_(ACTIVE_RUN_STATUSES),
-                    SourceSyncRun.updated_at >= _stale_cutoff(),
+            active = (
+                await session.execute(
+                    select(SourceSyncRun).where(
+                        SourceSyncRun.source_id == source_id,
+                        SourceSyncRun.status.in_(ACTIVE_RUN_STATUSES),
+                        SourceSyncRun.updated_at >= _stale_cutoff(),
+                    )
                 )
-            )
-        ).scalars().first()
-        if active is not None:
-            raise SyncAlreadyRunning(f"A sync is already {active.status} for this source.")
+            ).scalars().first()
+            if active is not None:
+                raise SyncAlreadyRunning(f"A sync is already {active.status} for this source.")
 
-        context = structlog.contextvars.get_contextvars()
-        run = SourceSyncRun(
-            tenant_id=tenant_id, source_id=source_id, trigger=trigger, status="queued",
-            triggered_by=actor_id, trace_id=context.get("trace_id"), request_id=context.get("request_id"),
-            stats={"targets": targets} if targets else {},
-        )
-        session.add(run)
-        await session.flush()
-        return run.id
+            context = structlog.contextvars.get_contextvars()
+            run = SourceSyncRun(
+                tenant_id=tenant_id, source_id=source_id, trigger=trigger, status="queued",
+                triggered_by=actor_id, trace_id=context.get("trace_id"), request_id=context.get("request_id"),
+                stats={"targets": targets} if targets else {},
+            )
+            session.add(run)
+            await session.flush()
+            return run.id
+    except IntegrityError as exc:
+        # The SELECT above is a check, not a lock: two callers close together (a double-clicked
+        # "sync now", a scheduled sync racing a webhook notification, two workers draining pending
+        # targets) can both pass it and both reach this insert. uq_source_sync_runs_active
+        # (packages/infrastructure/database/upgrades.py) is the actual guarantee; this just
+        # translates its violation into the same exception the check-then-act path already raises.
+        raise SyncAlreadyRunning("A sync is already queued or running for this source.") from exc
 
 
 async def dispatch(container: ApplicationContainer, background_tasks: Any, source_id: UUID, run_id: UUID) -> None:

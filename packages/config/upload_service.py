@@ -17,30 +17,10 @@ class UploadServiceSettings(BaseSettings):
         description="Base URL of the Upload Service",
     )
 
-    timeout: int = Field(
-        default=30,
-        alias="UPLOAD_SERVICE_TIMEOUT",
-        ge=1,
-        le=300,
-        description="Request timeout in seconds",
-    )
-
     api_key: str | None = Field(
         default=None,
         alias="UPLOAD_SERVICE_API_KEY",
         description="Optional service-to-service API key",
-    )
-
-    signed_url_expiry: int = Field(
-        default=3600,
-        alias="UPLOAD_SIGNED_URL_EXPIRY",
-        ge=60,
-        description="Default signed URL expiry in seconds",
-    )
-
-    verify_ssl: bool = Field(
-        default=True,
-        alias="UPLOAD_SERVICE_VERIFY_SSL",
     )
 
     # The Upload Service (GATEWAY_AUTH_REQUIRED=true, its default) only

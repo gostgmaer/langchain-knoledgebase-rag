@@ -58,6 +58,9 @@ async def create_model_profile(
             detail=f"A model profile named '{payload.name}' already exists.",
         )
 
+    if payload.is_default:
+        await model_profiles.clear_default()
+
     model_profile = ModelProfile(
         name=payload.name,
         provider=payload.provider,
@@ -190,6 +193,9 @@ async def update_model_profile(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"A model profile named '{updates['name']}' already exists.",
             )
+
+    if updates.get("is_default"):
+        await model_profiles.clear_default()
 
     for field, value in updates.items():
         setattr(model_profile, field, value)

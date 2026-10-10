@@ -118,6 +118,17 @@ async def test_channel_allowlist_and_excludelist():
 
 
 @pytest.mark.asyncio
+async def test_channel_allowlist_and_excludelist_also_work_by_channel_id():
+    # Slack channel ids are upper-case (e.g. "C1"); the allow/exclude lists must match them
+    # case-insensitively just like channel names, not silently fail to match at all.
+    docs = await collect(slack({"channels": ["C1"]}).discover(context()))
+    assert {d.metadata["channel_id"] for d in docs} == {"C1"}
+
+    docs = await collect(slack({"exclude_channels": ["C1"], "include_private_channels": True}).discover(context()))
+    assert "C1" not in {d.metadata["channel_id"] for d in docs}
+
+
+@pytest.mark.asyncio
 async def test_thread_root_and_replies_become_one_document_with_rendered_transcript():
     docs = await collect(slack({"channels": ["general"]}).discover(context()))
     thread = next(d for d in docs if d.external_id == "C1:1700000000.000100")

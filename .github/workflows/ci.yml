@@ -1,159 +1,133 @@
 name: CI
 
-# docs/BUGS.md item 4: no CI pipeline existed at all before this — every one of this project's
-# tests had only ever been run manually, locally. This runs the real unit + integration suites
-# (382 tests) against real Postgres/Redis service containers on every push and pull request.
-#
-# The exact recipe below (build the test environment from .env.example plus connection overrides,
-# no real secrets needed) was verified locally before being written here against a Postgres
-# container that, in hindsight, already had the schema from a previous `docker compose up` run
-# (`pytest.ini`'s default `-m "not live"` already excludes the handful of tests that need a real
-# LLM provider key). The first real run of this workflow on GitHub's own infrastructure caught
-# the gap that "verified locally" missed: a genuinely empty Postgres container has no schema until
-# something creates it, and nothing here did - see the "Run database migrations" step below.
+# Test jobs (dependency-audit, backend test, frontend-test) were removed on request — not a focus
+# right now. Re-add test jobs (and gate build-and-deploy on them via `needs:`) when testing becomes
+# a priority again — see git history for the removed jobs' exact content.
 
 on:
   push:
     branches: [main, master]
-  pull_request:
 
 jobs:
-  dependency-audit:
-    # docs/BUGS.md item 13: no dependency-vulnerability scanning existed at all. Real enforcement,
-    # not just reporting — fails the build on anything pip-audit finds that isn't explicitly
-    # ignored below. The four ignored IDs are all the same package (chromadb 1.5.9, confirmed
-    # live to already be the latest version on PyPI — no fix exists yet); everything else must
-    # stay clean or get a fix/upgrade, not silently added to this list.
+  # Decides which image(s) a given push actually needs — backend-only changes build only the
+  # backend image, frontend-only changes build only the frontend image, a change touching both (or
+  # neither path list below) builds both. Compares against the commit before the push
+  # (`github.event.before`), which dorny/paths-filter already does by default for a `push` event.
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      - uses: dorny/paths-filter@v3
+        id: filter
         with:
-          version: "latest"
+          filters: |
+            backend:
+              - 'apps/**'
+              - 'packages/**'
+              - 'alembic/**'
+              - 'alembic.ini'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'scripts/**'
+              - 'docker/Dockerfile'
+              - 'docker/Dockerfile.worker'
+            frontend:
+              - 'frontend/**'
 
-      - name: Set up Python
-        run: uv python install 3.14
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Audit dependencies for known vulnerabilities
-        run: >
-          uv run pip-audit
-          --ignore-vuln PYSEC-2026-311
-          --ignore-vuln PYSEC-2026-3814
-          --ignore-vuln PYSEC-2026-3815
-          --ignore-vuln PYSEC-2026-3813
-
-  test:
+  # Requires these repo secrets to actually run (none exist yet as of writing this — add them
+  # under Settings -> Secrets and variables -> Actions):
+  #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN        - registry push (docker/login-action)
+  #   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY    - SSH access to the box running docker-compose.prod.yml
+  #   DEPLOY_PATH                                 - that box's checkout of this repo (scripts/
+  #                                                  deploy_blue_green.sh and docker-compose.prod.yml
+  #                                                  are run from there, not copied over by this job)
+  # Until those are added, this job reaches the docker/login-action step and fails there — every
+  # step before it (build) still runs and is useful on its own as a build-only smoke test.
+  build-and-deploy:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_USER: my_db_user
-          POSTGRES_PASSWORD: my_secure_password
-          POSTGRES_DB: my_database_name
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U my_db_user"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      - name: Set image tag from the merge commit's short SHA
+        run: echo "VERSION=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
         with:
-          version: "latest"
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Set up Python
-        run: uv python install 3.14
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Build a test environment (no real secrets — placeholders from .env.example)
-        run: |
-          cp .env.example .env
-          {
-            echo "DATABASE_URL=postgresql://my_db_user:my_secure_password@localhost:5432/my_database_name"
-            echo "REDIS_URL=redis://localhost:6379/0"
-            echo "POSTGRES_USER=my_db_user"
-            echo "POSTGRES_PASSWORD=my_secure_password"
-            echo "POSTGRES_DB=my_database_name"
-            echo "CONNECTOR_CREDENTIAL_KEYS=$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
-          } >> .env
-
-      - name: Create the vector extension
-        run: |
-          PGPASSWORD=my_secure_password psql -h localhost -U my_db_user -d my_database_name -c "CREATE EXTENSION IF NOT EXISTS vector;"
-
-      # Real bug found via this workflow's own first observed run (docs/BUGS.md item 26): nothing
-      # here ever created the schema. tests/conftest.py's fixtures deliberately skip the app's
-      # lifespan (and therefore its create_all()/apply_schema_upgrades() auto-provisioning) on
-      # purpose, assuming the schema already exists — true on every local dev machine (which has
-      # run `docker compose up` at least once) but never true for this job's brand-new ephemeral
-      # Postgres service container. Integration tests failed with
-      # `relation "knowledge_sources" does not exist` as a direct result. `alembic upgrade head`
-      # is the same command docker-compose.prod.yml's `migrate` service runs (docs/DEPLOYMENT.md
-      # §4) - this also gives the migrations themselves real CI coverage for the first time.
-      - name: Run database migrations
-        run: uv run alembic upgrade head
-
-      - name: Run unit tests
-        run: uv run pytest tests/unit -q
-
-      - name: Run integration tests
-        run: uv run pytest tests/integration -q
-
-      - name: Run API contract tests
-        run: uv run pytest tests/api -q
-
-  frontend-test:
-    # docs/BUGS.md item 5: zero frontend test coverage existed at all — no test runner, no test
-    # files, nothing gating a UI regression. Runs the new Vitest suite (frontend/vitest.config.mts)
-    # plus a real type-check on every push/PR, same as the backend jobs above.
-    runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: frontend
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
+      # One image for both api and worker (docker/Dockerfile) — see scripts/build_prod_image.sh's
+      # own comment on why they intentionally share a tag.
+      - name: Build and push backend image
+        if: needs.changes.outputs.backend == 'true'
+        uses: docker/build-push-action@v6
         with:
-          version: 10
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: |
+            easydev/ai-platform:${{ env.VERSION }}
+            easydev/ai-platform:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - uses: actions/setup-node@v4
+      - name: Build and push frontend image
+        if: needs.changes.outputs.frontend == 'true'
+        uses: docker/build-push-action@v6
         with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          context: frontend
+          file: frontend/Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_WIDGET_API_URL=${{ vars.NEXT_PUBLIC_WIDGET_API_URL }}
+          tags: |
+            easydev/ai-platform-frontend:${{ env.VERSION }}
+            easydev/ai-platform-frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      # Runs the same scripts this repo already documents for a manual deploy (docs/DEPLOYMENT.md
+      # §6-7) against the already-cloned copy of this repo on the deploy host — just VERSION-pinned
+      # to this merge's image instead of a human picking a version by hand. Split into two steps
+      # (rather than one script with inline conditionals) so a backend-only push never touches the
+      # frontend service and vice versa — exactly mirroring the build steps above.
+      - name: Deploy backend
+        if: needs.changes.outputs.backend == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}"
+            git fetch origin "${{ github.ref_name }}"
+            git checkout "${{ github.sha }}"
+            VERSION="${{ env.VERSION }}" scripts/deploy_blue_green.sh
+            docker image prune -f
 
-      - name: Type-check
-        run: npx tsc --noEmit
-
-      - name: Run tests
-        run: pnpm test
+      - name: Deploy frontend
+        if: needs.changes.outputs.frontend == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}"
+            git fetch origin "${{ github.ref_name }}"
+            git checkout "${{ github.sha }}"
+            VERSION="${{ env.VERSION }}" docker compose -f docker-compose.prod.yml pull frontend
+            VERSION="${{ env.VERSION }}" docker compose -f docker-compose.prod.yml up -d frontend
+            docker image prune -f

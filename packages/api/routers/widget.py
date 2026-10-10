@@ -31,7 +31,7 @@ from packages.application.dto.chat import ChatRequest
 from packages.conversation.bootstrap import ensure_default_conversation
 from packages.domain.models.agent import Agent
 from packages.infrastructure.container import ApplicationContainer
-from packages.shared.access import set_retrieval_filters
+from packages.shared.access import set_retrieval_filters, set_retrieval_strategy
 from packages.tools.context import fetch_enabled_tools, set_enabled_tools, set_widget_mode
 
 router = APIRouter(prefix="/widget", tags=["Widget"])
@@ -142,6 +142,7 @@ async def chat(
     # Feature Flags — but an admin who's disabled enable_calculator platform-wide should see that
     # apply here too, not just on the authenticated /chat path (docs/BUGS.md item 38).
     set_enabled_tools(await fetch_enabled_tools(container.feature_flags.service(), agent.tenant_id))
+    set_retrieval_strategy(await container.platform_settings.service().get("retrieval_strategy"))
     set_retrieval_filters(None)
 
     conversations = container.repositories.conversation()

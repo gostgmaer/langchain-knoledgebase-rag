@@ -17,12 +17,6 @@ ALLOWED_ORIGIN = "https://shop.example.com"
 
 
 async def _create_agent(client) -> dict:
-    # Uppercase: packages/domain/enums/model_provider.py's ModelProvider is a StrEnum of
-    # UPPERCASE values ("GOOGLE", not "google") — matching tests/api/test_agents_api.py's and
-    # test_model_profiles_api.py's own pre-existing, already-known, deliberately-excluded failure
-    # here (lowercase "google" passes pydantic's plain `str` field but is rejected by Postgres'
-    # modelprovider enum at insert time). Using the correct casing avoids inheriting that bug.
-    #
     # `model` is uuid4()-suffixed, not just `name` — model_profiles has a UNIQUE(provider, model)
     # constraint, and this dev database already has a real, committed GOOGLE/gemini-3.1-flash-lite
     # row from this session's own earlier manual verification work (same reasoning as

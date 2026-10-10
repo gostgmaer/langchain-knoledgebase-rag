@@ -18,8 +18,7 @@ from packages.application.services.retrieval_settings_service import (
     RetrievalSettingsService,
     platform_defaults,
 )
-from packages.config.loader import settings
-from packages.shared.access import retrieval_filters
+from packages.shared.access import current_retrieval_strategy, retrieval_filters
 from packages.graph.state import GraphState
 from packages.knowledge.manager import KnowledgeManager
 from packages.knowledge.reranking.cross_encoder import (
@@ -196,7 +195,7 @@ class RetrieveNode:
             request_id=context.get("request_id"),
             query=primary_query,
             sub_query_count=query_count,
-            strategy=settings.rag.retrieval_strategy,
+            strategy=current_retrieval_strategy(),
             top_k=top_k,
             min_relevance_score=config.min_relevance_score if config.reranking_enabled else None,
             reranking_enabled=config.reranking_enabled,

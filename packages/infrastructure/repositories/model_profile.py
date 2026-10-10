@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.domain.enums.model_status import ModelStatus
@@ -16,6 +16,17 @@ class ModelProfileRepository(BaseRepository[ModelProfile]):
         session: AsyncSession,
     ) -> None:
         super().__init__(ModelProfile, session)
+
+    async def clear_default(self) -> None:
+        """
+        Unsets `is_default` on every profile. Callers run this immediately before marking a
+        profile as the new default, inside the same request-scoped transaction, so exactly one
+        profile ever has `is_default=True` — nothing previously enforced that invariant (not a
+        unique constraint, not application logic), so two profiles could each be "the" default at
+        once, and `get_default()`'s `.limit(1)` with no deterministic ordering would silently pick
+        either one each time it's called (docs/BUGS.md item 39).
+        """
+        await self.session.execute(update(ModelProfile).values(is_default=False))
 
     async def get_by_name(
         self,

@@ -27,7 +27,3 @@ class IAMSettings(BaseSettings):
     client_id: str
     client_secret: str
     introspection_api_key: str
-
-    timeout: int = 30
-    verify_ssl: bool = True
-    max_retries: int = 3

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from packages.application.services.platform_settings_service import PlatformSettingsService
-from packages.config.loader import settings
 from packages.infrastructure.ai.manager import LLMManager
 from packages.infrastructure.repositories.entity import EntityRepository
 from packages.infrastructure.repositories.relationship import RelationshipRepository
@@ -23,6 +22,7 @@ from packages.knowledge.retrievers.providers.similarity import (
     SimilarityRetriever,
 )
 from packages.knowledge.vectorstores.manager import VectorStoreManager
+from packages.shared.access import current_retrieval_strategy
 
 
 class RetrieverFactory:
@@ -36,7 +36,7 @@ class RetrieverFactory:
         platform_settings: PlatformSettingsService,
     ) -> BaseRetriever:
 
-        strategy = settings.rag.retrieval_strategy.lower()
+        strategy = current_retrieval_strategy().lower()
 
         if strategy == "similarity":
             return SimilarityRetriever(vector_store)

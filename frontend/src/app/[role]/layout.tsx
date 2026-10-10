@@ -3,6 +3,7 @@
 import {
   Cable,
   Activity,
+  BookOpen,
   Cog,
   ListTree,
   SlidersHorizontal,
@@ -43,6 +44,7 @@ import { SLUG_TO_ROLE, type Role } from "@/lib/session";
 const NAV_BY_ROLE: Record<Role, NavItem[]> = {
   customer: [
     { href: "/customer/chat", label: "Chat", icon: MessageSquare },
+    { href: "/customer/docs", label: "Documentation", icon: BookOpen },
     { href: "/customer/settings", label: "Settings", icon: Settings },
   ],
   tenant_admin: [
@@ -70,6 +72,8 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/tenant-admin/team", label: "Team", icon: Users, section: "Administration" },
     { href: "/tenant-admin/api-keys", label: "API Keys", icon: Key, section: "Administration" },
     { href: "/tenant-admin/settings", label: "Settings", icon: Settings, section: "Administration" },
+
+    { href: "/tenant-admin/docs", label: "Documentation", icon: BookOpen, section: "Help" },
   ],
   admin: [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard, section: "Overview" },
@@ -99,6 +103,8 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/admin/feature-flags", label: "Feature Flags", icon: Flag, section: "Administration" },
     { href: "/admin/platform-settings", label: "Platform Settings", icon: Cog, section: "Administration" },
     { href: "/admin/settings", label: "Settings", icon: Settings, section: "Administration" },
+
+    { href: "/admin/docs", label: "Documentation", icon: BookOpen, section: "Help" },
   ],
 };
 

@@ -19,6 +19,7 @@ from packages.api.schemas.search import (
 from packages.conversation.bootstrap import ensure_default_model_profile
 from packages.infrastructure.container import ApplicationContainer
 from packages.knowledge.vectorstores.schema import SearchFilter, SearchOptions
+from packages.shared.access import set_retrieval_strategy
 
 router = APIRouter(
     prefix="/search",
@@ -50,6 +51,7 @@ async def search(
     model_profiles = container.repositories.model_profile()
     model_profile = await ensure_default_model_profile(model_profiles)
 
+    set_retrieval_strategy(await container.platform_settings.service().get("retrieval_strategy"))
     knowledge_manager = container.rag.knowledge_manager()
     reranker = container.rag.reranker()
 

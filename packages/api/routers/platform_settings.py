@@ -40,6 +40,7 @@ async def _response(service: PlatformSettingsService) -> PlatformSettingsRespons
                 help=spec.help,
                 minimum=spec.minimum,
                 maximum=spec.maximum,
+                choices=spec.choices,
                 value=value,
                 default=spec.default,
                 is_overridden=value != spec.default,

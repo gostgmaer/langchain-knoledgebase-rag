@@ -3,9 +3,20 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from packages.domain.enums.model_provider import ModelProvider
 from packages.domain.enums.model_status import ModelStatus
+
+
+def _validate_provider(value: str) -> str:
+    """Case-insensitive membership check against `ModelProvider`, preserving the caller's own casing."""
+    try:
+        ModelProvider(value.strip().upper())
+    except ValueError:
+        valid = ", ".join(p.value.lower() for p in ModelProvider)
+        raise ValueError(f"Unknown provider '{value}'. Must be one of: {valid}.") from None
+    return value
 
 
 class CreateModelProfileRequestSchema(BaseModel):
@@ -24,6 +35,11 @@ class CreateModelProfileRequestSchema(BaseModel):
     name: str = Field(min_length=1, max_length=100)
 
     provider: str = Field(min_length=1, max_length=50)
+
+    @field_validator("provider")
+    @classmethod
+    def _check_provider(cls, value: str) -> str:
+        return _validate_provider(value)
 
     model: str = Field(min_length=1, max_length=150)
 
@@ -64,6 +80,11 @@ class UpdateModelProfileRequestSchema(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
 
     provider: str | None = Field(default=None, min_length=1, max_length=50)
+
+    @field_validator("provider")
+    @classmethod
+    def _check_provider(cls, value: str | None) -> str | None:
+        return value if value is None else _validate_provider(value)
 
     model: str | None = Field(default=None, min_length=1, max_length=150)
 

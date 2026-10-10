@@ -23,7 +23,7 @@ export function PermissionsTab({ source }: { source: KnowledgeSource }) {
   const mappings = useIdentityMappings(source.type);
   const save = useSaveMapping();
   const remove = useDeleteMapping();
-  const [draft, setDraft] = useState<{ key: string; internalType: "user" | "role"; internalId: string }>({ key: "", internalType: "role", internalId: "" });
+  const [draft, setDraft] = useState<{ principalType: "user" | "group"; key: string; internalType: "user" | "role"; internalId: string }>({ principalType: "group", key: "", internalType: "role", internalId: "" });
 
   if (perms.isError) return <QueryError error={perms.error} onRetry={() => void perms.refetch()} />;
   if (perms.isLoading || !perms.data) return <Skeleton className="h-40 w-full" />;
@@ -33,7 +33,7 @@ export function PermissionsTab({ source }: { source: KnowledgeSource }) {
     try {
       await save.mutateAsync({ provider: source.type, principal_type: principalType === "user" ? "user" : "group", external_id: externalId, internal_type: internalType, internal_id: internalId.trim() });
       toast.success("Mapped. Access on existing documents was updated.");
-      setDraft({ key: "", internalType: "role", internalId: "" });
+      setDraft({ principalType: "group", key: "", internalType: "role", internalId: "" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save the mapping.");
     }
@@ -111,13 +111,17 @@ export function PermissionsTab({ source }: { source: KnowledgeSource }) {
             <p className="text-sm text-neutral-500">No mappings yet.</p>
           )}
           <div className="flex flex-wrap items-end gap-2">
+            <Select className="h-8 w-28 text-xs" value={draft.principalType} onChange={(e) => setDraft({ ...draft, principalType: e.target.value as "user" | "group" })} aria-label="External principal type">
+              <option value="group">group</option>
+              <option value="user">user</option>
+            </Select>
             <Input className="h-8 w-64 text-xs" placeholder="external group or user id" value={draft.key} onChange={(e) => setDraft({ ...draft, key: e.target.value })} aria-label="External id" />
             <Select className="h-8 w-28 text-xs" value={draft.internalType} onChange={(e) => setDraft({ ...draft, internalType: e.target.value as "user" | "role" })} aria-label="Internal type">
               <option value="role">role</option>
               <option value="user">user id</option>
             </Select>
             <Input className="h-8 w-48 text-xs" placeholder={draft.internalType === "role" ? "internal role, e.g. finance" : "internal user id"} value={draft.internalId} onChange={(e) => setDraft({ ...draft, internalId: e.target.value })} aria-label="Internal id" />
-            <Button size="sm" disabled={!draft.key.trim() || !draft.internalId.trim()} onClick={() => void map("group", draft.key.trim(), draft.internalType, draft.internalId)}>
+            <Button size="sm" disabled={!draft.key.trim() || !draft.internalId.trim()} onClick={() => void map(draft.principalType, draft.key.trim(), draft.internalType, draft.internalId)}>
               Add mapping
             </Button>
           </div>

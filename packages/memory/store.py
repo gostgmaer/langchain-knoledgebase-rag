@@ -116,3 +116,18 @@ class MemoryStore(ABC):
         if one exists (e.g. a conversation's running summary).
         """
         ...
+
+    @abstractmethod
+    async def upsert_summary(
+        self,
+        request: CreateMemoryRequest,
+    ) -> MemoryFact:
+        """
+        Atomically creates a conversation's SUMMARY memory, or replaces its content if one already
+        exists — `request.type` must be `MemoryType.SUMMARY`. Unlike a caller doing
+        `get_by_conversation_and_type()` then `create()`/`update()` itself, this must never leave a
+        window where two concurrent callers for the same conversation each see "none yet" and both
+        create one: implementations back this with a real atomic database operation (e.g. Postgres
+        `INSERT ... ON CONFLICT DO UPDATE`), not an application-level check-then-act.
+        """
+        ...

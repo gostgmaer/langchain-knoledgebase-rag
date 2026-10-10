@@ -16,10 +16,12 @@ class PlatformSettingItemSchema(BaseModel):
     key: str
     label: str
     kind: str
-    """int | bool | string_list"""
+    """int | float | bool | string_list | string"""
     help: str | None
     minimum: float | None
     maximum: float | None
+    choices: tuple[str, ...] | None = None
+    """For kind="string": the only values accepted."""
     value: Any
     """The effective value in use right now."""
     default: Any

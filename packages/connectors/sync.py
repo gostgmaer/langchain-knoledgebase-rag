@@ -92,6 +92,7 @@ def slim_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass
 class Counters:
+    max_error_details: int = 100
     discovered: int = 0
     created: int = 0
     updated: int = 0
@@ -108,7 +109,7 @@ class Counters:
 
     def add_error(self, external_id: str, title: str | None, stage: str, message: str) -> None:
         self.failed += 1
-        if len(self.errors) < settings.rag.connector_max_error_details:
+        if len(self.errors) < self.max_error_details:
             self.errors.append({"external_id": external_id[:200], "title": (title or "")[:200], "stage": stage, "message": redact(message)})
 
 
@@ -150,7 +151,8 @@ class SyncEngine:
         if snapshot is None:
             return "skipped"
 
-        counters = Counters()
+        max_error_details = await self._container.platform_settings.service().get("connector_max_error_details")
+        counters = Counters(max_error_details=max_error_details)
         status, summary = "failed", None
         connector: BaseKnowledgeConnector | None = None
         new_state = dict(snapshot.sync_state)

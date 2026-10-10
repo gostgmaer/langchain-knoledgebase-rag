@@ -49,3 +49,24 @@ def set_retrieval_filters(filters: dict | None) -> None:
 
 def retrieval_filters() -> dict:
     return dict(_retrieval_filters.get())
+
+
+# `retrieval_strategy` (docs/BUGS.md item 38 follow-up) moved from a static `.env` field
+# (packages/config/rag.py) to Platform Settings, read fresh per request — but
+# `RetrieverFactory.create` (packages/knowledge/retrievers/factory.py) sits behind
+# `ApplicationContainer`'s plain-sync `providers.Factory` chain, same impasse
+# packages/tools/context.py's own docstring describes for custom tools: making any one provider
+# in that chain async would force every caller of `container.rag.*`/`container.graph.*` to
+# `await` it. Same fix: the router does the async `PlatformSettingsService.get()` read up front
+# and drops the already-fetched string here; the sync factory just reads it back. `None` (never
+# fetched — a worker job, a script, a test) falls back to "hybrid", this app's long-standing
+# static default, not a crash.
+_retrieval_strategy: ContextVar[str | None] = ContextVar("retrieval_strategy", default=None)
+
+
+def set_retrieval_strategy(strategy: str | None) -> None:
+    _retrieval_strategy.set(strategy)
+
+
+def current_retrieval_strategy() -> str:
+    return _retrieval_strategy.get() or "hybrid"

@@ -38,6 +38,10 @@ def test_the_secret_is_accepted_in_the_header_or_as_graph_client_state():
     assert webhooks.authenticated(digest, None, {"value": [{"clientState": "s3cret"}, {"clientState": "s3cret"}]})
     assert not webhooks.authenticated(digest, None, {"value": [{"clientState": "s3cret"}, {"clientState": "other"}]})  # every notification must carry it
     assert not webhooks.authenticated(digest, None, {"value": [{}]})
+    # A non-dict entry must not be silently dropped from the clientState check: filtering it out of
+    # `states` and then `all()`-ing the (now empty) rest would vacuously authenticate the request.
+    assert not webhooks.authenticated(digest, None, {"value": ["not-a-dict"]})
+    assert not webhooks.authenticated(digest, None, {"value": [{"clientState": "s3cret"}, "not-a-dict"]})
 
 
 def test_only_token_shaped_validation_strings_are_echoed():

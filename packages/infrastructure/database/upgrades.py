@@ -97,6 +97,55 @@ UPGRADES: tuple[str, ...] = (
     "ALTER TABLE agents ADD COLUMN IF NOT EXISTS widget_public_id varchar(32)",
     "ALTER TABLE agents ADD COLUMN IF NOT EXISTS widget_allowed_origins json NOT NULL DEFAULT '[]'",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_agent_widget_public_id ON agents (widget_public_id) WHERE widget_public_id IS NOT NULL",
+    # model_profiles.provider: was a native Postgres enum (uppercase labels only), which rejected
+    # any caller sending a differently-cased but valid provider name (e.g. "google") with a raw DB
+    # error instead of a clean 422 — validation now lives at the API boundary instead, case-
+    # insensitively, so the column just needs to hold whatever string the caller sent. Safe to
+    # rerun: ALTER COLUMN TYPE to the type a column already has is a no-op.
+    "ALTER TABLE model_profiles ALTER COLUMN provider TYPE varchar(50) USING provider::text",
+    # model_profiles.is_default: nothing enforced "exactly one default profile" — create/update
+    # could mark a second profile as default with no error, and get_default()'s `.limit(1)` with no
+    # deterministic ordering would then silently pick either one, each call independently (confirmed
+    # live: two profiles both ended up is_default=true via ordinary PATCH calls). Application code
+    # now clears every other profile's flag before setting a new default (packages/infrastructure/
+    # repositories/model_profile.py's clear_default(), called from packages/api/routers/models.py),
+    # but a database that already has duplicates from before this fix needs cleaning up before the
+    # new unique index below can be created. Keeps the oldest duplicate; arbitrary but deterministic,
+    # and no worse than the pre-existing nondeterministic .limit(1) behavior (docs/BUGS.md item 39).
+    "UPDATE model_profiles SET is_default = false "
+    "WHERE is_default = true "
+    "AND id <> (SELECT id FROM model_profiles WHERE is_default = true ORDER BY created_at ASC, id ASC LIMIT 1)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_model_profile_single_default ON model_profiles (is_default) WHERE is_default = true",
+    # memories: "one SUMMARY row per conversation" was an application-level invariant only — no DB
+    # constraint backed it. MemoryManager.summarize()'s Redis lock guarded the check-then-act, but
+    # its critical section was released before the transaction that actually persisted the create
+    # was committed (commit happens later, at the caller's own session boundary), so two calls
+    # close together could still both see "no row yet" and both insert one. The repository's own
+    # get_by_conversation_and_type() already tolerated this defensively (picks the most-recently-
+    # updated row rather than crashing on a duplicate), so this was never a crash in practice — just
+    # silent duplicate rows accumulating. Fixed at the source with a real atomic upsert
+    # (packages/infrastructure/repositories/memory.py's upsert_summary()); this cleans up any
+    # duplicates a pre-fix database already has (keeps the most recently updated one per
+    # conversation, same tie-break the repository's own defensive read already used) before the
+    # unique index it needs can be created.
+    "DELETE FROM memories m USING memories m2 "
+    "WHERE m.type = 'SUMMARY' AND m2.type = 'SUMMARY' "
+    "AND m.conversation_id = m2.conversation_id "
+    "AND (m.updated_at, m.id) < (m2.updated_at, m2.id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_conversation_summary ON memories (conversation_id, type) WHERE type = 'SUMMARY'",
+    # One active (queued/running) sync run per source: packages/connectors/scheduling.py's
+    # create_run() used to rely solely on a check-then-insert (SELECT active runs, then INSERT) with
+    # no row lock, so two concurrent callers (a manual "sync now" double-click, a scheduled sync
+    # racing a webhook notification) could both pass the check and both insert a queued run. This
+    # index gives create_run() something atomic to conflict against instead. Cleans up any existing
+    # duplicates first (cancels every active run but the most recently updated one per source), same
+    # tie-break as the memory-summary cleanup above, so the index can actually be created.
+    "UPDATE source_sync_runs r SET status = 'cancelled', completed_at = now() "
+    "FROM source_sync_runs r2 "
+    "WHERE r.status IN ('queued', 'running') AND r2.status IN ('queued', 'running') "
+    "AND r.source_id = r2.source_id "
+    "AND (r.updated_at, r.id) < (r2.updated_at, r2.id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_source_sync_runs_active ON source_sync_runs (source_id) WHERE status IN ('queued', 'running')",
 )
 
 # Row-level security: defence in depth behind the query-layer tenant filters. The policy applies

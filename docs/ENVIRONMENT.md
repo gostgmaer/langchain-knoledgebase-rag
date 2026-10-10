@@ -112,9 +112,6 @@ The API verifies each request by sending the caller's bearer token to IAM (`GET 
 | `IAM_CLIENT_ID`, `IAM_CLIENT_SECRET` | none (required) | Credentials for IAM's `client_credentials` service token. Not used for per-request auth. Placeholders are fine until a feature calls the service token. |
 | `IAM_INTROSPECTION_API_KEY` | none (required) | Sent as `x-api-key` when the API calls IAM's session-introspection endpoint. Set it to IAM's value if you use introspection; otherwise a placeholder. |
 | `IAM_JWKS_BASE_URL` | unset | **Unused today.** Reserved for future local RS256 verification. Leave empty. |
-| `IAM_TIMEOUT` | `30` | Seconds per IAM request. |
-| `IAM_MAX_RETRIES` | `3` | Retries on transient IAM/network failures. |
-| `IAM_VERIFY_SSL` | `true` | Set `false` only against a local self-signed certificate. |
 | `JWT_SECRET` | none (required) | Legacy local-signing secret. Sessions are IAM-issued tokens and are not verified with this, but it must be set. Use a random 32+ character value. |
 | `JWT_ALGORITHM` | `HS256` | Algorithm for the legacy secret above. |
 | `ENABLE_RBAC` | `false` | Seed value of the dynamic `enable_rbac` feature flag: turns on permission-code checks (`require_permission` / `require_role`) on routes that use them. Separate from `AUTH_REQUIRED`. |
@@ -138,7 +135,7 @@ The API verifies each request by sending the caller's bearer token to IAM (`GET 
 | `CHROMA_SERVER_HOST`, `CHROMA_SERVER_PORT` | unset | Only for `chroma`: use a real `chroma run` server instead of the embedded client (needed when API and worker both use Chroma). |
 | `CHUNK_SIZE` | `1000` | Characters per chunk when splitting documents. |
 | `CHUNK_OVERLAP` | `200` | Characters shared between adjacent chunks. |
-| `RETRIEVAL_STRATEGY` | `hybrid` | Retrieval mode (vector + keyword). |
+| ~~`RETRIEVAL_STRATEGY`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38 follow-up) — admin-configurable from the Platform Settings page. Built-in default: `hybrid`. One of `similarity`/`hybrid`/`self_query`/`parent_document`/`multi_vector`/`graph_rag` (`mmr` omitted — `mmr_search` is unimplemented in every vector store backend, see docs/BUGS.md item 38). |
 | `RAG_MAX_RESULTS` | `5` | Chunks passed to the answer step after reranking. |
 | ~~`RETRIEVAL_KEYWORD_WEIGHT`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38 follow-up) — admin-configurable from the Platform Settings page. Built-in default: `1.0` (range 0.0-2.0). Weight of BM25 keyword matches relative to vector search in hybrid retrieval. |
 | ~~`RAG_CONTEXT_TOKEN_BUDGET`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38 follow-up) — admin-configurable from the Platform Settings page. Built-in default: `4000`. Max tokens of retrieved context sent to the LLM. |
@@ -152,7 +149,7 @@ The API verifies each request by sending the caller's bearer token to IAM (`GET 
 | `CONNECTOR_CREDENTIAL_KEYS` | unset | **Required to store any credential.** Fernet key(s), comma separated; the first encrypts, every key decrypts. Generate one: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Rotate by putting a new key first, then re-saving or rotating credentials, then removing the old key. Losing every key makes stored credentials unreadable (they must be re-entered). Never commit it. |
 | `CONNECTOR_ALLOW_PRIVATE_HOSTS` | `false` | Lets connectors call private-network addresses (an intranet Confluence, a docs site on your network). **Off by default: it is the guard against a source URL reaching the platform's own network or cloud metadata (SSRF).** Turn on only if your sources genuinely live on a private network. |
 | ~~`CONNECTOR_SYNC_CONCURRENCY`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38) — admin-configurable from the Platform Settings page. Built-in default: `4` (range 1-16). |
-| `CONNECTOR_MAX_ERROR_DETAILS` | `100` | Failed documents listed in a sync run's error detail (counts are always exact). |
+| ~~`CONNECTOR_MAX_ERROR_DETAILS`~~ | moved to DB | **No longer an env var** (docs/BUGS.md item 38 follow-up) — admin-configurable from the Platform Settings page. Built-in default: `100`. Failed documents listed in a sync run's error detail (counts are always exact). |
 | `CONNECTOR_RENDER_URL` | unset | Base URL of a headless-rendering service (Browserless-compatible `/content` endpoint) used when a web source has "Render JavaScript" turned on. Unset means that option is rejected at save time. See `docs/KNOWLEDGE_SOURCES.md`, "JavaScript-rendered pages". |
 | `CONNECTOR_RENDER_TOKEN` | unset | Bearer token sent to `CONNECTOR_RENDER_URL`, if the rendering service requires one. |
 
@@ -197,9 +194,6 @@ Seed values for the live Feature Flags page (changes made there take effect with
 | **`FILE_UPLOAD_HMAC_SECRET`** | unset | Shared secret used to sign every request to the upload service (`X-Gateway-Hmac` = HMAC-SHA256 of `userId:email:role`). **Required whenever the upload service runs with `GATEWAY_AUTH_REQUIRED=true` (its default)**; without it uploads fail with `Missing gateway signature`. Same value as the upload service's `GATEWAY_INTERNAL_SECRET`. |
 | `UPLOAD_SERVICE_ROLE` | `admin` | Role presented in the signed identity: `user` or `admin`. RAG is a trusted backend acting for its own already-authorised tenants; `admin` lets it replace/delete the files it stored. |
 | `UPLOAD_SERVICE_API_KEY` | unset | Sent as `x-api-key`. The upload service does not check it today; harmless to keep set. |
-| `UPLOAD_SERVICE_TIMEOUT` | `30` | Seconds per call (1-300). |
-| `UPLOAD_SIGNED_URL_EXPIRY` | `3600` | Signed download URL lifetime in seconds (min 60). |
-| `UPLOAD_SERVICE_VERIFY_SSL` | `true` | `false` only for local self-signed certificates. |
 
 ### 3.8 Observability
 
