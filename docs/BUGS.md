@@ -1581,6 +1581,48 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   where `frontend/Dockerfile` expects them) both verified post-fix.
 - **Files:** `frontend/src/lib/api/types.ts`.
 
+### 52. ✅ New feature — a CI/CD pipeline that builds both images, pushes them, and deploys on every merge
+- No automation existed past CI (`.github/workflows/ci.yml` only ran tests) — every real deploy was
+  a human running `scripts/build_prod_image.sh`/`scripts/deploy_blue_green.sh` by hand
+  (`docs/DEPLOYMENT.md` §6-7), and the frontend had no production image or deploy path at all.
+- **Backend:** unchanged — still `docker/Dockerfile`, now built and pushed by CI instead of by hand.
+- **Frontend, built for the first time:** `frontend/Dockerfile` (3-stage: pnpm install, `next build`,
+  a slim `node:22-slim` runtime running the `output: "standalone"` server as a non-root user on
+  `:3000`), `frontend/.dockerignore`, `output: "standalone"` added to `frontend/next.config.ts`, and
+  a new `frontend/src/app/api/healthz/route.ts` for the container `HEALTHCHECK` — under `/api/`, so
+  `proxy.ts`'s auth gate never intercepts it (the same reachable-without-a-cookie mechanism item 49
+  added for `widget.js`), no change to `PUBLIC_PATHS` needed. `docker-compose.prod.yml` gained a
+  `frontend` service (`easydev/ai-platform-frontend:${VERSION}`) — deliberately v1-simple: single
+  instance, host port 3000 published directly, no Traefik routing or blue-green yet. The backend's
+  zero-downtime mechanism (item 9) took a whole pass of its own; nothing has asked for that same
+  investment here yet, and this isn't it.
+- **Pipeline:** one new job, `build-and-deploy`, appended to the existing `.github/workflows/ci.yml`
+  — `needs: [dependency-audit, test, frontend-test]` and `if: github.event_name == 'push' &&
+  (... main or master)`, so it only ever runs after a real merge whose tests already passed, never
+  on a PR. Tags both images with the merge commit's short SHA plus a floating `latest`, pushes both
+  to Docker Hub, then SSHes into the deploy host and runs the same scripts a human would
+  (`scripts/deploy_blue_green.sh` for the backend, `docker compose ... up -d frontend` for the new
+  service) with `VERSION` pinned to that SHA. Deliberately one combined job, not split into a
+  separate deploy-status or version-bump step — that split, and any real versioning scheme beyond
+  "the commit SHA that built it," is flagged to come later, not an oversight here.
+- **Not yet wired up (needs real values, not placeholders):** `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`
+  and `DEPLOY_HOST`/`DEPLOY_USER`/`DEPLOY_SSH_KEY`/`DEPLOY_PATH` as repo secrets, and (optionally)
+  `NEXT_PUBLIC_WIDGET_API_URL` as a repo variable — none exist yet. Until they're added under
+  Settings → Secrets and variables → Actions, the job runs, builds both images locally in the
+  runner, and fails cleanly at the registry-login step; nothing it does before that point touches
+  any real external system.
+- **Verified:** `docker compose -f docker-compose.prod.yml config` resolves cleanly with the new
+  `frontend` service. `.github/workflows/ci.yml` parses as valid YAML. `pnpm build` (the exact
+  command `frontend/Dockerfile` runs) succeeds end to end with `output: "standalone"` and produces
+  `.next/standalone/server.js` + `.next/static` in the shape the Dockerfile's `COPY` lines expect.
+  `npx tsc --noEmit` and `pnpm test` (35 passed) both clean. A real `docker build` of either image
+  was not run (Docker Desktop unavailable in this environment, same gap noted in
+  `docs/DEPLOYMENT.md` §7) — the frontend Dockerfile mirrors the already-live-verified structure of
+  `docker/Dockerfile` (non-root user, `--chown` at `COPY` time, cache-mounted installs) closely
+  enough that this is a real, known gap to close on first real use, not a blind guess.
+- **Files:** `.github/workflows/ci.yml`, `frontend/Dockerfile`, `frontend/.dockerignore`,
+  `frontend/next.config.ts`, `frontend/src/app/api/healthz/route.ts`, `docker-compose.prod.yml`.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale

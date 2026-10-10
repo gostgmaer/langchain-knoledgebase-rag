@@ -157,3 +157,84 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+  # Fires only on a real merge to main/master (never on a PR — `github.event_name == 'push'`), and
+  # only once every test job above has actually passed (`needs:`). v1, deliberately simple per the
+  # explicit request that kicked this off: build both images, push them, deploy — one job, no
+  # separate status-update/version-bump step yet. That's flagged to be revisited later, not an
+  # oversight here.
+  #
+  # Requires these repo secrets to actually run (none exist yet as of writing this — add them
+  # under Settings -> Secrets and variables -> Actions):
+  #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN        - registry push (docker/login-action)
+  #   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY    - SSH access to the box running docker-compose.prod.yml
+  #   DEPLOY_PATH                                 - that box's checkout of this repo (scripts/
+  #                                                  deploy_blue_green.sh and docker-compose.prod.yml
+  #                                                  are run from there, not copied over by this job)
+  # Until those are added, this job reaches the docker/login-action step and fails there — every
+  # step before it (build) still runs and is useful on its own as a build-only smoke test.
+  build-and-deploy:
+    needs: [dependency-audit, test, frontend-test]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image tag from the merge commit's short SHA
+        run: echo "VERSION=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # One image for both api and worker (docker/Dockerfile) — see scripts/build_prod_image.sh's
+      # own comment on why they intentionally share a tag.
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: |
+            easydev/ai-platform:${{ env.VERSION }}
+            easydev/ai-platform:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_WIDGET_API_URL=${{ vars.NEXT_PUBLIC_WIDGET_API_URL }}
+          tags: |
+            easydev/ai-platform-frontend:${{ env.VERSION }}
+            easydev/ai-platform-frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Runs the same scripts this repo already documents for a manual deploy (docs/DEPLOYMENT.md
+      # §6-7) against the already-cloned copy of this repo on the deploy host — just VERSION-pinned
+      # to this merge's image instead of a human picking a version by hand.
+      - name: Deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}"
+            git fetch origin "${{ github.ref_name }}"
+            git checkout "${{ github.sha }}"
+            VERSION="${{ env.VERSION }}" scripts/deploy_blue_green.sh
+            VERSION="${{ env.VERSION }}" docker compose -f docker-compose.prod.yml pull frontend
+            VERSION="${{ env.VERSION }}" docker compose -f docker-compose.prod.yml up -d frontend
+            docker image prune -f

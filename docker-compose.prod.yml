@@ -308,6 +308,35 @@ services:
     networks:
       - backend
 
+  # v1, deliberately simple: single instance, host port published directly, no Traefik/blue-green
+  # yet — the backend's zero-downtime machinery (§7 of docs/DEPLOYMENT.md) took a whole pass of
+  # its own to get right, and nothing has asked for that same investment here yet. Revisit once a
+  # real deploy step/versioning scheme (docs/BUGS.md) lands for this service.
+  frontend:
+    image: easydev/ai-platform-frontend:${VERSION:?Set VERSION to a real image tag before deploying — no floating "latest" in production}
+
+    restart: always
+
+    env_file:
+      - .env
+
+    ports:
+      - "3000:3000"
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+        reservations:
+          cpus: "0.25"
+          memory: 256m
+
+    logging: *default-logging
+
+    networks:
+      - backend
+
   redis:
     image: redis:8-alpine
 
