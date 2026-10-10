@@ -1641,6 +1641,16 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   repo variable — none exist yet. Until they're added under Settings → Secrets and variables →
   Actions, the build/push steps now succeed on their own and the deploy steps fail at the SSH
   connection instead.
+- **Release tag on merge, manual dispatch added**: `build-and-deploy` now also tags the repo itself
+  — `git tag v<short-sha> && git push origin v<short-sha>`, matching the same short-SHA scheme
+  already used for the two image tags — right after resolving `VERSION`, only on an actual `push`
+  (not on a manual run, which could land on a commit whose tag already exists). Needed
+  `permissions: contents: write` on the job (was `read`); still uses `actions/checkout`'s own
+  `GITHUB_TOKEN` credentials, no new secret. Also added `workflow_dispatch` so the pipeline can be
+  run by hand: the `changes` job now branches on `github.event_name` — a `push` still goes through
+  `dorny/paths-filter` as before, but a manual run skips the filter entirely (there's no meaningful
+  "before" commit to diff against) and always treats the backend as needed, with a `skip_frontend`
+  checkbox input controlling whether the frontend image builds/deploys too (default: build both).
 - **Verified:** `docker compose -f docker-compose.prod.yml config` resolves cleanly with the new
   `frontend` service. `.github/workflows/ci.yml` parses as valid YAML. `pnpm build` (the exact
   command `frontend/Dockerfile` runs) succeeds end to end with `output: "standalone"` and produces
@@ -1653,6 +1663,108 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
 - **Files:** `.github/workflows/ci.yml`, `frontend/Dockerfile`, `frontend/.dockerignore`,
   `frontend/next.config.ts`, `frontend/src/app/api/healthz/route.ts`, `docker-compose.prod.yml`,
   `scripts/build_prod_image.sh`, `docs/DEPLOYMENT.md`.
+
+### 53. ✅ Split the in-app usability guide's two combined topics into one page per route
+- Item 50's guide had two topics each covering several sidebar routes at once: "operations"
+  (Analytics, Usage, Observability, Feedback — four separate nav items under one page) and
+  "retrieval" (Retrieval Log and Retrieval Settings — two nav items under one page). Every other
+  topic in the guide is already one page per route; these two were the exception, not a deliberate
+  design choice, and the combined "operations" page in particular undersold what each of its four
+  pages actually does (e.g. Observability's re-index action and searchable audit trail weren't
+  mentioned at all).
+- **Fixed:** replaced `operations.md` with four dedicated pages — `analytics.md`, `usage.md`,
+  `observability.md`, `feedback.md` — and split `retrieval.md` into `retrieval.md` (Retrieval Log
+  only) plus a new `retrieval-settings.md`. Each page's content was written against the real
+  component it documents (`analytics-view.tsx`, `usage-view.tsx`, `observability-view.tsx`,
+  `feedback-view.tsx`, `retrieval-view.tsx`, `retrieval-settings-view.tsx`), not the prior
+  higher-level summary — e.g. corrected `feedback.md` to say a feedback row's message id is plain
+  text, not a link back to the message (the old `operations.md` claimed it linked back; the
+  component never made it a `<Link>`), and documented Observability's "Re-index outdated" action
+  and the audit trail's filter/pagination, neither of which `operations.md` mentioned at all.
+  `frontend/src/lib/docs-topics.ts` now lists all six Operations-section routes individually
+  (`analytics`, `retrieval`, `retrieval-settings`, `observability`, `usage`, `feedback`,
+  `upload-jobs`), each tagged "Tenant Admin and Admin" — `upload-jobs` was previously untagged,
+  itself a small accuracy gap since it's equally absent from the Customer nav.
+- Updated the two cross-links into the removed/renamed slugs: `chat.md`'s feedback mention now
+  points at `/docs/analytics` and `/docs/feedback` (was one link to `/docs/operations`), and
+  `troubleshooting.md`'s relevance-threshold tip now points at `/docs/retrieval-settings` (was
+  `/docs/retrieval`, which is now the log, not the settings, page). `getting-started.md`'s sidebar
+  overview now names "Retrieval Log" and "Retrieval Settings" as the two separate items they are,
+  rather than one "Retrieval".
+- **Verified:** `npx vitest run` (35 passed, unchanged) and `npx tsc --noEmit` clean. Confirmed by
+  count that `frontend/public/docs/topics/*.md` (27 files) matches `DOCS_TOPICS.length` exactly (23
+  from item 50, minus the one removed `operations.md`, plus the five new files), and that no
+  remaining reference to `/docs/operations` exists anywhere in `frontend/public` or `frontend/src`.
+- **Files:** `frontend/src/lib/docs-topics.ts`, `frontend/public/docs/topics/analytics.md`,
+  `usage.md`, `observability.md`, `feedback.md`, `retrieval-settings.md`, `retrieval.md` (rewritten),
+  `chat.md`, `troubleshooting.md`, `getting-started.md` — `operations.md` removed.
+
+### 54. ✅ Enriched 15 of the usability guide's thinnest topic pages against their real components
+- A line-count pass over all 27 topic pages found 15 that were 4-9 lines — thin enough that they
+  named a feature without actually describing its real fields, table columns, or actions, unlike
+  the guide's deeper pages (`knowledge-sources.md`, the new `observability.md`). Each one was
+  rewritten against the actual component it documents, the same standard item 50 set and item 53
+  followed, rather than left as a placeholder-level summary.
+- **Fixed one real inaccuracy found in the process:** `model-profiles.md` claimed "saving a new
+  default automatically un-defaults the previous one," describing backend capability the page
+  doesn't actually expose — `model-profiles-view.tsx`'s create/edit form has no `is_default`
+  field or control at all; the "default" badge is informational only. Rewritten to describe only
+  what the form and list actually do.
+- **Added real detail that was simply missing before**, per page: `agents.md` now lists every
+  create/edit field and the Activate/Deactivate action; `tools.md` explains the built-in tool list,
+  the CUSTOM-category-plus-URL requirement to actually become callable, and GET vs. POST payload
+  shape; `prompts.md` walks the draft → publish version flow; `api-keys.md` and `documents.md` now
+  describe their list columns and destructive actions (revoke, delete) accurately; `team.md` now
+  states the real limitation that the Members table can't show each person's specific role, and
+  that platform-level roles are excluded from the invite dropdown; `knowledge-bases.md` now covers
+  the public badge, document count/embedding model, and the empty-only delete constraint;
+  `dashboard.md` was rewritten almost entirely — it previously named three cards, the real page has
+  six, including per-card links and a combined "needs attention" stat; `feature-flags.md` and
+  `platform-settings.md` now describe their real form fields and the override/reset mechanism;
+  `tenants.md` now states the real `tenant:read_all`/`super_admin` permission requirement behind
+  the directory, visible today only as an error message if you don't have it; `upload-jobs.md` now
+  explains the id-lookup tool, not just the list.
+- **Verified:** wrote a throwaway script (`unified` + `remark-parse` + `remark-gfm`, the exact
+  pipeline `docs-markdown.tsx` renders with) to parse all 27 topic files and confirm none fail to
+  parse or come back empty, and a second pass extracting every internal `/docs/<slug>` link from
+  every file and confirming each resolves to a real `DOCS_TOPICS` slug — both clean, 0 problems.
+  `npx vitest run` (35 passed) and `npx tsc --noEmit` both clean. Scripts were scratch-only, not
+  committed.
+- **Files:** `frontend/public/docs/topics/agents.md`, `tools.md`, `prompts.md`, `model-profiles.md`,
+  `api-keys.md`, `search.md`, `team.md`, `settings.md`, `documents.md`, `knowledge-bases.md`,
+  `dashboard.md`, `feature-flags.md`, `platform-settings.md`, `tenants.md`, `upload-jobs.md`.
+
+### 55. ✅ New feature — three cross-cutting usability guide pages beyond the one-page-per-route set
+- Every topic through item 54 maps 1:1 to a sidebar route. That leaves no page for questions that
+  aren't about any one screen — "what can each role actually do," "what do these terms mean,"
+  "what does the platform actually store." Added three new topics to cover exactly that, each
+  grounded in real code rather than general claims:
+  - **`roles-permissions.md`** (Overview section) — a table of what Customer/Tenant Admin/Admin
+    each see, built directly from `frontend/src/app/[role]/layout.tsx`'s `NAV_BY_ROLE`. Also
+    documents a real, non-obvious mechanic: `frontend/src/lib/session.tsx`'s `setViewingTenant`
+    only swaps which tenant's data an Admin's `effectiveSession` resolves to — an Admin "browsing
+    as" a tenant keeps every Admin-only page, not a narrowed-down Tenant Admin menu. And that
+    Model Profiles are the one resource that isn't tenant-scoped at all.
+  - **`glossary.md`** (Help section) — one-line definitions (Knowledge Base, Knowledge Source,
+    Chunk, Embedding, Retrieval, Reranking, Agent, Model Profile, Prompt, Tool, Tenant, API Key),
+    each linking to its full topic page.
+  - **`data-privacy.md`** (Help section) — what's actually stored, verified against the backend,
+    not assumed from the UI: `packages/application/services/retrieval_log_service.py`'s
+    `hash_query()` confirms queries are SHA-256-hashed, never stored as text; `packages/domain/
+    models/document_version.py`'s own comment and `packages/infrastructure/repositories/
+    document.py`'s `is_current.is_(True)` filters (used by every retrieval/search read) confirm a
+    superseded document is flagged out of search, not deleted, while `packages/connectors/
+    credentials.py`/`credential_service.py` confirm source credentials really are encrypted at
+    rest, not just described that way in `knowledge-sources.md`.
+- `getting-started.md` now links to both new pages (`roles-permissions.md` from its existing role
+  summary, `glossary.md` from a new closing line) so they're discoverable from the guide's natural
+  entry point, not just the index.
+- **Verified:** re-ran the item 54 parse/link-consistency script against the updated set — 30
+  `DOCS_TOPICS` entries, 30 files on disk, every file parses through the real `remark-gfm`
+  pipeline, every internal `/docs/<slug>` link resolves, no orphan files and no missing files.
+  `npx tsc --noEmit` and `npx vitest run` (35 passed) both clean.
+- **Files:** `frontend/src/lib/docs-topics.ts`, `frontend/public/docs/topics/roles-permissions.md`,
+  `glossary.md`, `data-privacy.md` (new), `getting-started.md` (cross-links added).
 
 ---
 

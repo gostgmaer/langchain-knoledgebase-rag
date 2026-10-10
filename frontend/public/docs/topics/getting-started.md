@@ -11,7 +11,9 @@ Three kinds of accounts see different parts of the product:
   can do, plus platform-wide settings, feature flags, and the tenant directory.
 
 Pages marked "Tenant Admin and Admin" or "Admin only" in this guide don't appear in a narrower
-role's own menu at all — that's expected, not a bug.
+role's own menu at all — that's expected, not a bug. See
+[Roles and permissions](/docs/roles-permissions) for the full breakdown, including what changes
+(and what doesn't) when an Admin browses a specific tenant.
 
 Sign in with your email and password, or with Google, Microsoft or Facebook if your administrator
 has turned on social sign-in (see [Settings](/docs/settings)). If someone invited you, follow the
@@ -19,8 +21,10 @@ link in your invitation email — it attaches you to the right workspace automat
 
 Once signed in, the left sidebar is your menu, grouped by what each section is for: **Overview**
 (Dashboard, Chat), **Knowledge** (Knowledge Bases, Knowledge Sources, Documents, Search), **Build**
-(Agents, Model Profiles, Prompts, Tools), **Operations** (Analytics, Retrieval, Observability,
-Usage, Feedback, Upload Jobs), and **Administration** (Team, API Keys, Settings, and, for Admins,
-Tenants, Feature Flags and Platform Settings).
+(Agents, Model Profiles, Prompts, Tools), **Operations** (Analytics, Retrieval Log, Retrieval
+Settings, Observability, Usage, Feedback, Upload Jobs), and **Administration** (Team, API Keys,
+Settings, and, for Admins, Tenants, Feature Flags and Platform Settings).
 
 ![Signed-in sidebar, showing the grouped menu](/docs/images/sidebar-overview.png)
+
+New to terms like "chunk" or "reranking"? See the [Glossary](/docs/glossary).

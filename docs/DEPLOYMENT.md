@@ -178,7 +178,12 @@ docker-compose.prod.yml up` failed immediately with an image-not-found error.
 **Since item 52, `.github/workflows/ci.yml`'s `build-and-deploy` job does this automatically** on
 every push to `main`/`master` — it builds, tags, and pushes to GitHub Container Registry
 (`ghcr.io`, authenticated via the workflow's own `GITHUB_TOKEN`; no registry secret to create or
-rotate) whenever backend-relevant paths change. The manual path below is still correct for a local
+rotate) whenever backend-relevant paths change, then tags the repo itself `v<short-sha>` (same SHA
+used for the image tag) and pushes that tag too, so each deployed image has a matching release tag
+to check out or diff against later. The job can also be run by hand from the Actions tab
+(`workflow_dispatch`) — a manual run always builds the backend and, unless you check
+`skip_frontend`, the frontend too; it skips the push-diff logic entirely and does not create a
+release tag (only an actual merge does that). The manual path below is still correct for a local
 build or a registry push outside CI; just be aware GHCR packages default to **private** — the
 deploy host needs `docker login ghcr.io` with a PAT that has `read:packages`, or the packages need
 to be made public, or `docker compose pull` will fail there with an auth error.
@@ -332,3 +337,90 @@ confirmed `GET /auth/me` returns the new RAG codes alongside the platform's othe
 confirmed `GET /api/v1/feature-flags` shows the running API's own live view of `enable_rbac` as
 `true`, and confirmed `GET /api/v1/agents`/`GET /api/v1/knowledge-sources` still return `200` with a
 real admin token — RBAC is genuinely enforcing, not a no-op, and no admin was locked out.
+
+## 10. Using the CI/CD pipeline (`.github/workflows/ci.yml`)
+
+`docs/BUGS.md` item 52. Day-to-day reference for the pipeline itself, as opposed to §6-7 above,
+which cover doing the same steps by hand.
+
+### What runs when
+
+| Trigger | Backend built/deployed? | Frontend built/deployed? | Release tag pushed? |
+| --- | --- | --- | --- |
+| Push to `main`/`master` touching backend paths only | Yes | No | Yes |
+| Push to `main`/`master` touching `frontend/**` only | No | Yes | Yes |
+| Push touching both, or neither path list (e.g. docs-only) | Both built/deployed on "both"; the job is skipped entirely on "neither" | — | Yes (skipped along with the job if nothing matched) |
+| Manual run (Actions tab → CI → **Run workflow**, or `gh workflow run ci.yml`) | Always | Yes, unless `skip_frontend` is checked | No — manual runs never create a release tag |
+
+"Backend paths" are `apps/**`, `packages/**`, `alembic/**`, `alembic.ini`, `pyproject.toml`,
+`uv.lock`, `scripts/**`, `docker/Dockerfile`, `docker/Dockerfile.worker` — see the `changes` job's
+`filters:` block for the authoritative list.
+
+Run it manually, backend-only, from the CLI:
+
+```bash
+gh workflow run ci.yml -f skip_frontend=true
+```
+
+Then watch it:
+
+```bash
+gh run list --workflow=ci.yml --limit 5
+gh run view <run-id>          # per-job/per-step status
+gh run watch <run-id>          # live-follow the current run
+```
+
+### One-time setup: required secrets and variables
+
+Nothing above actually deploys until these exist under **Settings → Secrets and variables →
+Actions** on the repo (as of writing, none of them do — `gh secret list`/`gh variable list` both
+return empty):
+
+| Name | Kind | Needed for | Value |
+| --- | --- | --- | --- |
+| `DEPLOY_HOST` | Secret | SSH deploy steps | Hostname/IP of the box running `docker-compose.prod.yml` |
+| `DEPLOY_USER` | Secret | SSH deploy steps | SSH username on that box |
+| `DEPLOY_SSH_KEY` | Secret | SSH deploy steps | Private key for that user (the matching public key must already be in that box's `authorized_keys`) |
+| `DEPLOY_PATH` | Secret | SSH deploy steps | Absolute path to this repo's checkout on that box (where `scripts/deploy_blue_green.sh` and `docker-compose.prod.yml` actually run from) |
+| `NEXT_PUBLIC_WIDGET_API_URL` | Variable (optional) | Frontend build-arg | Public base URL the embeddable widget snippet generator should default to; safe to leave unset — it's a UI convenience, not required for the build to succeed |
+
+`secrets.GITHUB_TOKEN` needs no setup — GitHub injects it automatically into every run; it's what
+authenticates the GHCR push and the release-tag push (§6, item 52).
+
+```bash
+gh secret set DEPLOY_HOST --body "<host-or-ip>"
+gh secret set DEPLOY_USER --body "<ssh-user>"
+gh secret set DEPLOY_SSH_KEY < /path/to/private_key
+gh secret set DEPLOY_PATH --body "/absolute/path/on/the/deploy/host"
+gh variable set NEXT_PUBLIC_WIDGET_API_URL --body "https://api.yourdomain.com/api/v1"
+```
+
+Until `DEPLOY_*` exist, the build/push steps succeed on their own and the pipeline fails at the SSH
+connection — that's expected, not a sign anything else is broken.
+
+### Finding what's actually deployed, and rolling back
+
+Every merge that builds anything pushes a `v<short-sha>` tag matching the image tag that went out,
+so "what's running in prod" and "what's in git" are always answerable from the same value:
+
+```bash
+git tag -l 'v*' --sort=-creatordate | head          # most recent release tags
+git log -1 v1a2b3c4                                  # the commit a given release tag points at
+```
+
+To roll back, redeploy an older tag's `VERSION` by hand (the pipeline only ever deploys forward,
+one merge at a time):
+
+```bash
+VERSION=1a2b3c4 scripts/deploy_blue_green.sh                              # backend
+VERSION=1a2b3c4 docker compose -f docker-compose.prod.yml up -d frontend  # frontend
+```
+
+### GHCR package visibility
+
+GHCR packages default to **private**. The first push creates `ai-platform` and
+`ai-platform-frontend` packages under the repo owner's account — either make them public
+(package → Package settings → Change visibility, on github.com) or run `docker login ghcr.io` on
+the deploy host with a PAT that has `read:packages`. Until one of those is done, `docker compose
+pull`/`scripts/deploy_blue_green.sh` fail there with an auth error even though the build/push steps
+in CI succeeded.

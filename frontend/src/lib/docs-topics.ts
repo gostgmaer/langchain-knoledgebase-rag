@@ -15,6 +15,7 @@ export interface DocsTopic {
 
 export const DOCS_TOPICS: DocsTopic[] = [
   { slug: "getting-started", title: "Getting started", description: "Signing in, roles, and finding your way around.", section: "Overview" },
+  { slug: "roles-permissions", title: "Roles and permissions", description: "What Customer, Tenant Admin and Admin can each actually see and do.", section: "Overview" },
   { slug: "chat", title: "Chat", description: "Ask questions, read citations, leave feedback.", section: "Overview" },
   { slug: "dashboard", title: "Dashboard", description: "A quick health check for your workspace.", section: "Overview", roleNote: "Tenant Admin and Admin" },
 
@@ -30,9 +31,13 @@ export const DOCS_TOPICS: DocsTopic[] = [
   { slug: "prompts", title: "Prompts", description: "Versioned system-prompt templates.", section: "Build" },
   { slug: "tools", title: "Tools", description: "Built-in tools, and custom webhook tools.", section: "Build" },
 
-  { slug: "retrieval", title: "Retrieval Log and Retrieval Settings", description: "See what retrieval found, and tune how it behaves.", section: "Operations" },
-  { slug: "operations", title: "Analytics, Usage, Observability and Feedback", description: "How the workspace is actually performing.", section: "Operations", roleNote: "Tenant Admin and Admin" },
-  { slug: "upload-jobs", title: "Upload Jobs", description: "Real-time progress for every document upload.", section: "Operations" },
+  { slug: "analytics", title: "Analytics", description: "Queries per day, feedback trends, and the most-flagged responses.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "retrieval", title: "Retrieval Log", description: "See exactly what retrieval found for a given query, and why.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "retrieval-settings", title: "Retrieval Settings", description: "Tune how many chunks feed an answer and how strict reranking is.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "observability", title: "Observability", description: "Retrieval health, document health, and an audit trail.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "usage", title: "Usage", description: "Token consumption and estimated cost, by day.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "feedback", title: "Feedback", description: "Every thumbs up/down left on an assistant response.", section: "Operations", roleNote: "Tenant Admin and Admin" },
+  { slug: "upload-jobs", title: "Upload Jobs", description: "Real-time progress for every document upload.", section: "Operations", roleNote: "Tenant Admin and Admin" },
 
   { slug: "team", title: "Team", description: "Members and pending invitations.", section: "Administration" },
   { slug: "api-keys", title: "API Keys", description: "Call the platform's API outside a browser session.", section: "Administration" },
@@ -41,6 +46,8 @@ export const DOCS_TOPICS: DocsTopic[] = [
   { slug: "feature-flags", title: "Feature Flags", description: "Dynamic toggles, no redeploy needed.", section: "Administration", roleNote: "Admin only" },
   { slug: "platform-settings", title: "Platform Settings", description: "Operational knobs, platform-wide.", section: "Administration", roleNote: "Admin only" },
 
+  { slug: "glossary", title: "Glossary", description: "Quick definitions for terms used throughout this guide.", section: "Help" },
+  { slug: "data-privacy", title: "Data handling and privacy", description: "What actually gets stored, in plain terms.", section: "Help" },
   { slug: "troubleshooting", title: "Troubleshooting and FAQ", description: "Common issues, and how to resolve them.", section: "Help" },
 ];
 

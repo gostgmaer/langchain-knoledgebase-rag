@@ -3,8 +3,8 @@ Confirm the knowledge source containing it has finished syncing (check its statu
 [Knowledge Sources](/docs/knowledge-sources) — "connected" with a recent "Last sync" time, not
 "error" or "disconnected"), and that your account has access to it (see
 [Permissions and identity mappings](/docs/permissions)). Also check
-[Retrieval Settings](/docs/retrieval) — a relevance threshold set too high can exclude a
-genuinely relevant but lower-scoring passage.
+[Retrieval Settings](/docs/retrieval-settings) — a minimum relevance score set too high can exclude
+a genuinely relevant but lower-scoring passage.
 
 **A knowledge source shows "error" or "disconnected."**
 Open its detail page — the most recent sync run usually explains why (expired credentials, a

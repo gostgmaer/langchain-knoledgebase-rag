@@ -7,22 +7,34 @@ name: CI
 on:
   push:
     branches: [main, master]
+  # Manual runs always build the backend; frontend builds too unless skip_frontend is checked.
+  # There's no "before" commit to diff against here, so this bypasses dorny/paths-filter entirely
+  # (see the `changes` job below) instead of trying to feed it a meaningful comparison ref.
+  workflow_dispatch:
+    inputs:
+      skip_frontend:
+        description: "Skip building/deploying the frontend image"
+        type: boolean
+        default: false
 
 jobs:
-  # Decides which image(s) a given push actually needs — backend-only changes build only the
-  # backend image, frontend-only changes build only the frontend image, a change touching both (or
-  # neither path list below) builds both. Compares against the commit before the push
-  # (`github.event.before`), which dorny/paths-filter already does by default for a `push` event.
+  # Decides which image(s) this run actually needs.
+  # - push: backend-only changes build only the backend image, frontend-only changes build only
+  #   the frontend image, a change touching both (or neither path list below) builds both.
+  #   Compares against the commit before the push (`github.event.before`), which
+  #   dorny/paths-filter already does by default for a `push` event.
+  # - workflow_dispatch: always backend, frontend unless `skip_frontend` was checked.
   changes:
     runs-on: ubuntu-latest
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
+      backend: ${{ steps.decide.outputs.backend }}
+      frontend: ${{ steps.decide.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: dorny/paths-filter@v3
         id: filter
+        if: github.event_name == 'push'
         with:
           filters: |
             backend:
@@ -37,6 +49,21 @@ jobs:
               - 'docker/Dockerfile.worker'
             frontend:
               - 'frontend/**'
+
+      - name: Decide
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            if [ "${{ inputs.skip_frontend }}" = "true" ]; then
+              echo "frontend=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "frontend=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "backend=${{ steps.filter.outputs.backend }}" >> "$GITHUB_OUTPUT"
+            echo "frontend=${{ steps.filter.outputs.frontend }}" >> "$GITHUB_OUTPUT"
+          fi
 
   # Pushes to GitHub Container Registry (ghcr.io), not Docker Hub — authenticates with the
   # workflow's own built-in GITHUB_TOKEN (needs `permissions: packages: write` below), so no
@@ -60,7 +87,9 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
+      # write, not read: the release-tag step below pushes a tag using actions/checkout's own
+      # GITHUB_TOKEN credentials, no separate PAT.
+      contents: write
       packages: write
 
     steps:
@@ -68,6 +97,15 @@ jobs:
 
       - name: Set image tag from the merge commit's short SHA
         run: echo "VERSION=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      # Only on an actual merge, not a manual run — a manual re-run can land on a commit that
+      # already has its tag (pushed by the merge that originally built it), and re-tagging it
+      # isn't what "release tag on merge" asked for.
+      - name: Create and push release tag
+        if: github.event_name == 'push'
+        run: |
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
 
       - uses: docker/setup-buildx-action@v3
 
