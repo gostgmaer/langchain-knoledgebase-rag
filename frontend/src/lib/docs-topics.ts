@@ -15,6 +15,7 @@ export interface DocsTopic {
 
 export const DOCS_TOPICS: DocsTopic[] = [
   { slug: "getting-started", title: "Getting started", description: "Signing in, roles, and finding your way around.", section: "Overview" },
+  { slug: "roles-permissions", title: "Roles and permissions", description: "What Customer, Tenant Admin and Admin can each actually see and do.", section: "Overview" },
   { slug: "chat", title: "Chat", description: "Ask questions, read citations, leave feedback.", section: "Overview" },
   { slug: "dashboard", title: "Dashboard", description: "A quick health check for your workspace.", section: "Overview", roleNote: "Tenant Admin and Admin" },
 
@@ -45,6 +46,8 @@ export const DOCS_TOPICS: DocsTopic[] = [
   { slug: "feature-flags", title: "Feature Flags", description: "Dynamic toggles, no redeploy needed.", section: "Administration", roleNote: "Admin only" },
   { slug: "platform-settings", title: "Platform Settings", description: "Operational knobs, platform-wide.", section: "Administration", roleNote: "Admin only" },
 
+  { slug: "glossary", title: "Glossary", description: "Quick definitions for terms used throughout this guide.", section: "Help" },
+  { slug: "data-privacy", title: "Data handling and privacy", description: "What actually gets stored, in plain terms.", section: "Help" },
   { slug: "troubleshooting", title: "Troubleshooting and FAQ", description: "Common issues, and how to resolve them.", section: "Help" },
 ];
 

@@ -1734,6 +1734,38 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   `api-keys.md`, `search.md`, `team.md`, `settings.md`, `documents.md`, `knowledge-bases.md`,
   `dashboard.md`, `feature-flags.md`, `platform-settings.md`, `tenants.md`, `upload-jobs.md`.
 
+### 55. ✅ New feature — three cross-cutting usability guide pages beyond the one-page-per-route set
+- Every topic through item 54 maps 1:1 to a sidebar route. That leaves no page for questions that
+  aren't about any one screen — "what can each role actually do," "what do these terms mean,"
+  "what does the platform actually store." Added three new topics to cover exactly that, each
+  grounded in real code rather than general claims:
+  - **`roles-permissions.md`** (Overview section) — a table of what Customer/Tenant Admin/Admin
+    each see, built directly from `frontend/src/app/[role]/layout.tsx`'s `NAV_BY_ROLE`. Also
+    documents a real, non-obvious mechanic: `frontend/src/lib/session.tsx`'s `setViewingTenant`
+    only swaps which tenant's data an Admin's `effectiveSession` resolves to — an Admin "browsing
+    as" a tenant keeps every Admin-only page, not a narrowed-down Tenant Admin menu. And that
+    Model Profiles are the one resource that isn't tenant-scoped at all.
+  - **`glossary.md`** (Help section) — one-line definitions (Knowledge Base, Knowledge Source,
+    Chunk, Embedding, Retrieval, Reranking, Agent, Model Profile, Prompt, Tool, Tenant, API Key),
+    each linking to its full topic page.
+  - **`data-privacy.md`** (Help section) — what's actually stored, verified against the backend,
+    not assumed from the UI: `packages/application/services/retrieval_log_service.py`'s
+    `hash_query()` confirms queries are SHA-256-hashed, never stored as text; `packages/domain/
+    models/document_version.py`'s own comment and `packages/infrastructure/repositories/
+    document.py`'s `is_current.is_(True)` filters (used by every retrieval/search read) confirm a
+    superseded document is flagged out of search, not deleted, while `packages/connectors/
+    credentials.py`/`credential_service.py` confirm source credentials really are encrypted at
+    rest, not just described that way in `knowledge-sources.md`.
+- `getting-started.md` now links to both new pages (`roles-permissions.md` from its existing role
+  summary, `glossary.md` from a new closing line) so they're discoverable from the guide's natural
+  entry point, not just the index.
+- **Verified:** re-ran the item 54 parse/link-consistency script against the updated set — 30
+  `DOCS_TOPICS` entries, 30 files on disk, every file parses through the real `remark-gfm`
+  pipeline, every internal `/docs/<slug>` link resolves, no orphan files and no missing files.
+  `npx tsc --noEmit` and `npx vitest run` (35 passed) both clean.
+- **Files:** `frontend/src/lib/docs-topics.ts`, `frontend/public/docs/topics/roles-permissions.md`,
+  `glossary.md`, `data-privacy.md` (new), `getting-started.md` (cross-links added).
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
