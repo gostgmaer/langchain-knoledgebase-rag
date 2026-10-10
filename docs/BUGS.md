@@ -1597,14 +1597,21 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   zero-downtime mechanism (item 9) took a whole pass of its own; nothing has asked for that same
   investment here yet, and this isn't it.
 - **Pipeline:** one new job, `build-and-deploy`, appended to the existing `.github/workflows/ci.yml`
-  — `needs: [dependency-audit, test, frontend-test]` and `if: github.event_name == 'push' &&
-  (... main or master)`, so it only ever runs after a real merge whose tests already passed, never
-  on a PR. Tags both images with the merge commit's short SHA plus a floating `latest`, pushes both
-  to Docker Hub, then SSHes into the deploy host and runs the same scripts a human would
-  (`scripts/deploy_blue_green.sh` for the backend, `docker compose ... up -d frontend` for the new
-  service) with `VERSION` pinned to that SHA. Deliberately one combined job, not split into a
-  separate deploy-status or version-bump step — that split, and any real versioning scheme beyond
-  "the commit SHA that built it," is flagged to come later, not an oversight here.
+  — originally gated behind `needs: [dependency-audit, test, frontend-test]` so it only ran after a
+  real merge whose tests already passed. **Those three test jobs, and the `needs:` gate, were then
+  removed on explicit request** ("remove all test pipeline from ci as we are not focusing it for
+  now") — `ci.yml` now has exactly one job, runs on every push to `main`/`master` with no test gate
+  at all, and the `pull_request` trigger was dropped too (nothing left for a PR push to run). A
+  broken build or a real regression can now reach the registry and the deploy host without
+  anything catching it first — a deliberate, explicit tradeoff, not an oversight; the removed jobs'
+  exact content is recoverable from git history (`git show <commit>^:.github/workflows/ci.yml`)
+  whenever testing becomes a priority again. Tags both images with the merge commit's short SHA
+  plus a floating `latest`, pushes both to Docker Hub, then SSHes into the deploy host and runs the
+  same scripts a human would (`scripts/deploy_blue_green.sh` for the backend, `docker compose ... up
+  -d frontend` for the new service) with `VERSION` pinned to that SHA. Deliberately one combined
+  job, not split into a separate deploy-status or version-bump step — that split, and any real
+  versioning scheme beyond "the commit SHA that built it," is flagged to come later, not an
+  oversight here.
 - **Not yet wired up (needs real values, not placeholders):** `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`
   and `DEPLOY_HOST`/`DEPLOY_USER`/`DEPLOY_SSH_KEY`/`DEPLOY_PATH` as repo secrets, and (optionally)
   `NEXT_PUBLIC_WIDGET_API_URL` as a repo variable — none exist yet. Until they're added under
