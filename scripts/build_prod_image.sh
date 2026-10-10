@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds and tags the image docker-compose.prod.yml expects (easydev/ai-platform:${VERSION}) --
+# Builds and tags the image docker-compose.prod.yml expects (ghcr.io/gostgmaer/ai-platform:${VERSION}) --
 # docs/BUGS.md item 7: docker-compose.prod.yml requires a pre-built, already-tagged image via
 # Compose's `${VERSION:?...}` syntax (deliberately no floating `latest`, so a redeploy's image is
 # always answerable and rollback is just re-running with an older VERSION), but nothing in the
@@ -23,12 +23,12 @@ cd "$(dirname "$0")/.."
 VERSION="${1:-}"
 if [ -z "$VERSION" ]; then
   echo "Usage: $0 <version>  (e.g. $0 1.4.2)" >&2
-  echo "  Tags the image as easydev/ai-platform:<version>, matching what" >&2
+  echo "  Tags the image as ghcr.io/gostgmaer/ai-platform:<version>, matching what" >&2
   echo "  docker-compose.prod.yml's VERSION build-arg expects." >&2
   exit 1
 fi
 
-IMAGE="easydev/ai-platform:${VERSION}"
+IMAGE="ghcr.io/gostgmaer/ai-platform:${VERSION}"
 
 echo "Building $IMAGE from docker/Dockerfile ..."
 docker build -t "$IMAGE" -f docker/Dockerfile .

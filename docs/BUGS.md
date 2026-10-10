@@ -1624,12 +1624,23 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   job, not split into a separate deploy-status or version-bump step — that split, and any real
   versioning scheme beyond "the commit SHA that built it," is flagged to come later, not an
   oversight here.
-- **Not yet wired up (needs real values, not placeholders):** `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`
-  and `DEPLOY_HOST`/`DEPLOY_USER`/`DEPLOY_SSH_KEY`/`DEPLOY_PATH` as repo secrets, and (optionally)
-  `NEXT_PUBLIC_WIDGET_API_URL` as a repo variable — none exist yet. Until they're added under
-  Settings → Secrets and variables → Actions, the job runs, builds both images locally in the
-  runner, and fails cleanly at the registry-login step; nothing it does before that point touches
-  any real external system.
+- **Registry switched from Docker Hub to GHCR**: the first real run of this pipeline failed at
+  "Log in to Docker Hub" with `Username and password required` — confirmed live via
+  `gh run view`/`gh secret list`: zero repo secrets existed at all, so `DOCKERHUB_USERNAME`/
+  `DOCKERHUB_TOKEN` were both empty. Rather than create and rotate a Docker Hub token, switched the
+  registry to `ghcr.io` (GitHub Container Registry), which authenticates with the workflow's own
+  `GITHUB_TOKEN` — no new secret to create at all, just `permissions: packages: write` on the job.
+  Images are now `ghcr.io/gostgmaer/ai-platform[-frontend]:${VERSION}`; `docker-compose.prod.yml`,
+  `scripts/build_prod_image.sh`, and `docs/DEPLOYMENT.md`'s examples were all updated to match (they
+  previously referenced `easydev/ai-platform`, a name that was never actually pushed anywhere).
+  **GHCR packages default to private** — the deploy host needs `docker login ghcr.io` with a PAT
+  that has `read:packages` (or the packages made public after their first push) before
+  `docker compose pull`/`scripts/deploy_blue_green.sh` can pull them there.
+- **Still not wired up (needs real values, not placeholders):** `DEPLOY_HOST`/`DEPLOY_USER`/
+  `DEPLOY_SSH_KEY`/`DEPLOY_PATH` as repo secrets, and (optionally) `NEXT_PUBLIC_WIDGET_API_URL` as a
+  repo variable — none exist yet. Until they're added under Settings → Secrets and variables →
+  Actions, the build/push steps now succeed on their own and the deploy steps fail at the SSH
+  connection instead.
 - **Verified:** `docker compose -f docker-compose.prod.yml config` resolves cleanly with the new
   `frontend` service. `.github/workflows/ci.yml` parses as valid YAML. `pnpm build` (the exact
   command `frontend/Dockerfile` runs) succeeds end to end with `output: "standalone"` and produces
@@ -1640,7 +1651,8 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   `docker/Dockerfile` (non-root user, `--chown` at `COPY` time, cache-mounted installs) closely
   enough that this is a real, known gap to close on first real use, not a blind guess.
 - **Files:** `.github/workflows/ci.yml`, `frontend/Dockerfile`, `frontend/.dockerignore`,
-  `frontend/next.config.ts`, `frontend/src/app/api/healthz/route.ts`, `docker-compose.prod.yml`.
+  `frontend/next.config.ts`, `frontend/src/app/api/healthz/route.ts`, `docker-compose.prod.yml`,
+  `scripts/build_prod_image.sh`, `docs/DEPLOYMENT.md`.
 
 ---
 
