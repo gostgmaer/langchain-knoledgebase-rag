@@ -1699,6 +1699,41 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
   `usage.md`, `observability.md`, `feedback.md`, `retrieval-settings.md`, `retrieval.md` (rewritten),
   `chat.md`, `troubleshooting.md`, `getting-started.md` — `operations.md` removed.
 
+### 54. ✅ Enriched 15 of the usability guide's thinnest topic pages against their real components
+- A line-count pass over all 27 topic pages found 15 that were 4-9 lines — thin enough that they
+  named a feature without actually describing its real fields, table columns, or actions, unlike
+  the guide's deeper pages (`knowledge-sources.md`, the new `observability.md`). Each one was
+  rewritten against the actual component it documents, the same standard item 50 set and item 53
+  followed, rather than left as a placeholder-level summary.
+- **Fixed one real inaccuracy found in the process:** `model-profiles.md` claimed "saving a new
+  default automatically un-defaults the previous one," describing backend capability the page
+  doesn't actually expose — `model-profiles-view.tsx`'s create/edit form has no `is_default`
+  field or control at all; the "default" badge is informational only. Rewritten to describe only
+  what the form and list actually do.
+- **Added real detail that was simply missing before**, per page: `agents.md` now lists every
+  create/edit field and the Activate/Deactivate action; `tools.md` explains the built-in tool list,
+  the CUSTOM-category-plus-URL requirement to actually become callable, and GET vs. POST payload
+  shape; `prompts.md` walks the draft → publish version flow; `api-keys.md` and `documents.md` now
+  describe their list columns and destructive actions (revoke, delete) accurately; `team.md` now
+  states the real limitation that the Members table can't show each person's specific role, and
+  that platform-level roles are excluded from the invite dropdown; `knowledge-bases.md` now covers
+  the public badge, document count/embedding model, and the empty-only delete constraint;
+  `dashboard.md` was rewritten almost entirely — it previously named three cards, the real page has
+  six, including per-card links and a combined "needs attention" stat; `feature-flags.md` and
+  `platform-settings.md` now describe their real form fields and the override/reset mechanism;
+  `tenants.md` now states the real `tenant:read_all`/`super_admin` permission requirement behind
+  the directory, visible today only as an error message if you don't have it; `upload-jobs.md` now
+  explains the id-lookup tool, not just the list.
+- **Verified:** wrote a throwaway script (`unified` + `remark-parse` + `remark-gfm`, the exact
+  pipeline `docs-markdown.tsx` renders with) to parse all 27 topic files and confirm none fail to
+  parse or come back empty, and a second pass extracting every internal `/docs/<slug>` link from
+  every file and confirming each resolves to a real `DOCS_TOPICS` slug — both clean, 0 problems.
+  `npx vitest run` (35 passed) and `npx tsc --noEmit` both clean. Scripts were scratch-only, not
+  committed.
+- **Files:** `frontend/public/docs/topics/agents.md`, `tools.md`, `prompts.md`, `model-profiles.md`,
+  `api-keys.md`, `search.md`, `team.md`, `settings.md`, `documents.md`, `knowledge-bases.md`,
+  `dashboard.md`, `feature-flags.md`, `platform-settings.md`, `tenants.md`, `upload-jobs.md`.
+
 ---
 
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
