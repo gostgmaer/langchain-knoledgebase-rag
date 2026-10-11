@@ -59,6 +59,13 @@ async def assert_public_url(url: str, *, allow_private: bool = False) -> None:
     Refuses anything but http(s) to a public address, so a source URL can never be used to reach
     the platform's own network, cloud metadata endpoints or loopback (server-side request forgery).
     `allow_private` (CONNECTOR_ALLOW_PRIVATE_HOSTS) is for self-hosted systems on a private network.
+
+    This is a fast, clear pre-flight check only — it does NOT, by itself, make the eventual
+    connection safe (docs/BUGS.md item 42's own documented gap, now actually closed: see
+    `_PinnedResolutionTransport` below). A hostname can legitimately resolve differently between
+    this check and the real connection moments later (DNS rebinding); the enforcement that
+    actually matters happens at connect time, in the transport, where there is no such gap because
+    the resolved address IS the address connected to, in the same step.
     """
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https"):
@@ -69,16 +76,15 @@ async def assert_public_url(url: str, *, allow_private: bool = False) -> None:
     if allow_private:
         return
 
-    try:
-        addresses = [host] if _looks_like_ip(host) else await _resolve(host, parts.port)
-    except OSError as exc:
-        raise BlockedUrlError(f"Could not resolve '{host}'.") from exc
-    for address in addresses:
-        if not _is_public_address(address):
+    if _looks_like_ip(host):
+        if not _is_public_address(host):
             raise BlockedUrlError(
-                f"'{host}' resolves to a non-public address; set CONNECTOR_ALLOW_PRIVATE_HOSTS only for "
+                f"'{host}' is not a public address; set CONNECTOR_ALLOW_PRIVATE_HOSTS only for "
                 "systems that legitimately live on a private network."
             )
+        return
+
+    await _resolve_validated(host, parts.port)
 
 
 def _looks_like_ip(host: str) -> bool:
@@ -93,6 +99,64 @@ async def _resolve(host: str, port: int | None) -> list[str]:
     loop = asyncio.get_running_loop()
     infos = await loop.getaddrinfo(host, port or 443, type=socket.SOCK_STREAM)
     return sorted({info[4][0] for info in infos})
+
+
+async def _resolve_validated(host: str, port: int | None) -> list[str]:
+    """
+    Resolves `host` and raises BlockedUrlError unless every address it resolves to is public.
+    The single source of truth both `assert_public_url`'s pre-check and
+    `_PinnedResolutionTransport`'s real, connection-time enforcement call through — there is
+    deliberately no second, separate "trust this address" path.
+    """
+    try:
+        addresses = await _resolve(host, port)
+    except OSError as exc:
+        raise BlockedUrlError(f"Could not resolve '{host}'.") from exc
+    for address in addresses:
+        if not _is_public_address(address):
+            raise BlockedUrlError(
+                f"'{host}' resolves to a non-public address; set CONNECTOR_ALLOW_PRIVATE_HOSTS only for "
+                "systems that legitimately live on a private network."
+            )
+    return addresses
+
+
+class _PinnedResolutionTransport(httpx.AsyncBaseTransport):
+    """
+    Closes the DNS-rebinding TOCTOU gap (docs/BUGS.md item 42) by making "resolve and validate"
+    and "connect" the exact same step, with nothing in between that DNS could change.
+
+    `assert_public_url()` alone cannot do this: it resolves a hostname, checks the result, then
+    returns — the actual TCP connection happens later, in httpx/httpcore's own independent DNS
+    resolution inside the real transport, with no guarantee it lands on the same address. A DNS
+    server that answers the first (validating) lookup with a public address and a later
+    (connecting) lookup with a private one — loopback, a cloud metadata address, an internal
+    service — passes the check and still reaches the private address.
+
+    This transport wraps the real one and, for every actual request (including every redirect
+    hop and every retry attempt — each gets its own fresh resolution, which only strengthens this,
+    never weakens it): resolves and validates the host itself, rewrites the request to connect
+    directly to the validated address, and sets the `sni_hostname` extension so TLS SNI and
+    certificate hostname verification still check against the real hostname, not the IP — the
+    `Host` header is untouched (httpx already baked it in from the original hostname when the
+    request was first built, before this transport ever sees it). A literal IP host, or
+    `allow_private`, is passed straight through unchanged, same as `assert_public_url`'s own rules.
+    """
+
+    def __init__(self, inner: httpx.AsyncBaseTransport, *, allow_private: bool) -> None:
+        self._inner = inner
+        self._allow_private = allow_private
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        if not self._allow_private and not _looks_like_ip(host):
+            addresses = await _resolve_validated(host, request.url.port)
+            request.url = request.url.copy_with(host=addresses[0])
+            request.extensions = {**request.extensions, "sni_hostname": host}
+        return await self._inner.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
 
 
 @dataclass
@@ -166,12 +230,18 @@ class ResilientHttpClient:
     stats: HttpStats = field(default_factory=HttpStats)
 
     def __post_init__(self) -> None:
+        # Pinned-resolution wrapper closes the DNS-rebinding gap (docs/BUGS.md item 42) around
+        # whatever the real transport is — httpx's own default, or a test's injected
+        # httpx.MockTransport (which, wrapped or not, never does real DNS; every such test already
+        # sets allow_private=True, so this wrapper is a no-op for them, same as assert_public_url's
+        # own early return).
+        inner_transport = self.transport or httpx.AsyncHTTPTransport()
         self._client = httpx.AsyncClient(
             headers=self.headers,
             auth=self.auth,
             timeout=self.timeout,
             follow_redirects=False,
-            transport=self.transport,
+            transport=_PinnedResolutionTransport(inner_transport, allow_private=self.allow_private),
         )
         self._semaphore = asyncio.Semaphore(max(1, self.max_concurrency))
         self._last_request_at: dict[str, float] = {}

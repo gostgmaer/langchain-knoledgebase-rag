@@ -2140,6 +2140,146 @@ scratch, since `tests/unit/test_supervisor_node.py` is deleted along with the no
 
 ---
 
+### 64. ✅ By request — F4/F5 fixed: a cascading-render anti-pattern on Settings, two unescaped apostrophes on Team
+
+Picked up from the shared QA artifact's open findings list.
+
+**F4 — `settings/page.tsx` seeded its profile edit form synchronously inside a `useEffect`**
+(`setProfileDraft(...)` called directly in the effect body on every `profileQuery.data` change) —
+`react-hooks/set-state-in-effect`'s exact warning: a cascading extra render pass, not a crash, but
+real waste on every profile load. **Fixed** with React's own recommended pattern for "derive state
+once when a query's data changes" (react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes):
+adjust state during render, gated on noticing the query's data object actually changed (tracked via
+a `seededProfile` state value), instead of a `useEffect` + `setState` round-trip. `useEffect` is no
+longer imported in this file at all — it had no other use.
+
+**F5 — `team/page.tsx` had two literal apostrophes in JSX text** ("doesn't show", "doesn't
+return") that `react/no-unescaped-entities` flags — cosmetic only, the rendered text was already
+correct, just invalid JSX syntax-adjacent style the linter catches. **Fixed** by escaping both as
+`&apos;`.
+
+- **Verified:** `npx eslint` on both files is clean (previously 3 errors total); `npx tsc --noEmit`
+  clean across the whole frontend.
+- **Files:** `frontend/src/app/[role]/settings/page.tsx`, `frontend/src/app/[role]/team/page.tsx`.
+
+---
+
+### 65. ✅ F2 fixed — `ResilientHttpClient`'s DNS-rebinding TOCTOU gap (item 42) actually closed
+
+Item 42 documented, but deliberately deferred, a real gap: `assert_public_url()` resolves a
+hostname and checks the result is public, then returns — the actual connection happens moments
+later, through httpx/httpcore's own **independent** DNS resolution, with nothing tying the two
+together. A hostname whose DNS answers differently between the validating lookup and the
+connecting one (classic DNS rebinding — a public address for the check, a private one — loopback,
+cloud metadata, an internal service — for the real connection) passes the check and still reaches
+the private address. Item 42 correctly identified why this wasn't a quick patch: a correct fix
+means pinning the actual TCP connection to the already-validated IP while still presenting the
+right `Host` header and TLS SNI for certificate validation against the real hostname — a
+transport-level change, not application logic, with real risk of subtly breaking TLS/cert
+validation if done carelessly.
+
+**Fix:** `_PinnedResolutionTransport` (`packages/connectors/http.py`), a thin `httpx.AsyncBaseTransport`
+wrapper that makes "resolve and validate" and "connect" the exact same step, with nothing in
+between for DNS to change. For every real request (every redirect hop, every retry attempt — each
+gets its own fresh resolution, which only strengthens this): resolves the host itself, raises
+`BlockedUrlError` unless every resolved address is public (`_resolve_validated`, now the single
+source of truth both this transport and `assert_public_url`'s own fast pre-check call through),
+rewrites the request to connect directly to that validated address (`request.url.copy_with(host=...)`),
+and sets the `sni_hostname` extension httpcore already supports
+(`.venv/Lib/site-packages/httpcore/_async/connection.py:107` — confirmed present in the pinned
+httpx 0.28.1/httpcore version before relying on it) so TLS SNI and certificate hostname
+verification still check the real hostname, not the IP. The `Host` header needs no manual
+handling: httpx already baked it in from the original hostname when the request was first built,
+before this transport ever sees it, and mutating `request.url` afterward doesn't retroactively
+change it. A literal IP host, or `allow_private=True`, passes straight through unchanged — same
+rules `assert_public_url` already followed, and critically what keeps every existing connector
+test (which all use a fake non-IP hostname with `allow_private=True`, the test helper's own
+default) a true no-op with zero real DNS attempted.
+
+- **Verified with a real DNS-rebinding simulation, not just "looks right":** a new test
+  (`test_a_dns_rebind_between_the_pre_check_and_the_real_connection_is_still_blocked`) makes the
+  resolver return a public address on its first call and a private one on its second — exactly the
+  scenario item 42 describes. The pre-check's (first) lookup passes; the transport's (second)
+  lookup, immediately before connecting, is what actually gets validated and connected to, and
+  correctly blocks. Companion tests confirm: the transport connects to the validated address while
+  the `Host` header and TLS `sni_hostname` still carry the real hostname
+  (`test_pinned_resolution_connects_to_the_validated_address_with_sni_preserved`); a private
+  resolution is blocked outright; a literal IP host and `allow_private=True` both skip resolution
+  entirely (asserted by making the resolver raise if called at all in those cases).
+- **One existing test fixed to match the new structure, not weakened:**
+  `test_a_file_the_service_cannot_read_does_not_stop_the_thread_being_indexed`
+  (`tests/unit/connectors/test_events_render_files.py`) reached directly into
+  `connector.http._client._transport.handler` to swap the mock handler mid-test; `_transport` is
+  now `_PinnedResolutionTransport`, so this reaches through `._inner.handler` instead — the real
+  `httpx.MockTransport` the pinning wrapper sits in front of.
+- **Verified:** full `uv run pytest`, 525 passed / 1 deselected (net +5: 5 new tests in
+  `test_http_client.py`, same 112/112 passing in the full connectors suite). `uv run ruff check`
+  shows the same 24 pre-existing, unrelated issues as before this change (confirmed by diffing
+  against the pre-change file) — zero new lint issues introduced. `api`/`worker` restarted and
+  confirmed healthy afterward.
+- **Files:** `packages/connectors/http.py`, `tests/unit/connectors/test_http_client.py`,
+  `tests/unit/connectors/test_events_render_files.py` (one line, structural fix only).
+
+---
+
+### 66. ✅ F3 — real unit/integration test coverage added for two genuinely zero-coverage, fully load-bearing services
+
+`ConversationService` and `MessageService` (`packages/application/services/`) had **zero** direct
+tests before this (confirmed: zero test files referenced either), despite being what every single
+chat turn goes through first — `ChatService._get_conversation` calls `ConversationService.get_or_create`
+on every request, and `MessageService.create_assistant_message` computes the actual token/cost
+accounting a tenant's usage view would show. Added real integration tests against a live Postgres
+(the `db_session` fixture, same pattern already established in
+`test_conversation_durable_execution.py`), not hand-rolled fakes — this is a real repository-backed
+service layer, and fakes would only prove the mocks agree with themselves.
+
+- `tests/integration/test_conversation_service.py` (new, 9 tests): `get`'s not-found error,
+  `create`/`get_by_session`, `get_or_create` genuinely reusing the same conversation for a repeated
+  session (the exact behavior every chat turn depends on to not fork a new conversation per
+  message), `close` setting `COMPLETED`/`ended_at`, and `touch`'s `+= 2` (one user + one assistant
+  message per turn — an easy, silent off-by-one to introduce since nothing previously pinned it
+  down).
+- `tests/integration/test_message_service.py` (new, 9 tests): all four message-role creators, and
+  `create_assistant_message`'s real arithmetic — pinned down against `packages/config/pricing.py`'s
+  actual rate table (1000 input + 500 output tokens on `google`/`gemini-3.1-flash-lite` = exactly
+  `$0.000300`, not just "a cost got set"), the "usage without a provider/model skips cost entirely
+  rather than guessing $0" branch, tool_calls/tool_results storage, and the conditional
+  `AIResponse` row (created only when `raw_response` carries real metadata, confirmed both ways).
+- **A real bug found and fixed while writing these, not a test-authoring inconvenience:** the
+  shared `db_session` fixture (`tests/conftest.py`) built its transaction's `AsyncSession` without
+  `expire_on_commit=False` — unlike `create_session_factory`'s real production session, which sets
+  it explicitly. Under the fixture's default (`expire_on_commit=True`), any service that commits
+  and then immediately reads an attribute off the object it just committed —
+  `ConversationService.create()`'s `ConversationResponse.model_validate(conversation)` right after
+  `await self._uow.commit()`, a completely ordinary, correct pattern — hit a `MissingGreenlet`
+  crash that can never happen against the real session, since SQLAlchemy would otherwise expire
+  and try to lazily reload that attribute outside an active greenlet context. No existing test had
+  ever combined "service-level commit" with "immediate attribute read" before these new ones, which
+  is exactly why this was never caught. **Fixed** by matching the fixture's session construction to
+  production's real configuration.
+- **A second small, genuine fix found in the same area:** `message_service.py` type-hinted its
+  `uow` parameter as `packages.infrastructure.database.transaction.UnitOfWork` — a different,
+  incomplete stub class (no `.messages`/`.ai_responses`/etc.) that happened to share a name with
+  the real one actually injected (`packages.infrastructure.repositories.unit_of_work.UnitOfWork`,
+  via `container.database.uow`). Harmless at runtime (Python doesn't enforce type hints, and the
+  real object was always duck-type-compatible), but wrong, and exactly the "two same-named classes
+  at different layers" confusion this codebase has already fixed once before (`LLMChatService`'s
+  own rename, docs/UNUSED_FILES.md). Fixed the import; the stale stub module
+  (`packages/infrastructure/database/transaction.py`) had no other reference anywhere in the
+  codebase once that one caller was corrected, so it's deleted outright rather than left as new
+  dead code.
+- **Verified:** full `uv run pytest`, 543 passed / 1 deselected (net +18 over item 65's 525: 9 + 9
+  new tests). `uv run ruff check` clean on every changed file. `api`/`worker` restarted and
+  confirmed healthy afterward (the message_service.py import fix touches a real, live-wired file).
+- **Not claimed as closing F3 entirely** — `packages/application/services/` has nine files total;
+  this covers two of the most critical ones. `ingestion_audit.py`/`retention_service.py` and the
+  rest of the package remain genuinely untested, left open.
+- **Files:** `packages/application/services/message_service.py`,
+  `packages/infrastructure/database/transaction.py` (deleted), `tests/conftest.py`,
+  `tests/integration/test_conversation_service.py` (new), `tests/integration/test_message_service.py` (new).
+
+---
+
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
 
 These aren't bugs; `docs/BUILD_STATUS.md` contained claims that no longer matched the code. Listed

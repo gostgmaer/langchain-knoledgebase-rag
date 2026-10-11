@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -77,15 +77,21 @@ function SettingsContent() {
   });
 
   const [profileDraft, setProfileDraft] = useState({ firstName: "", lastName: "", displayName: "", phone: "" });
-  useEffect(() => {
-    if (!profileQuery.data) return;
+  // Seeds the editable draft from the fetched profile exactly once per fetch,
+  // without the extra render pass react-hooks/set-state-in-effect warns about
+  // (react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes):
+  // adjusting state during render, gated on noticing the query's data object
+  // actually changed, rather than calling setState from inside a useEffect.
+  const [seededProfile, setSeededProfile] = useState<Profile | undefined>(undefined);
+  if (profileQuery.data && profileQuery.data !== seededProfile) {
+    setSeededProfile(profileQuery.data);
     setProfileDraft({
       firstName: profileQuery.data.firstName ?? "",
       lastName: profileQuery.data.lastName ?? "",
       displayName: profileQuery.data.displayName ?? "",
       phone: profileQuery.data.phone ?? "",
     });
-  }, [profileQuery.data]);
+  }
 
   const updateProfile = useMutation({
     mutationFn: (body: Partial<typeof profileDraft>) =>

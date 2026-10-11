@@ -267,12 +267,15 @@ async def test_files_are_not_read_unless_enabled():
 @pytest.mark.asyncio
 async def test_a_file_the_service_cannot_read_does_not_stop_the_thread_being_indexed():
     connector, _ = teams_with_files()
-    original = connector.http._client._transport.handler  # type: ignore[attr-defined]
+    # _transport is _PinnedResolutionTransport (docs/BUGS.md item 42), wrapping the real
+    # httpx.MockTransport this test swaps the handler on - reach through ._inner for it.
+    inner = connector.http._client._transport._inner  # type: ignore[attr-defined]
+    original = inner.handler
 
     def deny_shares(request):
         return httpx.Response(403) if "/shares/" in request.url.path else original(request)
 
-    connector.http._client._transport.handler = deny_shares  # type: ignore[attr-defined]
+    inner.handler = deny_shares
     docs = await collect(connector.discover(context()))
     assert [d.external_id for d in docs] == ["11111111-1111-1111-1111-111111111111:c1:m1"]
 

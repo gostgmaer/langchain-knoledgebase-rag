@@ -5,7 +5,7 @@ from packages.config.pricing import compute_cost
 from packages.domain.enums.message_role import MessageRole
 from packages.domain.models.ai_response import AIResponse
 from packages.domain.models.message import Message
-from packages.infrastructure.database.transaction import UnitOfWork
+from packages.infrastructure.repositories.unit_of_work import UnitOfWork
 
 
 class MessageService:

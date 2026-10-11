@@ -146,11 +146,21 @@ async def db_session(container: ApplicationContainer) -> AsyncIterator[AsyncSess
     (packages/infrastructure/database/session.py's `resolve_session`), so
     any repository/service resolved through `container` during the test
     transparently shares this one session instead of opening its own.
+
+    `expire_on_commit=False`, matching `create_session_factory`'s real
+    production session exactly (docs/BUGS.md F3) — without it, this
+    fixture's session behaves differently from every real request's:
+    any service that commits and then immediately reads an attribute off
+    the object it just committed (e.g. ConversationService.create()
+    building its Pydantic response right after `await self._uow.commit()`)
+    hits a `MissingGreenlet` error here that can never happen against the
+    real session, since SQLAlchemy would otherwise expire and try to
+    lazily reload that attribute outside of an active greenlet context.
     """
     engine = container.database.engine()
     connection = await engine.connect()
     trans = await connection.begin()
-    session = AsyncSession(bind=connection, join_transaction_mode="create_savepoint")
+    session = AsyncSession(bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False)
 
     token = current_session.set(session)
     try:
