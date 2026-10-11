@@ -85,3 +85,28 @@ async def test_non_multi_part_response_clears_sub_questions():
 
     assert result["is_multi_part"] is False
     assert result["sub_questions"] == []
+
+
+@pytest.mark.asyncio
+async def test_returns_only_its_own_keys_not_the_whole_mutated_state():
+    """
+    docs/BUGS.md item 61 — this node now fans out from START alongside
+    `load_memory` in the same superstep (GraphBuilder's
+    START -> {planner, load_memory, supervisor} -> join). Returning the
+    full `state` object, rather than a scoped partial dict, makes
+    LangGraph treat it as a write to every key in `state` — including
+    "memories", which `load_memory` is writing concurrently in that
+    exact same step — and LangGraph's LastValue channels fatally reject
+    two writers to one channel in a single step. This must return only
+    its own two keys, no matter what else is sitting in `state`.
+    """
+    plan = SubQuestionPlan(is_multi_part=False, sub_questions=[])
+    node = SupervisorNode(_FakeLLM(_FakeChain(result=plan)))
+
+    state = _state()
+    state["memories"] = []
+    state["execution_plan"] = object()
+
+    result = await node(state)
+
+    assert set(result.keys()) == {"is_multi_part", "sub_questions"}

@@ -45,6 +45,18 @@ class SupervisorNode:
     is_multi_part=False — this must never crash and must never route
     into Researcher with nothing to research, since it protects the
     entire existing, heavily-tested single-question path.
+
+    Returns a partial dict, not the full mutated `state` (docs/BUGS.md
+    item 61) — the same LoadMemoryNode-established pattern, and for the
+    same reason: now that this node fans out from START alongside
+    `load_memory` in the same superstep, returning the whole `state`
+    object makes LangGraph treat it as a write to every one of its keys,
+    including "memories" — a second, conflicting write to the exact
+    channel `load_memory` is writing in that same step. LangGraph's
+    LastValue channels fatally reject two writers in one step
+    regardless of whether the values agree, so this crashed every
+    single chat turn (InvalidUpdateError: "memories"), not just
+    multi-part ones, the moment Supervisor moved into the fan-out.
     """
 
     def __init__(self, llm: LLMManager) -> None:
@@ -53,7 +65,7 @@ class SupervisorNode:
     async def __call__(
         self,
         state: GraphState,
-    ) -> GraphState:
+    ) -> dict:
 
         query = state.get("rewritten_query") or state["messages"][-1].content
 
@@ -77,7 +89,7 @@ class SupervisorNode:
 
         is_multi_part = plan.is_multi_part and bool(plan.sub_questions)
 
-        state["is_multi_part"] = is_multi_part
-        state["sub_questions"] = plan.sub_questions if is_multi_part else []
-
-        return state
+        return {
+            "is_multi_part": is_multi_part,
+            "sub_questions": plan.sub_questions if is_multi_part else [],
+        }

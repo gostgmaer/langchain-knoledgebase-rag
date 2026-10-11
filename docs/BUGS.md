@@ -1974,6 +1974,85 @@ dev server on 3000.
 
 ---
 
+### 60. ✅ WriterNode never streamed — every multi-part/comparison turn's real answer was silently discarded by the actual streaming endpoint the UI calls
+
+Asked to fix "Core chat reliability" for real, not just cosmetically. `ChatService.stream()`
+(`packages/application/services/chat_service.py`) — the method `POST /api/v1/chat` with
+`"stream": true` actually calls, which is what the real browser UI always uses — only ever sees
+events a node explicitly pushes through LangGraph's `get_stream_writer()` under `stream_mode="custom"`;
+it never reads a node's final state write directly, unlike the non-streaming `chat()` path's
+`result["messages"][-1]`. `LLMNode` (`packages/graph/nodes/llm.py`) already pushed `token`/
+`metadata`/`usage`/`citations` events when `state["stream"]` was set. `WriterNode`
+(`packages/graph/nodes/writer.py`) — which produces the final answer for every genuinely multi-part/
+comparison question (item 59's `researcher` → `writer` → `END` path) — never checked `state["stream"]`
+at all and always called the plain, non-streaming `self._chat.chat(request)`. Since `_stream_runtime`
+only accumulates tokens from pushed writer events, a writer-routed streamed turn's `chunks` list stayed
+permanently empty no matter how good the real synthesized answer was, and item 57's own empty-reply
+guard then replaced that perfectly good answer with the generic "I wasn't able to put together an
+answer to that" fallback — **every single time**, for every multi-part/comparison question, under the
+one code path the real UI actually exercises. Every earlier diagnostic this session (including the
+original F1 repro script) called `chat()` or invoked graph nodes directly, never `stream()` — so this
+was never exercised by any prior reproduction attempt, which is exactly why five separate attempts to
+reproduce F1 after item 58's reranker-race fix all came back "correct."
+
+**Fix:** `WriterNode` now mirrors `LLMNode`'s exact streaming contract — when `state["stream"]` is set,
+it calls `self._chat.astream(request)` instead of `self._chat.chat(request)`, pushing `token` events
+per chunk and `metadata`/`usage`/`citations` events once streaming ends, through the same
+`get_stream_writer()`. The citation dedup (`packages/graph/nodes/writer.py`'s existing "keep the higher
+of two scores" logic) was moved earlier, before the LLM call, since it only ever depended on
+`research_findings` — not the response — so the streaming branch can push it immediately. No
+`retrieval_id` to push: a multi-part turn never had a single one even on the non-streaming path, since
+each sub-question runs its own independent research subgraph.
+
+- **Verified live, end to end, against the real running stack** (not a diagnostic that bypasses the
+  actual bug): a direct call to `ChatService.stream()` with the exact comparison question from this
+  session's original F1 repro ("Compare the knowledge bases I have access to and tell me which one is
+  most recently updated.") now returns 10 real `token` events and a `citations` event (3 citations)
+  whose assembled text is WriterNode's genuine synthesized answer — not the fallback message. Before
+  this fix, the same call (once item 61 below is also accounted for) would have discarded that answer
+  silently.
+- **Added `tests/unit/test_writer_node.py::test_a_streaming_turn_pushes_tokens_instead_of_discarding_the_answer`**,
+  confirmed to fail without the fix (`AttributeError` — the old file never imported `get_stream_writer`)
+  and pass with it.
+- **Files:** `packages/graph/nodes/writer.py`, `tests/unit/test_writer_node.py`.
+
+---
+
+### 61. ✅ Every single chat turn was fatally crashing — `SupervisorNode` returning full state conflicted with `load_memory`'s concurrent write, the moment item 59 moved Supervisor into the START fan-out
+
+Found while live-verifying item 60 above: the exact same comparison-question call first failed, before
+any streaming concern was even reachable, with `langgraph.errors.InvalidUpdateError: At key 'memories':
+Can receive only one value per step.` Item 59 moved `SupervisorNode` into the `START` fan-out alongside
+`planner`/`load_memory`, following the pattern already established for those two — but
+`SupervisorNode.__call__` (`packages/graph/nodes/supervisor.py`) returned the full mutated `state`
+object, not a scoped partial dict like `LoadMemoryNode` was already fixed to do (a lesson from an
+earlier session, documented at the time this exact fan-out pattern was first introduced for `planner`/
+`load_memory`). LangGraph treats a dict return as a write to every key present in it; returning the
+whole `state` object meant Supervisor was writing to `"memories"` too — the exact channel
+`load_memory` is genuinely writing in that same superstep — and a `LastValue` channel fatally rejects
+two writers in one step regardless of whether the values agree. This is not a narrow, multi-part-only
+bug: `planner`/`load_memory`/`supervisor` fan out and join on **every** turn regardless of how it's
+later routed, so this crashed every single chat message sent through the streaming endpoint since
+item 59 shipped, full stop — the single most severe regression found this session, and almost
+certainly the real, final explanation for "chat is still broken" after every earlier fix.
+
+**Fix:** `SupervisorNode.__call__` now returns `{"is_multi_part": ..., "sub_questions": ...}` only, the
+same partial-dict discipline `GraphPlanner`/`LoadMemoryNode` already follow.
+
+- **Verified live, end to end:** the same comparison-question call that previously crashed with
+  `InvalidUpdateError` now runs clean through `supervisor` → `join` → `researcher` → `writer`, producing
+  item 60's real streamed answer. A plain single-question call ("What is in my knowledge base?") was
+  also re-run live afterward as a regression check — no crash, routes `retrieve` → `llm` → `tool`
+  exactly as before, correctly pausing on the tool-approval gate.
+- **Added `tests/unit/test_supervisor_node.py::test_returns_only_its_own_keys_not_the_whole_mutated_state`**,
+  which seeds `state` with extra keys (`memories`, `execution_plan`) the node doesn't own and asserts the
+  returned dict contains only its own two keys.
+- **Verified:** full `uv run pytest`, 518 passed / 1 deselected (two net new: item 60's and this item's).
+  `api`/`worker` restarted; both verification calls above ran against the restarted containers.
+- **Files:** `packages/graph/nodes/supervisor.py`, `tests/unit/test_supervisor_node.py`.
+
+---
+
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
 
 These aren't bugs; `docs/BUILD_STATUS.md` contained claims that no longer matched the code. Listed
