@@ -1796,6 +1796,63 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
 
 ---
 
+### 57. ✅ By request — Chat no longer answers from the model's own training knowledge; retrieval runs on every turn
+
+Found while live-testing after the 2026-10-11 QA pass: asked a fact-seeking question, the model
+would sometimes answer confidently from its own general knowledge instead of the knowledge base —
+`GraphPlanner`'s `needs_retrieval` classifier decided retrieval wasn't needed, so the turn never
+searched anything at all, and nothing in the prompt told the model not to fill the gap itself. By
+explicit request: retrieval now runs on **every** turn, and the model is told, in two independent
+places, never to substitute its own knowledge for what retrieval actually found.
+
+- **`packages/planner/planner.py`** — `GraphPlanner` no longer gates the `Capability.RETRIEVAL` step
+  behind a classifier decision; it's unconditionally part of every turn's plan. The `QueryAnalyzer`
+  LLM call still runs (when available) to rewrite/expand the query for better recall, but a failure
+  there now only degrades query quality, never skips the lookup. `packages/planner/query_analyzer.py`'s
+  `QueryAnalysis` schema dropped the now-unused `needs_retrieval` field; `packages/planner/rules.py`'s
+  now-dead `RETRIEVAL_KEYWORDS` fallback was deleted.
+- **`packages/prompts/builder.py`** — both branches of `PromptBuilder.build()`'s context handling were
+  rewritten: when sources are found, the model is told to answer "using ONLY these sources, the
+  conversation above, and any long-term memory facts... never supplement with your own general or
+  training knowledge"; when nothing is found, it's told to say so plainly "do not answer it from your
+  own general or training knowledge instead, even if you know the answer." A real tool call (weather,
+  calculator, search) still counts as legitimate grounding — this isn't a ban on tool use.
+- **`packages/conversation/bootstrap.py`** — the default agent's base system prompt gained the same
+  rule as a second, independent layer, so the restriction doesn't rely solely on the per-request
+  context block.
+- **Known follow-on effect, not separately asked for but real:** `GraphRouter.route()` already sends
+  every turn with a `RETRIEVAL` step through the `supervisor` node first — since retrieval is now
+  always in the plan, *every* turn now reaches the supervisor, which can decompose it into the
+  researcher/writer multi-agent path. That path has an open bug (see "Chat silently returns an empty
+  assistant reply" in `docs/QA_REPORT_2026-10-11.md`'s F1) that this change makes meaningfully more
+  reachable, not less.
+- **Mitigated, not root-caused, in the same pass:** `packages/application/services/chat_service.py`'s
+  `_finalize_or_pause()` (the one place both the single-question and multi-agent paths converge
+  before persistence) and `stream()`'s own token-assembly tail now both guard against ever persisting
+  or showing an empty `COMPLETED` assistant message — substituting a plain, visible "I wasn't able to
+  put together an answer to that" instead, with a logged warning. This stops the worst *symptom* (a
+  silent, confident-looking empty reply) immediately; the real root cause inside
+  `packages/graph/nodes/researcher.py`/`writer.py` is still open and still needs the investigation
+  `docs/QA_REPORT_2026-10-11.md` §6 already lays out.
+- **Not yet re-synced:** already-provisioned tenants' `agents` rows (the ones created before this
+  change, via `ensure_default_agent`'s idempotent get-or-create) still hold the old system prompt text
+  in the database — a one-off `UPDATE` to bring them onto the new wording was prepared but blocked by
+  this session's own permission policy (direct database mutation via `docker exec`), left for the user
+  to run or approve. The functional fix does not depend on this: `PromptBuilder`'s per-request
+  instructions are code, not stored state, and already apply to every tenant regardless.
+- **Verified:** full `uv run pytest` suite, 514 passed / 1 deselected, both before and after (no
+  dedicated `GraphPlanner`/`QueryAnalyzer` tests exist to update). `uv run ruff check` clean on every
+  touched file (one pre-existing, unrelated `F841` in `chat_service.py` left as found). `api`/`worker`
+  containers restarted to pick up the change; `GET /api/v1/health` confirmed healthy after. Live
+  browser re-verification of an actual chat turn was not completed this pass — the signed-in session
+  expired mid-verification (independent of this change) and a direct unauthenticated API probe was
+  correctly rejected by `AUTH_REQUIRED=true`, which this pass did not disable.
+- **Files:** `packages/planner/planner.py`, `packages/planner/query_analyzer.py`,
+  `packages/planner/rules.py`, `packages/prompts/builder.py`, `packages/conversation/bootstrap.py`,
+  `packages/application/services/chat_service.py`.
+
+---
+
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
 
 These aren't bugs; `docs/BUILD_STATUS.md` contained claims that no longer matched the code. Listed

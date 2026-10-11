@@ -30,6 +30,9 @@ from packages.graph.manager import GraphManager
 from packages.infrastructure.repositories.unit_of_work import (
     UnitOfWork,
 )
+from packages.shared.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def _extract_turn_tool_activity(
@@ -274,6 +277,25 @@ class ChatService:
         )
 
         final_message = result["messages"][-1]
+
+        # A graph run can reach here with a syntactically successful but
+        # genuinely empty final message (docs/BUGS.md item 57's F1 — a
+        # provider or subgraph returning blank content with no exception
+        # anywhere) — that must never be persisted/shown as a silent
+        # "COMPLETED" success with nothing in it. Caught here, not at
+        # each node, since this is the one place every path (single-
+        # question LLMNode, multi-agent WriterNode, any future one)
+        # converges before persistence.
+        if not (final_message.content or "").strip():
+            logger.warning(
+                "Graph produced an empty assistant message; substituting a visible fallback",
+                conversation_id=str(conversation.id),
+            )
+            final_message.content = (
+                "I wasn't able to put together an answer to that from what I "
+                "found. Could you try rephrasing the question?"
+            )
+
         raw_response = {
             "response_metadata": getattr(final_message, "response_metadata", None) or {},
             "additional_kwargs": getattr(final_message, "additional_kwargs", None) or {},
@@ -389,6 +411,22 @@ class ChatService:
                 return
 
             assistant_response = "".join(chunks)
+
+            # Same guard as _finalize_or_pause's — and more easily hit here,
+            # since a turn that routes into WriterNode (docs/BUGS.md item 57's
+            # F1 path) never pushes stream tokens at all (only LLMNode does,
+            # via get_stream_writer()), so `chunks` stays empty even on a
+            # genuinely successful multi-agent synthesis.
+            if not assistant_response.strip():
+                logger.warning(
+                    "Streamed turn produced no tokens; substituting a visible fallback",
+                    conversation_id=str(conversation.id),
+                )
+                assistant_response = (
+                    "I wasn't able to put together an answer to that from what "
+                    "I found. Could you try rephrasing the question?"
+                )
+                yield {"type": "token", "content": assistant_response}
 
             assistant_message = await self._save_assistant_message(
                 conversation,

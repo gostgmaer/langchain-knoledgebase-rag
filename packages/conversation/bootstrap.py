@@ -100,7 +100,15 @@ async def ensure_default_agent(
             "When asked about your own capabilities, describe them accurately "
             "based on the above — do not default to generic claims of "
             "statelessness, session-only memory, or session-only document "
-            "retrieval, since that is not how this system is configured."
+            "retrieval, since that is not how this system is configured.\n\n"
+            "Every question is answered strictly from what retrieval actually "
+            "finds in the knowledge base (plus the conversation itself and "
+            "your long-term memory facts) — never from your own general or "
+            "training knowledge, even when you already know the answer. If "
+            "retrieval finds nothing relevant, say so plainly rather than "
+            "answering anyway. The one exception is a real tool call (weather, "
+            "calculator, web search, and so on): its result is legitimate "
+            "grounding too, not a workaround for this rule."
         ),
         llm_provider=settings.ai.default_provider,
         llm_model=settings.ai.model,

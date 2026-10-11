@@ -17,15 +17,12 @@ logger = get_logger(__name__)
 
 class QueryAnalysis(BaseModel):
     """
-    One structured-output LLM call doing three roadmap items at once:
-    deciding whether retrieval is needed at all, rewriting the raw
-    query to resolve pronouns/context from conversation history, and
-    generating a few related variants to widen recall.
+    One structured-output LLM call rewriting the raw query to resolve
+    pronouns/context from conversation history, and generating a few
+    related variants to widen recall. Retrieval itself always runs
+    (packages/planner/planner.py) — this call only improves what gets
+    searched for, never whether a search happens.
     """
-
-    needs_retrieval: bool = Field(
-        description="Whether answering this message requires looking up stored documents.",
-    )
 
     rewritten_query: str = Field(
         description=(
