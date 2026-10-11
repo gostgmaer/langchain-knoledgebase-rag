@@ -7,7 +7,6 @@ from packages.graph.nodes.llm import LLMNode
 from packages.graph.nodes.load_memory import LoadMemoryNode
 from packages.graph.nodes.researcher import ResearcherNode
 from packages.graph.nodes.retrieve import RetrieveNode
-from packages.graph.nodes.supervisor import SupervisorNode
 from packages.graph.nodes.writer import WriterNode
 from packages.planner.planner import GraphPlanner
 
@@ -31,8 +30,6 @@ class GraphNodes:
     tool: ToolNode
 
     llm: LLMNode
-
-    supervisor: SupervisorNode
 
     researcher: ResearcherNode
 

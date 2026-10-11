@@ -68,11 +68,12 @@ def _instrumented(name: str, node: NodeFn, pipeline: MiddlewarePipeline = _DEFAU
 
 async def _join(state: GraphState) -> GraphState:
     """
-    No-op synchronization point for the `planner`/`load_memory`/
-    `supervisor` fan-out below — LangGraph only runs a node once every
-    one of its incoming edges has fired, so this is what guarantees
-    all three branches have actually finished before `router.route()`
-    reads `execution_plan`/`is_multi_part`.
+    No-op synchronization point for the `planner`/`load_memory`
+    fan-out below — LangGraph only runs a node once every one of its
+    incoming edges has fired, so this is what guarantees both branches
+    have actually finished before `router.route()` reads
+    `execution_plan`/`is_multi_part` (both now set by `planner` alone,
+    docs/BUGS.md item 63).
     """
 
     return state
@@ -85,11 +86,10 @@ class GraphBuilder:
     Flow
 
               START
-          ┌─────┼─────┐
-          ▼     ▼     ▼
-      planner  load_  supervisor
-               memory
-          └─────┼─────┘
+          ┌─────┴─────┐
+          ▼           ▼
+      planner    load_memory
+          └─────┬─────┘
                 ▼
               join
                 │
@@ -113,7 +113,7 @@ class GraphBuilder:
 
     Retrieval always runs (docs/BUGS.md item 57) — the plan always
     includes it, so `router.route()` only ever decides *which*
-    retrieval path: a genuinely multi-part question (Supervisor's
+    retrieval path: a genuinely multi-part question (`planner`'s own
     `is_multi_part`, Multi-Agent, docs/mvpRAG.md v2.0) reaches
     `researcher`/`writer`; a decomposition failure or a "no" decision
     falls straight through to `retrieve`, the same single-question
@@ -121,30 +121,26 @@ class GraphBuilder:
     `writer` never touch `tool` — synthesis over already-gathered
     findings, not a fresh tool-calling turn.
 
-    `planner`, `load_memory` and `supervisor` all fan out from START
-    and run concurrently — none of the three genuinely depends on
-    either of the others' output. `load_memory` only reads the raw
-    last message. `planner`'s `QueryAnalyzer` rewrites that same raw
-    message. `supervisor` used to run *after* `planner`, preferring
-    its `rewritten_query` when set — now that every turn reaches it
-    (item 57 made retrieval, and so Supervisor, unconditional instead
-    of a subset of turns), that extra sequential LLM round-trip landed
-    on every single turn, not just some. Moved into the same fan-out:
-    `supervisor` now always classifies off the raw last message (a
-    parallel branch has no visibility into a sibling's not-yet-landed
-    write, so `rewritten_query` is never set yet when it runs) — a
-    deliberate trade-off, since a genuinely multi-part/comparison
-    question is usually self-contained already, not pronoun-dependent
-    on prior turns the way a short follow-up is. `join` (a no-op node)
-    is where LangGraph's Pregel-style execution model guarantees all
-    three branches have actually finished before `router.route()`
-    reads `state["execution_plan"]`/`state["is_multi_part"]` — a
-    conditional edge can't itself be the fan-in point when three
-    *different* nodes lead into it, so a trivial join node is the
-    standard way to synchronize parallel branches before branching
-    again. This cuts a full LLM call off the critical path of every
-    turn that reaches Supervisor, instead of paying for it in sequence
-    after `planner`/`load_memory` have already both finished.
+    `planner` and `load_memory` fan out from START and run
+    concurrently — neither depends on the other's output. `load_memory`
+    only reads the raw last message. There used to be a third branch
+    here, `supervisor` (a separate structured-output LLM call deciding
+    `is_multi_part`) — merged into `planner`'s own `QueryAnalyzer` call
+    instead (docs/BUGS.md item 63): two concurrent LLM round-trips,
+    each paying its own fixed per-call network/inference overhead
+    regardless of output complexity, collapsed into one. Concurrency
+    only overlaps two calls against each other; it never makes either
+    one individually faster, so folding query-rewriting and multi-part
+    classification into a single call is a genuine latency win, not
+    just a simplification — bounded by whichever one call now costs,
+    rather than by whichever of the two separate calls happened to be
+    slower. `join` (a no-op node) is where LangGraph's Pregel-style
+    execution model guarantees both branches have actually finished
+    before `router.route()` reads
+    `state["execution_plan"]`/`state["is_multi_part"]` — a conditional
+    edge can't itself be the fan-in point when two *different* nodes
+    lead into it, so a trivial join node is the standard way to
+    synchronize parallel branches before branching again.
 
     Memory extraction/summarization no longer runs as a graph node —
     it used to sit between "llm" and END, blocking the HTTP response
@@ -177,33 +173,31 @@ class GraphBuilder:
         graph.add_node("retrieve", _instrumented("retrieve", self._nodes.retrieve))
         graph.add_node("tool", _instrumented("tool", self._nodes.tool))
         graph.add_node("llm", _instrumented("llm", self._nodes.llm))
-        graph.add_node("supervisor", _instrumented("supervisor", self._nodes.supervisor))
         graph.add_node("researcher", _instrumented("researcher", self._nodes.researcher))
         graph.add_node("writer", _instrumented("writer", self._nodes.writer))
 
         #
-        # Entry — fan out to planner, load_memory and supervisor
-        # concurrently, since none of the three depends on either of
-        # the others' output (see this class's own docstring for why
-        # supervisor moved here).
+        # Entry — fan out to planner and load_memory concurrently,
+        # since neither depends on the other's output. `planner` alone
+        # now also decides is_multi_part (docs/BUGS.md item 63 — this
+        # class's own docstring explains why the old third branch,
+        # `supervisor`, is gone).
         #
 
         graph.add_edge(START, "planner")
         graph.add_edge(START, "load_memory")
-        graph.add_edge(START, "supervisor")
 
         #
-        # Fan back in before routing — router.route() needs all three
-        # branches' results (state["execution_plan"] from planner,
-        # state["is_multi_part"] from supervisor).
+        # Fan back in before routing — router.route() needs both
+        # branches' results (state["execution_plan"] and
+        # state["is_multi_part"], both from planner).
         #
 
         graph.add_edge("planner", "join")
         graph.add_edge("load_memory", "join")
-        graph.add_edge("supervisor", "join")
 
         #
-        # Multi-Agent — a genuinely multi-part question (supervisor's
+        # Multi-Agent — a genuinely multi-part question (planner's
         # already-computed is_multi_part) goes to researcher/writer; a
         # decomposition failure or a "no" decision routes to the exact
         # same `retrieve` node the single-question path always used.

@@ -95,9 +95,10 @@ class GraphState(TypedDict, total=False):
     expanded_queries: list[str]
 
     #
-    # Multi-Agent (docs/mvpRAG.md v2.0) — SupervisorNode/ResearcherNode/
-    # WriterNode. Plain overwrite, no reducer needed: at most one write
-    # per field per turn.
+    # Multi-Agent (docs/mvpRAG.md v2.0) — is_multi_part/sub_questions
+    # set by GraphPlanner itself (docs/BUGS.md item 63), the rest by
+    # ResearcherNode/WriterNode. Plain overwrite, no reducer needed: at
+    # most one write per field per turn.
     #
 
     is_multi_part: bool

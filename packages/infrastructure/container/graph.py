@@ -32,7 +32,6 @@ from packages.graph.nodes.researcher import ResearcherNode
 from packages.application.services.retrieval_log_service import RetrievalLogService
 from packages.application.services.retrieval_settings_service import RetrievalSettingsService
 from packages.graph.nodes.retrieve import RetrieveNode
-from packages.graph.nodes.supervisor import SupervisorNode
 from packages.graph.nodes.tool import GraphToolNode
 from packages.graph.nodes.writer import WriterNode
 from packages.graph.router import GraphRouter
@@ -288,12 +287,9 @@ class GraphContainer(containers.DeclarativeContainer):
     # Multi-Agent (docs/mvpRAG.md v2.0) — all Factory, matching this
     # chain's existing, uniform rule (every node here is Factory,
     # regardless of whether it individually touches a per-request
-    # session).
-
-    supervisor = providers.Factory(
-        SupervisorNode,
-        llm=ai.manager,
-    )
+    # session). SupervisorNode itself is gone (docs/BUGS.md item 63) —
+    # its classification is now one combined QueryAnalyzer/GraphPlanner
+    # call instead of a second concurrent LLM round-trip.
 
     research_retrieve = providers.Factory(
         ResearchRetrieveNode,
@@ -342,7 +338,6 @@ class GraphContainer(containers.DeclarativeContainer):
         retrieve=retrieve,
         tool=tool,
         llm=llm,
-        supervisor=supervisor,
         researcher=researcher,
         writer=writer,
     )

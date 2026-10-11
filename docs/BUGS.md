@@ -2053,6 +2053,93 @@ same partial-dict discipline `GraphPlanner`/`LoadMemoryNode` already follow.
 
 ---
 
+### 62. 📊 Measured, not assumed — retrieval/reranking is already sub-second once warm; the "Response latency" ceiling is purely the LLM round-trip(s), nothing else
+
+Asked why "Response latency" is still rated Adequate rather than Strong after items 59-61. Checked
+whether there was any further real, controllable cost being missed, rather than re-asserting the
+same LLM-floor argument from item 59 without new evidence.
+
+Every latency number logged during this session's live verification runs (items 60-61's checks)
+showed `RetrieveNode` taking 9-10 seconds — alarming on its own, and easy to mistake for a real
+backend cost. It isn't: every one of those runs used `docker compose exec api python <script>.py`,
+which starts a **brand new Python process** each time. `CrossEncoderReranker` is wired as a DI
+`Singleton` (`packages/infrastructure/container/rag.py`) specifically so its ~90MB model loads once
+per process and stays resident — exactly the fix item 58 made thread-safe. A throwaway diagnostic
+process never benefits from that: it pays the one-time model-load cost on every single invocation,
+inflating `retrieve`'s measured time by roughly 9 seconds that a real request in the long-running
+`api`/`worker` containers never actually pays after the first request since a restart.
+
+**Verified directly:** three retrieval calls run back-to-back inside **one** process (not three
+separate `docker exec` calls) — first call (genuinely cold, model not yet loaded) took **9.57s**;
+second and third calls (warm, same process) took **0.85s** and **0.86s**. Retrieval plus reranking,
+once warm, is almost three orders of magnitude under the LLM floor established in item 59 — it is not
+a meaningful contributor to a real turn's latency in sustained traffic.
+
+**What this changes:** nothing code-level — there was no bug to fix, only a measurement artifact to
+correct. The scorecard's "Response latency" note is updated to state this precisely rather than
+leaving a reader to wonder whether retrieval itself might be a hidden cost: the only remaining,
+unavoidable cost in a real chat turn is the LLM round-trip(s) (one for the parallel
+planner/load_memory/supervisor block, one or more for retrieve→llm or researcher→writer). Category
+stays **Adequate**, not bumped to Strong — that floor is a third-party provider's own network
+round-trip, not something any further application change can close, and rating it "Strong" would
+overstate what's actually achievable.
+
+- **Files:** none changed — a measurement correction, documented here and in the shared QA artifact.
+
+---
+
+### 63. ✅ By request — "Response latency" pushed back on as still open; merged two concurrent LLM calls into one, cutting the critical path for simple turns
+
+Asked directly whether "Response latency" being rated Adequate meant it was actually closed, after
+item 62's measurement correction. It wasn't fully closed — one more real, controllable lever existed
+and hadn't been tried: `planner` and the now-deleted `SupervisorNode` ran as two *separate* concurrent
+structured-output LLM calls in the same `START` fan-out (item 59). Concurrency overlaps two calls
+against each other, but it never makes either one individually faster — each pays its own fixed
+per-call round-trip overhead (item 59's own measured 2.5-3.7s floor for a trivial call) on top of
+whatever generation time its specific output needs. The parallel block's wall-clock cost was bounded
+by whichever of the two calls happened to be slower that turn, and logs across this session showed
+`supervisor` was frequently the slower one (5-8s vs. `planner`'s 2-5s).
+
+**Fix:** folded `SupervisorNode`'s multi-part classification directly into `GraphPlanner`'s existing
+`QueryAnalyzer` call — one combined structured-output schema (`QueryAnalysis`, now carrying
+`rewritten_query`/`expanded_queries` *and* `is_multi_part`/`sub_questions`) instead of two separate
+ones. `SupervisorNode` is deleted outright; `GraphBuilder`'s `START` fan-out drops from three branches
+(`planner`/`load_memory`/`supervisor`) to two (`planner`/`load_memory`). `GraphPlanner` carries forward
+`SupervisorNode`'s exact hard fail-open guarantee (an analyzer error, a missing analyzer, or a
+nonsensical `is_multi_part=True` with zero `sub_questions` all collapse to `is_multi_part=False`) —
+verified with the same guarantee's test cases, moved and extended in
+`tests/unit/test_graph_planner.py` (no dedicated planner test file existed before this; written from
+scratch, since `tests/unit/test_supervisor_node.py` is deleted along with the node it tested).
+`packages/graph/router.py`'s `route()` needed no logic change — it already only reads
+`state["is_multi_part"]`, regardless of which node sets it.
+
+**Verified live, with real before/after numbers, not just "it should be faster":**
+- A simple, non-multi-part question ("What is the weather today?") through the merged `planner` node
+  alone: **2.20-5.77s** for one combined call, measured both in isolation and inside a full streamed
+  turn. Against item 59's own logged figures for the old two-call architecture — `planner` 2.51-7.16s
+  concurrent with `supervisor` 2.14-8.79s, critical path bounded by the slower one — this is a genuine
+  reduction for the common case: one call's own latency instead of whichever of two calls lost the
+  race.
+- A genuinely multi-part question ("Compare the Leave Policy and Salary Bands documents...") through
+  the same merged call: **4.85-5.77s**, correctly returning `is_multi_part=True` with 3 real
+  sub-questions. Roughly on par with the old architecture's typical cost for a question this shape —
+  honestly, not a further win here, since a more complex question's combined output naturally takes
+  longer to generate regardless of how many separate calls it's split across. No regression either.
+- Full streamed turns re-run end to end against the restarted stack for both shapes above: no crash,
+  correct routing (`retrieve` for the simple question, `researcher`→`writer` for the comparison one),
+  real citations on the multi-part turn (2 citations, 11 real token events).
+- **Verified:** full `uv run pytest`, 520 passed / 1 deselected (net +2 over item 61's 518: 5 old
+  `test_supervisor_node.py` cases removed, 7 new `test_graph_planner.py` cases added, covering both the
+  carried-forward fail-open guarantee and the merged query-rewrite/expansion behavior). `api`/`worker`
+  restarted before the live verification above.
+- **Files:** `packages/planner/query_analyzer.py`, `packages/planner/planner.py`,
+  `packages/graph/builder.py`, `packages/graph/router.py` (comment only), `packages/graph/state.py`
+  (comment only), `packages/graph/nodes/__init__.py`, `packages/infrastructure/container/graph.py`,
+  `packages/graph/nodes/supervisor.py` (deleted), `tests/unit/test_graph_planner.py` (new),
+  `tests/unit/test_supervisor_node.py` (deleted), `tests/workflow/test_graph_router.py` (wording only).
+
+---
+
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
 
 These aren't bugs; `docs/BUILD_STATUS.md` contained claims that no longer matched the code. Listed
