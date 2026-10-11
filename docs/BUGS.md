@@ -1912,6 +1912,68 @@ control (a known class of hosted-LLM-API flakiness) even with this race fixed.
 
 ---
 
+### 59. ✅ By request — cut one LLM round-trip off every turn that reaches Supervisor; measured, not guessed, what chat latency actually costs and why ".5 seconds for everything" isn't physically reachable
+
+Asked to bring every request/response under 0.5 seconds. Investigated what's actually controllable
+versus what isn't, with real measurements against the live stack, rather than assuming either way.
+
+**Real win, shipped:** `SupervisorNode` used to run strictly *after* `planner`/`load_memory` finished
+(`packages/graph/router.py` routed `join` → `supervisor` → `retrieve`/`researcher`) — a second,
+sequential LLM round-trip on top of `planner`'s own. Since item 57 made retrieval (and so Supervisor)
+unconditional, every single turn started paying for that, not just a subset. `packages/graph/builder.py`
+now fans `supervisor` out from `START` alongside `planner`/`load_memory`, same pattern already
+established for those two — none of the three genuinely depends on either of the others' output.
+Supervisor now classifies off the raw last message instead of `planner`'s `rewritten_query` (a parallel
+branch can't see a sibling's not-yet-landed write), a deliberate trade-off: a genuinely multi-part
+question is usually self-contained, not pronoun-dependent the way a short follow-up is.
+`packages/graph/router.py`'s `route()`/`route_after_supervisor()` merged into one method, since
+Supervisor's result is already in state by the time routing happens. `tests/workflow/test_graph_router.py`
+updated to match. **Verified:** true concurrency does work in this stack — two real Gemini calls fired
+with `asyncio.gather` finished in 3.62s total versus 6.50s run sequentially (confirmed with a throwaway,
+non-committed timing script against live infra); four concurrent calls finished in 3.78s, barely more
+than one. Measuring the three fanned-out nodes together against the same stack didn't show that same
+speedup in one sampled run (6.74s concurrent vs. 6.58s sequential) — each node timed alone (planner
+2.51s, load_memory 0.76s, supervisor 2.14s) sums close to the sequential figure but is well above the
+concurrent one's expected max, meaning something about `planner`'s/`supervisor`'s specific
+`with_structured_output()` shape didn't overlap the way two plain `ainvoke()` calls demonstrably did.
+Not chased further this pass — flagged honestly rather than claimed as a clean win, since the
+architecture change is correct regardless (it can only help, never hurt, and plain concurrent calls are
+proven to work) and a single sampled run isn't authoritative given real run-to-run API latency variance
+already observed (2.54s-3.77s for nominally identical trivial calls in the same batch).
+
+**The hard constraint, measured, not assumed:** a single trivial Gemini call ("reply with one word") took
+2.5-3.7s end to end against this environment's real API key/network path, across multiple samples. That
+alone exceeds a 500ms budget by 5-8x, before any of this app's own work. **No application-level change
+can put a real LLM chat completion under 500ms** — the floor is the provider's own round-trip. What's
+actually achievable: minimizing the *number* of sequential LLM calls a turn makes (this item's real
+fix), keeping every non-LLM step (retrieval, reranking, memory, settings lookups — already cached, see
+`RetrievalSettingsService`/`PlatformSettingsService`'s existing 30s TTL caches) as close to free as
+possible so the LLM call(s) are the only real cost, and — the actual lever for *perceived* speed —
+streaming, so a user sees the first token in roughly one LLM round-trip's worth of time instead of
+waiting for the full generation, even though total completion time is unchanged.
+
+**A genuine, different win found and verified, not part of what was asked but directly relevant:** the
+admin page-load timings in `docs/QA_REPORT_2026-10-11.md` (630ms-1.4s) were measured against `next dev`
+(Turbopack dev server — HMR, unminified/on-demand-compiled routes, no production optimization), never
+against a real production build, which the report itself flagged as untested "would disturb the running
+dev server." Ran a real, isolated check: `npx next build` (clean, succeeded), served on a separate port
+(3200, not the dev server) via `next start`, measured via the real Navigation Timing API on an
+unauthenticated page (`/login`, a fair apples-to-apples page since authenticated pages weren't
+reachable without a live session this pass): **165ms TTFB, 228ms DOMContentLoaded, 443ms full load** —
+already under the 500ms bar, for a page that took noticeably longer under `next dev`. Dev-server timings
+were never representative of what users actually get from a real deployment. Production server stopped
+immediately after measuring (`next start -p 3200`, PID 7136) — nothing left running beyond the normal
+dev server on 3000.
+
+- **Verified:** full `uv run pytest` after the router/builder change, 516 passed / 1 deselected (one net
+  fewer than item 58's 517, from consolidating `route()`/`route_after_supervisor()`'s test coverage into
+  fewer, more direct cases — no coverage dropped, re-checked against the diff). `uv run ruff check`
+  clean. `api`/`worker` restarted, `GET /api/v1/health` confirmed healthy after. `npx next build`
+  succeeded with no new errors/warnings beyond pre-existing ones.
+- **Files:** `packages/graph/builder.py`, `packages/graph/router.py`, `tests/workflow/test_graph_router.py`.
+
+---
+
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
 
 These aren't bugs; `docs/BUILD_STATUS.md` contained claims that no longer matched the code. Listed
