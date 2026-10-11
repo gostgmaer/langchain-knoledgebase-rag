@@ -1825,7 +1825,8 @@ places, never to substitute its own knowledge for what retrieval actually found.
   always in the plan, *every* turn now reaches the supervisor, which can decompose it into the
   researcher/writer multi-agent path. That path has an open bug (see "Chat silently returns an empty
   assistant reply" in `docs/QA_REPORT_2026-10-11.md`'s F1) that this change makes meaningfully more
-  reachable, not less.
+  reachable, not less. **Investigated further — see item 58**, a real, provable bug found on exactly
+  this path, below.
 - **Mitigated, not root-caused, in the same pass:** `packages/application/services/chat_service.py`'s
   `_finalize_or_pause()` (the one place both the single-question and multi-agent paths converge
   before persistence) and `stream()`'s own token-assembly tail now both guard against ever persisting
@@ -1850,6 +1851,64 @@ places, never to substitute its own knowledge for what retrieval actually found.
 - **Files:** `packages/planner/planner.py`, `packages/planner/query_analyzer.py`,
   `packages/planner/rules.py`, `packages/prompts/builder.py`, `packages/conversation/bootstrap.py`,
   `packages/application/services/chat_service.py`.
+
+---
+
+### 58. ✅ Root-cause investigation of F1 — a real, provable race fixed on the exact failing path; the empty-content symptom itself could not be force-reproduced
+
+Asked directly to fix F1 ("Chat silently returns an empty assistant reply",
+`docs/QA_REPORT_2026-10-11.md`) for real, not just mitigate it. Investigated with real, running
+infrastructure — not guesses — via read-only scripts run against the live DI container (no HTTP, no
+auth, no database writes), reproducing the exact path: `SupervisorNode` → `ResearcherNode` (which runs
+one research subgraph per decomposed sub-question **concurrently**, `asyncio.gather`) → `WriterNode`.
+
+**What was ruled out, with evidence, not assumption:** five separate genuinely multi-part questions
+run end to end against the real Postgres/Chroma/Gemini stack, several of them forcing real
+`is_multi_part=True` decomposition into 2-5 sub-questions — every single research finding and every
+writer synthesis came back correctly non-empty, including the exact original repro question. The
+empty-content symptom itself would not force-reproduce despite a genuine effort across multiple runs.
+
+**What was found instead, real and provable:** `packages/knowledge/reranking/cross_encoder.py`'s
+`CrossEncoderReranker._get_model()` lazy-loads its ~90MB `sentence-transformers` model on first use —
+deliberately, so constructing it at DI-container-build time never triggers the download (see the
+class's own docstring). The check was a bare `if self._model is None`, no lock. `rerank()` runs its
+sync work via `asyncio.to_thread()` — a **real OS thread** per call, not a coroutine — and
+`ResearcherNode`'s `asyncio.gather` fans out one `rerank()` call per sub-question at once, meaning the
+first multi-part turn in a process's lifetime calls `_get_model()` from several real threads
+simultaneously. Confirmed live: a 3-sub-question question logged `"Loading cross-encoder reranker
+model"` **three times** in one turn — each thread saw `None`, each independently constructed and
+loaded its own full model instance, racing to be the one `self._model` ends up holding. This directly
+explains part of the 16.4-second researcher-node latency `docs/QA_REPORT_2026-10-11.md` flagged
+(reloading a 90MB model from disk 2-5 times instead of once, every time a process's first multi-part
+turn happens), and is a real, if narrow, correctness risk independent of that — concurrent first
+construction of a stateful model object with no synchronization is a textbook data race, not something
+to leave standing on the grounds that it didn't happen to corrupt a result in five test runs.
+
+**Fixed**: `CrossEncoderReranker.__init__` now holds a `threading.Lock` (not `asyncio.Lock`, which only
+protects within one event loop, not across the real OS threads `asyncio.to_thread` actually uses), and
+`_get_model()` uses it in a standard double-checked-locking pattern.
+
+**Verified, not just argued:**
+- A new `tests/unit/test_cross_encoder_reranker.py`, with a fake `sentence_transformers.CrossEncoder`
+  that sleeps briefly on construction to widen the race window: 5 concurrent `rerank()` calls, asserted
+  to construct the model exactly once. **Confirmed this test actually catches the bug**, not just
+  passes trivially — reverted the fix locally, re-ran the test, watched it fail (multiple
+  constructions), then restored the fix and watched it pass. Two more tests cover correct ranking under
+  the same concurrency and the empty-input short-circuit.
+- Live, against the real running stack: restarted `api`/`worker` to pick up the fix, re-ran the same
+  five-question sweep from the investigation — `"Loading cross-encoder reranker model"` now logs
+  **exactly once** across the entire run (previously once per concurrent sub-question, every time),
+  every finding and every writer synthesis still correct and non-empty.
+- Full `uv run pytest`: 517 passed / 1 deselected (514 + the 3 new tests), `uv run ruff check` clean.
+
+**Honest bottom line:** this is a real bug, on the exact code path F1 flagged, now fixed and
+regression-tested — but it was not caught in the act producing empty content, so it cannot be claimed
+with certainty as *the* root cause of the original symptom, only as *a* real race on that path that's
+now closed. Item 57's defensive guard (never persist/show an empty `COMPLETED` message) stays in place
+regardless, since a provider-side empty response remains possible for reasons outside this app's
+control (a known class of hosted-LLM-API flakiness) even with this race fixed.
+- **Files:** `packages/knowledge/reranking/cross_encoder.py`, `tests/unit/test_cross_encoder_reranker.py`
+  (new).
 
 ---
 

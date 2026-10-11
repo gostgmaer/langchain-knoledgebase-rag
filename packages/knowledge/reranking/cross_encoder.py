@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 from packages.knowledge.vectorstores.schema import SearchResult
 from packages.shared.logging import get_logger
@@ -29,13 +30,29 @@ class CrossEncoderReranker:
     ) -> None:
         self._model_name = model_name
         self._model = None
+        # rerank() runs _rerank_sync via asyncio.to_thread — a real OS
+        # thread per call, not a coroutine — so the first turn whose
+        # plan fans out over several sub-questions (ResearcherNode's
+        # asyncio.gather, docs/mvpRAG.md v2.0) calls _get_model() from
+        # several real threads at once. A plain `if self._model is
+        # None` has no protection against that: every thread can see
+        # None simultaneously, and each then independently constructs
+        # and loads its own full ~90MB CrossEncoder instance — found
+        # live while investigating docs/BUGS.md item 57's F1 (a
+        # multi-agent turn's researcher step took 16.4s; this is why).
+        # A plain lock is correct here, not asyncio.Lock, which only
+        # protects within one event loop/coroutine, not across the
+        # real OS threads asyncio.to_thread actually uses.
+        self._lock = threading.Lock()
 
     def _get_model(self):
         if self._model is None:
-            from sentence_transformers import CrossEncoder
+            with self._lock:
+                if self._model is None:
+                    from sentence_transformers import CrossEncoder
 
-            logger.info("Loading cross-encoder reranker model", model=self._model_name)
-            self._model = CrossEncoder(self._model_name)
+                    logger.info("Loading cross-encoder reranker model", model=self._model_name)
+                    self._model = CrossEncoder(self._model_name)
 
         return self._model
 
