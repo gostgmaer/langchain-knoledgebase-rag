@@ -1796,6 +1796,742 @@ expiry, retention windows, embedding/connector-sync concurrency — plus the 4 o
 
 ---
 
+### 57. ✅ By request — Chat no longer answers from the model's own training knowledge; retrieval runs on every turn
+
+Found while live-testing after the 2026-10-11 QA pass: asked a fact-seeking question, the model
+would sometimes answer confidently from its own general knowledge instead of the knowledge base —
+`GraphPlanner`'s `needs_retrieval` classifier decided retrieval wasn't needed, so the turn never
+searched anything at all, and nothing in the prompt told the model not to fill the gap itself. By
+explicit request: retrieval now runs on **every** turn, and the model is told, in two independent
+places, never to substitute its own knowledge for what retrieval actually found.
+
+- **`packages/planner/planner.py`** — `GraphPlanner` no longer gates the `Capability.RETRIEVAL` step
+  behind a classifier decision; it's unconditionally part of every turn's plan. The `QueryAnalyzer`
+  LLM call still runs (when available) to rewrite/expand the query for better recall, but a failure
+  there now only degrades query quality, never skips the lookup. `packages/planner/query_analyzer.py`'s
+  `QueryAnalysis` schema dropped the now-unused `needs_retrieval` field; `packages/planner/rules.py`'s
+  now-dead `RETRIEVAL_KEYWORDS` fallback was deleted.
+- **`packages/prompts/builder.py`** — both branches of `PromptBuilder.build()`'s context handling were
+  rewritten: when sources are found, the model is told to answer "using ONLY these sources, the
+  conversation above, and any long-term memory facts... never supplement with your own general or
+  training knowledge"; when nothing is found, it's told to say so plainly "do not answer it from your
+  own general or training knowledge instead, even if you know the answer." A real tool call (weather,
+  calculator, search) still counts as legitimate grounding — this isn't a ban on tool use.
+- **`packages/conversation/bootstrap.py`** — the default agent's base system prompt gained the same
+  rule as a second, independent layer, so the restriction doesn't rely solely on the per-request
+  context block.
+- **Known follow-on effect, not separately asked for but real:** `GraphRouter.route()` already sends
+  every turn with a `RETRIEVAL` step through the `supervisor` node first — since retrieval is now
+  always in the plan, *every* turn now reaches the supervisor, which can decompose it into the
+  researcher/writer multi-agent path. That path has an open bug (see "Chat silently returns an empty
+  assistant reply" in `docs/QA_REPORT_2026-10-11.md`'s F1) that this change makes meaningfully more
+  reachable, not less. **Investigated further — see item 58**, a real, provable bug found on exactly
+  this path, below.
+- **Mitigated, not root-caused, in the same pass:** `packages/application/services/chat_service.py`'s
+  `_finalize_or_pause()` (the one place both the single-question and multi-agent paths converge
+  before persistence) and `stream()`'s own token-assembly tail now both guard against ever persisting
+  or showing an empty `COMPLETED` assistant message — substituting a plain, visible "I wasn't able to
+  put together an answer to that" instead, with a logged warning. This stops the worst *symptom* (a
+  silent, confident-looking empty reply) immediately; the real root cause inside
+  `packages/graph/nodes/researcher.py`/`writer.py` is still open and still needs the investigation
+  `docs/QA_REPORT_2026-10-11.md` §6 already lays out.
+- **Not yet re-synced:** already-provisioned tenants' `agents` rows (the ones created before this
+  change, via `ensure_default_agent`'s idempotent get-or-create) still hold the old system prompt text
+  in the database — a one-off `UPDATE` to bring them onto the new wording was prepared but blocked by
+  this session's own permission policy (direct database mutation via `docker exec`), left for the user
+  to run or approve. The functional fix does not depend on this: `PromptBuilder`'s per-request
+  instructions are code, not stored state, and already apply to every tenant regardless.
+- **Verified:** full `uv run pytest` suite, 514 passed / 1 deselected, both before and after (no
+  dedicated `GraphPlanner`/`QueryAnalyzer` tests exist to update). `uv run ruff check` clean on every
+  touched file (one pre-existing, unrelated `F841` in `chat_service.py` left as found). `api`/`worker`
+  containers restarted to pick up the change; `GET /api/v1/health` confirmed healthy after. Live
+  browser re-verification of an actual chat turn was not completed this pass — the signed-in session
+  expired mid-verification (independent of this change) and a direct unauthenticated API probe was
+  correctly rejected by `AUTH_REQUIRED=true`, which this pass did not disable.
+- **Files:** `packages/planner/planner.py`, `packages/planner/query_analyzer.py`,
+  `packages/planner/rules.py`, `packages/prompts/builder.py`, `packages/conversation/bootstrap.py`,
+  `packages/application/services/chat_service.py`.
+
+---
+
+### 58. ✅ Root-cause investigation of F1 — a real, provable race fixed on the exact failing path; the empty-content symptom itself could not be force-reproduced
+
+Asked directly to fix F1 ("Chat silently returns an empty assistant reply",
+`docs/QA_REPORT_2026-10-11.md`) for real, not just mitigate it. Investigated with real, running
+infrastructure — not guesses — via read-only scripts run against the live DI container (no HTTP, no
+auth, no database writes), reproducing the exact path: `SupervisorNode` → `ResearcherNode` (which runs
+one research subgraph per decomposed sub-question **concurrently**, `asyncio.gather`) → `WriterNode`.
+
+**What was ruled out, with evidence, not assumption:** five separate genuinely multi-part questions
+run end to end against the real Postgres/Chroma/Gemini stack, several of them forcing real
+`is_multi_part=True` decomposition into 2-5 sub-questions — every single research finding and every
+writer synthesis came back correctly non-empty, including the exact original repro question. The
+empty-content symptom itself would not force-reproduce despite a genuine effort across multiple runs.
+
+**What was found instead, real and provable:** `packages/knowledge/reranking/cross_encoder.py`'s
+`CrossEncoderReranker._get_model()` lazy-loads its ~90MB `sentence-transformers` model on first use —
+deliberately, so constructing it at DI-container-build time never triggers the download (see the
+class's own docstring). The check was a bare `if self._model is None`, no lock. `rerank()` runs its
+sync work via `asyncio.to_thread()` — a **real OS thread** per call, not a coroutine — and
+`ResearcherNode`'s `asyncio.gather` fans out one `rerank()` call per sub-question at once, meaning the
+first multi-part turn in a process's lifetime calls `_get_model()` from several real threads
+simultaneously. Confirmed live: a 3-sub-question question logged `"Loading cross-encoder reranker
+model"` **three times** in one turn — each thread saw `None`, each independently constructed and
+loaded its own full model instance, racing to be the one `self._model` ends up holding. This directly
+explains part of the 16.4-second researcher-node latency `docs/QA_REPORT_2026-10-11.md` flagged
+(reloading a 90MB model from disk 2-5 times instead of once, every time a process's first multi-part
+turn happens), and is a real, if narrow, correctness risk independent of that — concurrent first
+construction of a stateful model object with no synchronization is a textbook data race, not something
+to leave standing on the grounds that it didn't happen to corrupt a result in five test runs.
+
+**Fixed**: `CrossEncoderReranker.__init__` now holds a `threading.Lock` (not `asyncio.Lock`, which only
+protects within one event loop, not across the real OS threads `asyncio.to_thread` actually uses), and
+`_get_model()` uses it in a standard double-checked-locking pattern.
+
+**Verified, not just argued:**
+- A new `tests/unit/test_cross_encoder_reranker.py`, with a fake `sentence_transformers.CrossEncoder`
+  that sleeps briefly on construction to widen the race window: 5 concurrent `rerank()` calls, asserted
+  to construct the model exactly once. **Confirmed this test actually catches the bug**, not just
+  passes trivially — reverted the fix locally, re-ran the test, watched it fail (multiple
+  constructions), then restored the fix and watched it pass. Two more tests cover correct ranking under
+  the same concurrency and the empty-input short-circuit.
+- Live, against the real running stack: restarted `api`/`worker` to pick up the fix, re-ran the same
+  five-question sweep from the investigation — `"Loading cross-encoder reranker model"` now logs
+  **exactly once** across the entire run (previously once per concurrent sub-question, every time),
+  every finding and every writer synthesis still correct and non-empty.
+- Full `uv run pytest`: 517 passed / 1 deselected (514 + the 3 new tests), `uv run ruff check` clean.
+
+**Honest bottom line:** this is a real bug, on the exact code path F1 flagged, now fixed and
+regression-tested — but it was not caught in the act producing empty content, so it cannot be claimed
+with certainty as *the* root cause of the original symptom, only as *a* real race on that path that's
+now closed. Item 57's defensive guard (never persist/show an empty `COMPLETED` message) stays in place
+regardless, since a provider-side empty response remains possible for reasons outside this app's
+control (a known class of hosted-LLM-API flakiness) even with this race fixed.
+- **Files:** `packages/knowledge/reranking/cross_encoder.py`, `tests/unit/test_cross_encoder_reranker.py`
+  (new).
+
+---
+
+### 59. ✅ By request — cut one LLM round-trip off every turn that reaches Supervisor; measured, not guessed, what chat latency actually costs and why ".5 seconds for everything" isn't physically reachable
+
+Asked to bring every request/response under 0.5 seconds. Investigated what's actually controllable
+versus what isn't, with real measurements against the live stack, rather than assuming either way.
+
+**Real win, shipped:** `SupervisorNode` used to run strictly *after* `planner`/`load_memory` finished
+(`packages/graph/router.py` routed `join` → `supervisor` → `retrieve`/`researcher`) — a second,
+sequential LLM round-trip on top of `planner`'s own. Since item 57 made retrieval (and so Supervisor)
+unconditional, every single turn started paying for that, not just a subset. `packages/graph/builder.py`
+now fans `supervisor` out from `START` alongside `planner`/`load_memory`, same pattern already
+established for those two — none of the three genuinely depends on either of the others' output.
+Supervisor now classifies off the raw last message instead of `planner`'s `rewritten_query` (a parallel
+branch can't see a sibling's not-yet-landed write), a deliberate trade-off: a genuinely multi-part
+question is usually self-contained, not pronoun-dependent the way a short follow-up is.
+`packages/graph/router.py`'s `route()`/`route_after_supervisor()` merged into one method, since
+Supervisor's result is already in state by the time routing happens. `tests/workflow/test_graph_router.py`
+updated to match. **Verified:** true concurrency does work in this stack — two real Gemini calls fired
+with `asyncio.gather` finished in 3.62s total versus 6.50s run sequentially (confirmed with a throwaway,
+non-committed timing script against live infra); four concurrent calls finished in 3.78s, barely more
+than one. Measuring the three fanned-out nodes together against the same stack didn't show that same
+speedup in one sampled run (6.74s concurrent vs. 6.58s sequential) — each node timed alone (planner
+2.51s, load_memory 0.76s, supervisor 2.14s) sums close to the sequential figure but is well above the
+concurrent one's expected max, meaning something about `planner`'s/`supervisor`'s specific
+`with_structured_output()` shape didn't overlap the way two plain `ainvoke()` calls demonstrably did.
+Not chased further this pass — flagged honestly rather than claimed as a clean win, since the
+architecture change is correct regardless (it can only help, never hurt, and plain concurrent calls are
+proven to work) and a single sampled run isn't authoritative given real run-to-run API latency variance
+already observed (2.54s-3.77s for nominally identical trivial calls in the same batch).
+
+**The hard constraint, measured, not assumed:** a single trivial Gemini call ("reply with one word") took
+2.5-3.7s end to end against this environment's real API key/network path, across multiple samples. That
+alone exceeds a 500ms budget by 5-8x, before any of this app's own work. **No application-level change
+can put a real LLM chat completion under 500ms** — the floor is the provider's own round-trip. What's
+actually achievable: minimizing the *number* of sequential LLM calls a turn makes (this item's real
+fix), keeping every non-LLM step (retrieval, reranking, memory, settings lookups — already cached, see
+`RetrievalSettingsService`/`PlatformSettingsService`'s existing 30s TTL caches) as close to free as
+possible so the LLM call(s) are the only real cost, and — the actual lever for *perceived* speed —
+streaming, so a user sees the first token in roughly one LLM round-trip's worth of time instead of
+waiting for the full generation, even though total completion time is unchanged.
+
+**A genuine, different win found and verified, not part of what was asked but directly relevant:** the
+admin page-load timings in `docs/QA_REPORT_2026-10-11.md` (630ms-1.4s) were measured against `next dev`
+(Turbopack dev server — HMR, unminified/on-demand-compiled routes, no production optimization), never
+against a real production build, which the report itself flagged as untested "would disturb the running
+dev server." Ran a real, isolated check: `npx next build` (clean, succeeded), served on a separate port
+(3200, not the dev server) via `next start`, measured via the real Navigation Timing API on an
+unauthenticated page (`/login`, a fair apples-to-apples page since authenticated pages weren't
+reachable without a live session this pass): **165ms TTFB, 228ms DOMContentLoaded, 443ms full load** —
+already under the 500ms bar, for a page that took noticeably longer under `next dev`. Dev-server timings
+were never representative of what users actually get from a real deployment. Production server stopped
+immediately after measuring (`next start -p 3200`, PID 7136) — nothing left running beyond the normal
+dev server on 3000.
+
+- **Verified:** full `uv run pytest` after the router/builder change, 516 passed / 1 deselected (one net
+  fewer than item 58's 517, from consolidating `route()`/`route_after_supervisor()`'s test coverage into
+  fewer, more direct cases — no coverage dropped, re-checked against the diff). `uv run ruff check`
+  clean. `api`/`worker` restarted, `GET /api/v1/health` confirmed healthy after. `npx next build`
+  succeeded with no new errors/warnings beyond pre-existing ones.
+- **Files:** `packages/graph/builder.py`, `packages/graph/router.py`, `tests/workflow/test_graph_router.py`.
+
+---
+
+### 60. ✅ WriterNode never streamed — every multi-part/comparison turn's real answer was silently discarded by the actual streaming endpoint the UI calls
+
+Asked to fix "Core chat reliability" for real, not just cosmetically. `ChatService.stream()`
+(`packages/application/services/chat_service.py`) — the method `POST /api/v1/chat` with
+`"stream": true` actually calls, which is what the real browser UI always uses — only ever sees
+events a node explicitly pushes through LangGraph's `get_stream_writer()` under `stream_mode="custom"`;
+it never reads a node's final state write directly, unlike the non-streaming `chat()` path's
+`result["messages"][-1]`. `LLMNode` (`packages/graph/nodes/llm.py`) already pushed `token`/
+`metadata`/`usage`/`citations` events when `state["stream"]` was set. `WriterNode`
+(`packages/graph/nodes/writer.py`) — which produces the final answer for every genuinely multi-part/
+comparison question (item 59's `researcher` → `writer` → `END` path) — never checked `state["stream"]`
+at all and always called the plain, non-streaming `self._chat.chat(request)`. Since `_stream_runtime`
+only accumulates tokens from pushed writer events, a writer-routed streamed turn's `chunks` list stayed
+permanently empty no matter how good the real synthesized answer was, and item 57's own empty-reply
+guard then replaced that perfectly good answer with the generic "I wasn't able to put together an
+answer to that" fallback — **every single time**, for every multi-part/comparison question, under the
+one code path the real UI actually exercises. Every earlier diagnostic this session (including the
+original F1 repro script) called `chat()` or invoked graph nodes directly, never `stream()` — so this
+was never exercised by any prior reproduction attempt, which is exactly why five separate attempts to
+reproduce F1 after item 58's reranker-race fix all came back "correct."
+
+**Fix:** `WriterNode` now mirrors `LLMNode`'s exact streaming contract — when `state["stream"]` is set,
+it calls `self._chat.astream(request)` instead of `self._chat.chat(request)`, pushing `token` events
+per chunk and `metadata`/`usage`/`citations` events once streaming ends, through the same
+`get_stream_writer()`. The citation dedup (`packages/graph/nodes/writer.py`'s existing "keep the higher
+of two scores" logic) was moved earlier, before the LLM call, since it only ever depended on
+`research_findings` — not the response — so the streaming branch can push it immediately. No
+`retrieval_id` to push: a multi-part turn never had a single one even on the non-streaming path, since
+each sub-question runs its own independent research subgraph.
+
+- **Verified live, end to end, against the real running stack** (not a diagnostic that bypasses the
+  actual bug): a direct call to `ChatService.stream()` with the exact comparison question from this
+  session's original F1 repro ("Compare the knowledge bases I have access to and tell me which one is
+  most recently updated.") now returns 10 real `token` events and a `citations` event (3 citations)
+  whose assembled text is WriterNode's genuine synthesized answer — not the fallback message. Before
+  this fix, the same call (once item 61 below is also accounted for) would have discarded that answer
+  silently.
+- **Added `tests/unit/test_writer_node.py::test_a_streaming_turn_pushes_tokens_instead_of_discarding_the_answer`**,
+  confirmed to fail without the fix (`AttributeError` — the old file never imported `get_stream_writer`)
+  and pass with it.
+- **Files:** `packages/graph/nodes/writer.py`, `tests/unit/test_writer_node.py`.
+
+---
+
+### 61. ✅ Every single chat turn was fatally crashing — `SupervisorNode` returning full state conflicted with `load_memory`'s concurrent write, the moment item 59 moved Supervisor into the START fan-out
+
+Found while live-verifying item 60 above: the exact same comparison-question call first failed, before
+any streaming concern was even reachable, with `langgraph.errors.InvalidUpdateError: At key 'memories':
+Can receive only one value per step.` Item 59 moved `SupervisorNode` into the `START` fan-out alongside
+`planner`/`load_memory`, following the pattern already established for those two — but
+`SupervisorNode.__call__` (`packages/graph/nodes/supervisor.py`) returned the full mutated `state`
+object, not a scoped partial dict like `LoadMemoryNode` was already fixed to do (a lesson from an
+earlier session, documented at the time this exact fan-out pattern was first introduced for `planner`/
+`load_memory`). LangGraph treats a dict return as a write to every key present in it; returning the
+whole `state` object meant Supervisor was writing to `"memories"` too — the exact channel
+`load_memory` is genuinely writing in that same superstep — and a `LastValue` channel fatally rejects
+two writers in one step regardless of whether the values agree. This is not a narrow, multi-part-only
+bug: `planner`/`load_memory`/`supervisor` fan out and join on **every** turn regardless of how it's
+later routed, so this crashed every single chat message sent through the streaming endpoint since
+item 59 shipped, full stop — the single most severe regression found this session, and almost
+certainly the real, final explanation for "chat is still broken" after every earlier fix.
+
+**Fix:** `SupervisorNode.__call__` now returns `{"is_multi_part": ..., "sub_questions": ...}` only, the
+same partial-dict discipline `GraphPlanner`/`LoadMemoryNode` already follow.
+
+- **Verified live, end to end:** the same comparison-question call that previously crashed with
+  `InvalidUpdateError` now runs clean through `supervisor` → `join` → `researcher` → `writer`, producing
+  item 60's real streamed answer. A plain single-question call ("What is in my knowledge base?") was
+  also re-run live afterward as a regression check — no crash, routes `retrieve` → `llm` → `tool`
+  exactly as before, correctly pausing on the tool-approval gate.
+- **Added `tests/unit/test_supervisor_node.py::test_returns_only_its_own_keys_not_the_whole_mutated_state`**,
+  which seeds `state` with extra keys (`memories`, `execution_plan`) the node doesn't own and asserts the
+  returned dict contains only its own two keys.
+- **Verified:** full `uv run pytest`, 518 passed / 1 deselected (two net new: item 60's and this item's).
+  `api`/`worker` restarted; both verification calls above ran against the restarted containers.
+- **Files:** `packages/graph/nodes/supervisor.py`, `tests/unit/test_supervisor_node.py`.
+
+---
+
+### 62. 📊 Measured, not assumed — retrieval/reranking is already sub-second once warm; the "Response latency" ceiling is purely the LLM round-trip(s), nothing else
+
+Asked why "Response latency" is still rated Adequate rather than Strong after items 59-61. Checked
+whether there was any further real, controllable cost being missed, rather than re-asserting the
+same LLM-floor argument from item 59 without new evidence.
+
+Every latency number logged during this session's live verification runs (items 60-61's checks)
+showed `RetrieveNode` taking 9-10 seconds — alarming on its own, and easy to mistake for a real
+backend cost. It isn't: every one of those runs used `docker compose exec api python <script>.py`,
+which starts a **brand new Python process** each time. `CrossEncoderReranker` is wired as a DI
+`Singleton` (`packages/infrastructure/container/rag.py`) specifically so its ~90MB model loads once
+per process and stays resident — exactly the fix item 58 made thread-safe. A throwaway diagnostic
+process never benefits from that: it pays the one-time model-load cost on every single invocation,
+inflating `retrieve`'s measured time by roughly 9 seconds that a real request in the long-running
+`api`/`worker` containers never actually pays after the first request since a restart.
+
+**Verified directly:** three retrieval calls run back-to-back inside **one** process (not three
+separate `docker exec` calls) — first call (genuinely cold, model not yet loaded) took **9.57s**;
+second and third calls (warm, same process) took **0.85s** and **0.86s**. Retrieval plus reranking,
+once warm, is almost three orders of magnitude under the LLM floor established in item 59 — it is not
+a meaningful contributor to a real turn's latency in sustained traffic.
+
+**What this changes:** nothing code-level — there was no bug to fix, only a measurement artifact to
+correct. The scorecard's "Response latency" note is updated to state this precisely rather than
+leaving a reader to wonder whether retrieval itself might be a hidden cost: the only remaining,
+unavoidable cost in a real chat turn is the LLM round-trip(s) (one for the parallel
+planner/load_memory/supervisor block, one or more for retrieve→llm or researcher→writer). Category
+stays **Adequate**, not bumped to Strong — that floor is a third-party provider's own network
+round-trip, not something any further application change can close, and rating it "Strong" would
+overstate what's actually achievable.
+
+- **Files:** none changed — a measurement correction, documented here and in the shared QA artifact.
+
+---
+
+### 63. ✅ By request — "Response latency" pushed back on as still open; merged two concurrent LLM calls into one, cutting the critical path for simple turns
+
+Asked directly whether "Response latency" being rated Adequate meant it was actually closed, after
+item 62's measurement correction. It wasn't fully closed — one more real, controllable lever existed
+and hadn't been tried: `planner` and the now-deleted `SupervisorNode` ran as two *separate* concurrent
+structured-output LLM calls in the same `START` fan-out (item 59). Concurrency overlaps two calls
+against each other, but it never makes either one individually faster — each pays its own fixed
+per-call round-trip overhead (item 59's own measured 2.5-3.7s floor for a trivial call) on top of
+whatever generation time its specific output needs. The parallel block's wall-clock cost was bounded
+by whichever of the two calls happened to be slower that turn, and logs across this session showed
+`supervisor` was frequently the slower one (5-8s vs. `planner`'s 2-5s).
+
+**Fix:** folded `SupervisorNode`'s multi-part classification directly into `GraphPlanner`'s existing
+`QueryAnalyzer` call — one combined structured-output schema (`QueryAnalysis`, now carrying
+`rewritten_query`/`expanded_queries` *and* `is_multi_part`/`sub_questions`) instead of two separate
+ones. `SupervisorNode` is deleted outright; `GraphBuilder`'s `START` fan-out drops from three branches
+(`planner`/`load_memory`/`supervisor`) to two (`planner`/`load_memory`). `GraphPlanner` carries forward
+`SupervisorNode`'s exact hard fail-open guarantee (an analyzer error, a missing analyzer, or a
+nonsensical `is_multi_part=True` with zero `sub_questions` all collapse to `is_multi_part=False`) —
+verified with the same guarantee's test cases, moved and extended in
+`tests/unit/test_graph_planner.py` (no dedicated planner test file existed before this; written from
+scratch, since `tests/unit/test_supervisor_node.py` is deleted along with the node it tested).
+`packages/graph/router.py`'s `route()` needed no logic change — it already only reads
+`state["is_multi_part"]`, regardless of which node sets it.
+
+**Verified live, with real before/after numbers, not just "it should be faster":**
+- A simple, non-multi-part question ("What is the weather today?") through the merged `planner` node
+  alone: **2.20-5.77s** for one combined call, measured both in isolation and inside a full streamed
+  turn. Against item 59's own logged figures for the old two-call architecture — `planner` 2.51-7.16s
+  concurrent with `supervisor` 2.14-8.79s, critical path bounded by the slower one — this is a genuine
+  reduction for the common case: one call's own latency instead of whichever of two calls lost the
+  race.
+- A genuinely multi-part question ("Compare the Leave Policy and Salary Bands documents...") through
+  the same merged call: **4.85-5.77s**, correctly returning `is_multi_part=True` with 3 real
+  sub-questions. Roughly on par with the old architecture's typical cost for a question this shape —
+  honestly, not a further win here, since a more complex question's combined output naturally takes
+  longer to generate regardless of how many separate calls it's split across. No regression either.
+- Full streamed turns re-run end to end against the restarted stack for both shapes above: no crash,
+  correct routing (`retrieve` for the simple question, `researcher`→`writer` for the comparison one),
+  real citations on the multi-part turn (2 citations, 11 real token events).
+- **Verified:** full `uv run pytest`, 520 passed / 1 deselected (net +2 over item 61's 518: 5 old
+  `test_supervisor_node.py` cases removed, 7 new `test_graph_planner.py` cases added, covering both the
+  carried-forward fail-open guarantee and the merged query-rewrite/expansion behavior). `api`/`worker`
+  restarted before the live verification above.
+- **Files:** `packages/planner/query_analyzer.py`, `packages/planner/planner.py`,
+  `packages/graph/builder.py`, `packages/graph/router.py` (comment only), `packages/graph/state.py`
+  (comment only), `packages/graph/nodes/__init__.py`, `packages/infrastructure/container/graph.py`,
+  `packages/graph/nodes/supervisor.py` (deleted), `tests/unit/test_graph_planner.py` (new),
+  `tests/unit/test_supervisor_node.py` (deleted), `tests/workflow/test_graph_router.py` (wording only).
+
+---
+
+### 64. ✅ By request — F4/F5 fixed: a cascading-render anti-pattern on Settings, two unescaped apostrophes on Team
+
+Picked up from the shared QA artifact's open findings list.
+
+**F4 — `settings/page.tsx` seeded its profile edit form synchronously inside a `useEffect`**
+(`setProfileDraft(...)` called directly in the effect body on every `profileQuery.data` change) —
+`react-hooks/set-state-in-effect`'s exact warning: a cascading extra render pass, not a crash, but
+real waste on every profile load. **Fixed** with React's own recommended pattern for "derive state
+once when a query's data changes" (react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes):
+adjust state during render, gated on noticing the query's data object actually changed (tracked via
+a `seededProfile` state value), instead of a `useEffect` + `setState` round-trip. `useEffect` is no
+longer imported in this file at all — it had no other use.
+
+**F5 — `team/page.tsx` had two literal apostrophes in JSX text** ("doesn't show", "doesn't
+return") that `react/no-unescaped-entities` flags — cosmetic only, the rendered text was already
+correct, just invalid JSX syntax-adjacent style the linter catches. **Fixed** by escaping both as
+`&apos;`.
+
+- **Verified:** `npx eslint` on both files is clean (previously 3 errors total); `npx tsc --noEmit`
+  clean across the whole frontend.
+- **Files:** `frontend/src/app/[role]/settings/page.tsx`, `frontend/src/app/[role]/team/page.tsx`.
+
+---
+
+### 65. ✅ F2 fixed — `ResilientHttpClient`'s DNS-rebinding TOCTOU gap (item 42) actually closed
+
+Item 42 documented, but deliberately deferred, a real gap: `assert_public_url()` resolves a
+hostname and checks the result is public, then returns — the actual connection happens moments
+later, through httpx/httpcore's own **independent** DNS resolution, with nothing tying the two
+together. A hostname whose DNS answers differently between the validating lookup and the
+connecting one (classic DNS rebinding — a public address for the check, a private one — loopback,
+cloud metadata, an internal service — for the real connection) passes the check and still reaches
+the private address. Item 42 correctly identified why this wasn't a quick patch: a correct fix
+means pinning the actual TCP connection to the already-validated IP while still presenting the
+right `Host` header and TLS SNI for certificate validation against the real hostname — a
+transport-level change, not application logic, with real risk of subtly breaking TLS/cert
+validation if done carelessly.
+
+**Fix:** `_PinnedResolutionTransport` (`packages/connectors/http.py`), a thin `httpx.AsyncBaseTransport`
+wrapper that makes "resolve and validate" and "connect" the exact same step, with nothing in
+between for DNS to change. For every real request (every redirect hop, every retry attempt — each
+gets its own fresh resolution, which only strengthens this): resolves the host itself, raises
+`BlockedUrlError` unless every resolved address is public (`_resolve_validated`, now the single
+source of truth both this transport and `assert_public_url`'s own fast pre-check call through),
+rewrites the request to connect directly to that validated address (`request.url.copy_with(host=...)`),
+and sets the `sni_hostname` extension httpcore already supports
+(`.venv/Lib/site-packages/httpcore/_async/connection.py:107` — confirmed present in the pinned
+httpx 0.28.1/httpcore version before relying on it) so TLS SNI and certificate hostname
+verification still check the real hostname, not the IP. The `Host` header needs no manual
+handling: httpx already baked it in from the original hostname when the request was first built,
+before this transport ever sees it, and mutating `request.url` afterward doesn't retroactively
+change it. A literal IP host, or `allow_private=True`, passes straight through unchanged — same
+rules `assert_public_url` already followed, and critically what keeps every existing connector
+test (which all use a fake non-IP hostname with `allow_private=True`, the test helper's own
+default) a true no-op with zero real DNS attempted.
+
+- **Verified with a real DNS-rebinding simulation, not just "looks right":** a new test
+  (`test_a_dns_rebind_between_the_pre_check_and_the_real_connection_is_still_blocked`) makes the
+  resolver return a public address on its first call and a private one on its second — exactly the
+  scenario item 42 describes. The pre-check's (first) lookup passes; the transport's (second)
+  lookup, immediately before connecting, is what actually gets validated and connected to, and
+  correctly blocks. Companion tests confirm: the transport connects to the validated address while
+  the `Host` header and TLS `sni_hostname` still carry the real hostname
+  (`test_pinned_resolution_connects_to_the_validated_address_with_sni_preserved`); a private
+  resolution is blocked outright; a literal IP host and `allow_private=True` both skip resolution
+  entirely (asserted by making the resolver raise if called at all in those cases).
+- **One existing test fixed to match the new structure, not weakened:**
+  `test_a_file_the_service_cannot_read_does_not_stop_the_thread_being_indexed`
+  (`tests/unit/connectors/test_events_render_files.py`) reached directly into
+  `connector.http._client._transport.handler` to swap the mock handler mid-test; `_transport` is
+  now `_PinnedResolutionTransport`, so this reaches through `._inner.handler` instead — the real
+  `httpx.MockTransport` the pinning wrapper sits in front of.
+- **Verified:** full `uv run pytest`, 525 passed / 1 deselected (net +5: 5 new tests in
+  `test_http_client.py`, same 112/112 passing in the full connectors suite). `uv run ruff check`
+  shows the same 24 pre-existing, unrelated issues as before this change (confirmed by diffing
+  against the pre-change file) — zero new lint issues introduced. `api`/`worker` restarted and
+  confirmed healthy afterward.
+- **Files:** `packages/connectors/http.py`, `tests/unit/connectors/test_http_client.py`,
+  `tests/unit/connectors/test_events_render_files.py` (one line, structural fix only).
+
+---
+
+### 66. ✅ F3 — real unit/integration test coverage added for two genuinely zero-coverage, fully load-bearing services
+
+`ConversationService` and `MessageService` (`packages/application/services/`) had **zero** direct
+tests before this (confirmed: zero test files referenced either), despite being what every single
+chat turn goes through first — `ChatService._get_conversation` calls `ConversationService.get_or_create`
+on every request, and `MessageService.create_assistant_message` computes the actual token/cost
+accounting a tenant's usage view would show. Added real integration tests against a live Postgres
+(the `db_session` fixture, same pattern already established in
+`test_conversation_durable_execution.py`), not hand-rolled fakes — this is a real repository-backed
+service layer, and fakes would only prove the mocks agree with themselves.
+
+- `tests/integration/test_conversation_service.py` (new, 9 tests): `get`'s not-found error,
+  `create`/`get_by_session`, `get_or_create` genuinely reusing the same conversation for a repeated
+  session (the exact behavior every chat turn depends on to not fork a new conversation per
+  message), `close` setting `COMPLETED`/`ended_at`, and `touch`'s `+= 2` (one user + one assistant
+  message per turn — an easy, silent off-by-one to introduce since nothing previously pinned it
+  down).
+- `tests/integration/test_message_service.py` (new, 9 tests): all four message-role creators, and
+  `create_assistant_message`'s real arithmetic — pinned down against `packages/config/pricing.py`'s
+  actual rate table (1000 input + 500 output tokens on `google`/`gemini-3.1-flash-lite` = exactly
+  `$0.000300`, not just "a cost got set"), the "usage without a provider/model skips cost entirely
+  rather than guessing $0" branch, tool_calls/tool_results storage, and the conditional
+  `AIResponse` row (created only when `raw_response` carries real metadata, confirmed both ways).
+- **A real bug found and fixed while writing these, not a test-authoring inconvenience:** the
+  shared `db_session` fixture (`tests/conftest.py`) built its transaction's `AsyncSession` without
+  `expire_on_commit=False` — unlike `create_session_factory`'s real production session, which sets
+  it explicitly. Under the fixture's default (`expire_on_commit=True`), any service that commits
+  and then immediately reads an attribute off the object it just committed —
+  `ConversationService.create()`'s `ConversationResponse.model_validate(conversation)` right after
+  `await self._uow.commit()`, a completely ordinary, correct pattern — hit a `MissingGreenlet`
+  crash that can never happen against the real session, since SQLAlchemy would otherwise expire
+  and try to lazily reload that attribute outside an active greenlet context. No existing test had
+  ever combined "service-level commit" with "immediate attribute read" before these new ones, which
+  is exactly why this was never caught. **Fixed** by matching the fixture's session construction to
+  production's real configuration.
+- **A second small, genuine fix found in the same area:** `message_service.py` type-hinted its
+  `uow` parameter as `packages.infrastructure.database.transaction.UnitOfWork` — a different,
+  incomplete stub class (no `.messages`/`.ai_responses`/etc.) that happened to share a name with
+  the real one actually injected (`packages.infrastructure.repositories.unit_of_work.UnitOfWork`,
+  via `container.database.uow`). Harmless at runtime (Python doesn't enforce type hints, and the
+  real object was always duck-type-compatible), but wrong, and exactly the "two same-named classes
+  at different layers" confusion this codebase has already fixed once before (`LLMChatService`'s
+  own rename, docs/UNUSED_FILES.md). Fixed the import; the stale stub module
+  (`packages/infrastructure/database/transaction.py`) had no other reference anywhere in the
+  codebase once that one caller was corrected, so it's deleted outright rather than left as new
+  dead code.
+- **Verified:** full `uv run pytest`, 543 passed / 1 deselected (net +18 over item 65's 525: 9 + 9
+  new tests). `uv run ruff check` clean on every changed file. `api`/`worker` restarted and
+  confirmed healthy afterward (the message_service.py import fix touches a real, live-wired file).
+- **Not claimed as closing F3 entirely** — `packages/application/services/` has nine files total;
+  this covers two of the most critical ones. `ingestion_audit.py`/`retention_service.py` and the
+  rest of the package remain genuinely untested, left open.
+- **Files:** `packages/application/services/message_service.py`,
+  `packages/infrastructure/database/transaction.py` (deleted), `tests/conftest.py`,
+  `tests/integration/test_conversation_service.py` (new), `tests/integration/test_message_service.py` (new).
+
+---
+
+### 67. ✅ F3 actually closed — the remaining five files in `packages/application/services/`, including two genuinely zero-coverage, compliance-sensitive ones
+
+Item 66 covered the two services every chat turn hits first but explicitly left the rest of the
+package open. Re-surveyed all nine files by grepping which test files actually exercise each
+service's *class*, not just import it incidentally (`platform_settings_service.default_value` was
+tested; `PlatformSettingsService.get/set/seed_defaults` itself never was) — the real gap was
+narrower than item 66's "7 of 9 remain untested" but still covered the two highest-risk files in
+the package:
+
+- **`AuditService`** (`audit_service.py`) — only its standalone `clean_detail` helper had ever been
+  tested; the class every real audit write goes through, backing the "Audit & observability" and
+  "Secrets & data protection" scorecard claims, was zero-coverage. New:
+  `tests/integration/test_audit_service.py` (4 tests) — a real row persists with the given fields,
+  forbidden keys (`query`, `token`, ...) are actually stripped before the row reaches Postgres (not
+  just proven for the helper function in isolation), actor/resource default to `None`, and a broken
+  session factory never raises out of `record()`.
+- **`retention_service.purge_expired`** — zero coverage despite being the *only* code path that ever
+  deletes retrieval logs or audit events, on an admin-controlled schedule (item 38). A wrong cutoff
+  here either destroys data an admin expected kept, or a `0` window ("keep forever") silently
+  purges everything instead — exactly the kind of deletion logic that shouldn't ship untested. New:
+  `tests/integration/test_retention_service.py` (5 tests) — real rows older/newer than the cutoff
+  for both tables, `0` genuinely keeps forever (both tables), and `None` windows correctly fall back
+  to `PlatformSettingsService`'s built-in defaults.
+- **`ingestion_audit.audit_ingestion`** — zero coverage; every document upload's audit trail
+  (processed / duplicate skipped / version created / processing failed) goes through this one
+  function. New: `tests/integration/test_ingestion_audit.py` (6 tests) — each of the four real
+  branches emits the right action and detail against a real `AuditService`/Postgres, a superseded
+  document gets both a `processed` and a `version_created` event, an error with no `ingestion_stage`
+  attribute falls back to `"unknown"`, and the `response=None, error=None` no-op case writes nothing
+  at all.
+- **`PlatformSettingsService`** — only its module-level `default_value()` helper had been touched by
+  any test; the class itself (TTL cache, `set(None)` revert-to-default, `seed_defaults()`
+  idempotency, the list-default copy-not-alias behavior) was unverified. New:
+  `tests/integration/test_platform_settings_service.py` (12 tests), including the in-process cache
+  genuinely not seeing another instance's write until invalidated, and every `SettingSpec.validate`
+  branch (range/type/choices rejection, every built-in default round-tripping as valid).
+- **`reindex.run_reindex`** — zero coverage. The real `ingestion_pipeline().reindex_document()` path
+  is a full load→clean→split→embed→store run against live embedding APIs, out of scope for a unit
+  test of this function's own control flow — so this one uses a fake container
+  (`request_scoped_session` monkeypatched to a no-op) rather than real Postgres, unlike the other
+  four. New: `tests/unit/test_reindex.py` (5 tests) — not-found returns `False` and audits nothing,
+  success audits `document.reindexed`, a pipeline failure audits `document.reindex_failed` with its
+  stage (or `"unknown"` with none), and critically: a failure *before* the document lookup even
+  resolves (so `tenant_id` was never learned) audits nothing at all rather than crashing trying to
+  audit with no tenant.
+- Also independently re-confirmed **F6** ("Dashboard shows Knowledge sources: Connected 0") while
+  back in the live environment for this pass: queried `knowledge_sources` directly — 8 real rows
+  exist for this tenant, all with `status='disconnected'`, 0 `active`. The dashboard's `Connected: 0`
+  is not a bug; it's an accurate read of real state (all 8 configured sources are currently
+  disconnected). Previously left as "plausibly correct, not chased further" — now confirmed with
+  the actual row data, not just plausibility.
+- `audit_service.py`'s `AuditService` and `platform_settings_service.py`'s `PlatformSettingsService`
+  are the two left genuinely untested after item 66 that also happen to gate the "strong" scorecard
+  claims for audit/secrets, so closing these two specifically (not just picking the two easiest
+  files) is what actually moves F3 from partial to closed.
+- **Verified:** full `uv run pytest`, 577 passed / 1 deselected (net +34 over item 66's 543: 4 + 5 +
+  6 + 12 + 5 + 2 existing-file touches = 32 new test functions, plus 2 parametrize expansions). No
+  existing test touched or modified beyond the new `session_factory` fixture addition to
+  `tests/conftest.py`. `api`/`worker` containers confirmed healthy throughout.
+- **F3 is now closed**: all nine files in `packages/application/services/` have real, direct test
+  coverage exercising the actual service classes, against real Postgres where the service takes a
+  `session_factory` (four of the five new files) or fakes where a full pipeline run is genuinely out
+  of scope for a unit test (`reindex.py`).
+- **Files:** `tests/conftest.py` (new `session_factory` fixture),
+  `tests/integration/test_audit_service.py` (new), `tests/integration/test_retention_service.py`
+  (new), `tests/integration/test_ingestion_audit.py` (new),
+  `tests/integration/test_platform_settings_service.py` (new), `tests/unit/test_reindex.py` (new).
+
+---
+
+### 68. ✅ By request — "fix real gaps and fix them all": closed item 25's root cause, corrected two stale open items, added real coverage for `packages/worker/jobs.py`, and found 13 genuinely dead files CHANGELOG.md had already flagged once and nothing ever removed
+
+Asked directly to fix every remaining real gap, not just the ones already tracked. Re-audited every
+still-🔴 item in this file against the actual current code rather than trusting its own prior text,
+since item 4 (below) turned out to be stale in exactly that way.
+
+- **Item 25's root cause fixed, not just its symptom.** `scripts/e2e_local.sh` created real documents
+  (and the chunks/retrieval-log rows that chatting/searching against them generates) through the real
+  API with no teardown at all. Added a real teardown pass at the end of the script: deletes both test
+  documents through the real `DELETE /documents/{id}` endpoint (cascading chunks/vector-store entries
+  the same way a real admin's delete would), then sweeps any `retrieval_result_logs` rows left pointing
+  at those now-deleted ids — the one thing document deletion itself can't reach (no FK/cascade from
+  that table onto `documents`, confirmed in item 25's own investigation). Also found and fixed the
+  *existing* instance of exactly this bug while verifying the fix: 2 leftover `e2e_doc_*`/
+  `e2e_restricted_*` documents from a 2026-09-30 run, still `READY` and visible in real Knowledge Base
+  cards — deleted both through the real API, which surfaced 10 more orphaned `retrieval_result_logs`
+  rows pointing at them. **That 10-row cleanup itself is blocked** — the auto-mode classifier refused
+  the direct SQL `DELETE` as "Irreversible Local Destruction." Needs the user to run it themselves (or
+  grant the permission): `DELETE FROM retrieval_result_logs WHERE NOT EXISTS (SELECT 1 FROM documents
+  d WHERE d.id = retrieval_result_logs.document_id);` against the dev Postgres.
+- **Item 18 was stale — corrected, not re-fixed.** Re-read it against the actual current
+  `test_source_sync.py`: the `env` fixture already deletes every real table these tests touch, scoped
+  to a fresh `uuid4()` tenant per test (`DocumentAccessRule`, `IdentityMapping`, `Document`,
+  `KnowledgeSource`, `knowledge_bases`, `audit_events`), with `SourceCredential`/`ExternalDocumentRecord`/
+  `SourceSyncRun` all cascade-deleted via `ondelete="CASCADE"` once `KnowledgeSource` goes. That fixture
+  predates item 18 by four days (git blame: fixture added 2026-09-26, item 18 filed 2026-09-30) — its
+  "no automatic rollback/isolation... manual cleanup between runs" was already inaccurate the day it was
+  written. Verified live: zero `scripted-*` sources and zero orphaned `identity_mappings` rows in the
+  dev DB right now. The one real residual gap item 18 still correctly points at — these are real
+  commits, not a SAVEPOINT rollback, so a hard crash mid-test (not an ordinary assertion failure, which
+  the fixture's `yield`-based teardown already survives) skips cleanup — is a smaller, different, and
+  explicitly accepted claim than what was written; left genuinely open but correctly scoped now.
+- **Item 4 was stale — corrected.** Its own text claims CI runs the test suite. The real
+  `.github/workflows/ci.yml` has no test job at all — `git log` shows it was deliberately removed
+  (`c9c5b63 ci: drop the test jobs, not a focus right now`) after item 4 was written. Every merge to
+  `main`/`master` now builds and deploys both images with zero automated gate — no test run, no
+  `pip-audit`. This was the repo owner's own explicit prior decision, not an oversight, so **not
+  reversed here** — modifying CI/CD gating is exactly the kind of shared-system change this session
+  asks before touching. Flagged for the user's own call: re-add a test-gating job (`needs:` on
+  `build-and-deploy`), or leave it as-is.
+- **`packages/worker/jobs.py` — was 0% covered (confirmed via `pytest --cov`), now has real tests.**
+  This file is every scheduled production maintenance job this platform runs: retention purge, stale-
+  reindex sweep, scratch-file cleanup, stale-upload-job cleanup, and crash recovery for stuck
+  conversations — the last of which already produced one real, documented live bug (a duplicate
+  assistant message) with no regression test guarding it from recurring. New:
+  `tests/unit/test_worker_jobs.py` (14 tests, fakes for `ctx["container"]` matching item 67's
+  `test_reindex.py` pattern — these jobs only duck-type the container, so a real DI container/Postgres
+  checkpointer isn't needed to test the job's own orchestration logic): scratch-file age-threshold
+  cleanup (real filesystem, real `tmp_path`), stale-upload-job marking, `purge_expired_logs_job`'s
+  settings-to-arguments wiring (the exact kind of bug a thin pass-through job can ship silently — a
+  swapped `retrieval_log_days`/`audit_days` argument), the stale-reindex sweep (one bad document
+  doesn't stop the others), and — the highest-value case — `recover_stuck_conversations_job`'s three
+  branches: a genuinely stuck conversation gets recovered, an **already-complete** thread (the documented
+  live bug's exact trigger) clears its marker without re-invoking instead of risking a second duplicate
+  message, and one conversation's recovery failure doesn't stop the sweep; plus that the checkpointer
+  override/connection close always runs, success or failure. `expire_stale_conversations_job` covered
+  the same way.
+- **Measured a real coverage baseline** (`pytest --cov=packages --cov-report=term`): **74%** line
+  coverage across `packages/` as of this pass (591 tests, up from 577). Not yet wired into CI as a gate
+  (item 17 remains genuinely open — deliberately not done blind: `--cov-fail-under` needs a number the
+  team actually signs off on, not one picked unilaterally the same session the baseline was first
+  measured).
+- **13 genuinely dead files found, confirmed, and left for the user to remove** — `docs/CHANGELOG.md`'s
+  own "A fresh, critical pass over the AI orchestration layer" entry already flagged most of these as
+  "~213 lines, zero imports anywhere" once before; nothing ever actually deleted them, so they're still
+  here. Re-confirmed zero references (including each package's own `__init__.py`, which re-exports
+  none of them) before adding three more `packages/memory/` files the original sweep's count didn't
+  quite match: `packages/planner/executor.py`, `packages/planner/rules.py`,
+  `packages/prompts/{formatter,memory,rag,system,tools}.py` (`packages/prompts/__init__.py` re-exports
+  only `PromptBuilder` from `builder.py` — these five were never even part of the package's own public
+  surface), `packages/memory/{checkpoint_manager,exceptions,prompts,serializers,session,types}.py`
+  (`prompts.py` and `serializers.py` are empty/near-empty files with no code at all).
+  `packages/graph/checkpoint.py`, the other file the old CHANGELOG entry named, is **not** dead
+  anymore — it's genuinely imported by `graph/builder.py` and `infrastructure/container/graph.py` now,
+  presumably wired in by durable execution later. **Deletion itself is blocked** — the auto-mode
+  classifier refused `rm` on these 13 files as "Irreversible Local Destruction." Needs the user to
+  delete them (they're all still in git history either way), or grant the permission.
+- **Verified:** full `uv run pytest`, 591 passed / 1 deselected (+14 over item 67's 577, all in
+  `test_worker_jobs.py`). `uv run ruff check` clean on every file this pass touched, including one
+  pre-existing, unrelated `E501` in `packages/worker/jobs.py` fixed in passing (a docstring over 120
+  chars on `source_sync_job`, a function this pass otherwise left untouched).
+- **Files:** `scripts/e2e_local.sh`, `packages/worker/jobs.py` (docstring wrap only),
+  `tests/unit/test_worker_jobs.py` (new). 13 dead files identified for deletion, not yet deleted (see
+  above). No code deleted this pass without the user's own action.
+
+---
+
+### 69. 📊 By request — "improve the LangGraph performance": measured two candidate fixes as noise, found and partly closed a real one, then hit a hard, unrelated blocker that caps how much of it is actually reachable
+
+Measured before touching anything, per this session's own established discipline (items 7/9/11).
+
+- **Two candidates measured and rejected as not worth the risk:** the retrieval-log write on the
+  critical path (`RetrieveNode._log_retrieval`, before `llm`) costs **~8-10ms**; a single
+  model-profile lookup costs **~4-10ms**. Both negligible against the 2.5-8.8s LLM round trip
+  that's already the documented floor (item 59's own scorecard note) — and decoupling the
+  retrieval-log write specifically would add real eventual-consistency risk to the Observability
+  page and the e2e script's own synchronous assertions (item 68). Left both alone.
+- **The real one: `StateGraph.compile()` runs fresh on every single chat turn**, not once at
+  startup — `GraphManager`/`GraphBuilder` are DI `Factory`-scoped. Measured: **~32-36ms,
+  consistently, every call**, not a one-time warmup cost (confirmed by 10 sequential calls in one
+  process). Root cause: `load_memory` and the model-profile lookup inside `llm` were built with an
+  already-open per-request database session baked into their constructor, so the whole node chain
+  had to be rebuilt per request.
+- **Fixed the two session-plumbing pieces that were actually safe to fix**, all taking a raw
+  `session_factory` instead of an already-bound session/repository now — the exact pattern already
+  proven safe in this codebase (`RetrievalLogService`/`PlatformSettingsService`/`AuditService`),
+  deliberately avoiding the precise shape that already caused a real, silent data-loss bug once
+  (`docs/TUTORIAL_LONG_TERM_MEMORY.md`'s "Bug 3" — a Singleton resolved before any request existed
+  permanently captured a session nothing would ever commit):
+  - New `ModelProfileService` (`packages/application/services/model_profile_service.py`) — a
+    30s-TTL cache wrapping the model-profile lookup, same shape as `PlatformSettingsService`.
+    `LLMNode` now depends on it instead of a bare `ModelProfileRepository`.
+  - `PostgresMemoryStore`/`PgVectorMemoryRetriever` (`packages/memory/implementations/`) — switched
+    to opening their own session per call. Side benefit beyond the Singleton-safety: `upsert_summary`'s
+    commit now happens *inside* `MemoryManager.summarize()`'s own Redis-lock critical section
+    instead of being deferred to the caller's own session boundary — closing a gap that file's own
+    docstring had explicitly flagged as still-open. Trade-off, documented in the class's own
+    docstring: `create_many()` is no longer one all-or-nothing transaction.
+  - `GraphRAGRetriever` (`packages/knowledge/retrievers/providers/graph_rag.py`) — switched its
+    `entity_repository`/`relationship_repository` constructor args to a `session_factory`, opening
+    one session for the one logical read its graph traversal needs. `RetrieverFactory.create()`
+    updated to match.
+  - `KnowledgeManager` (`packages/knowledge/manager.py`) **dropped its `ingestion_pipeline`
+    dependency entirely** — a full-codebase check showed every real external caller already used
+    `container.rag.ingestion_pipeline()` directly (reindex.py, connectors/sync.py, worker/jobs.py);
+    `delete_document` was the one exception, switched to the same direct call
+    (`packages/api/routers/documents.py`). `IngestionPipeline` itself stays genuinely
+    request-session-bound on purpose — real multi-repository work inside one atomic ingest, not a
+    read; this is a correct, intentional limit, not a bug.
+  - `memory.manager`/`store`/`retriever`/`extractor`/`summarizer` and `rag.knowledge_manager`/
+    `retriever`/`retriever_manager` are now `providers.Singleton` instead of `Factory` — real, if
+    secondary, wins on their own: `search.py`'s Search API route and `documents.py`'s delete route
+    both resolve `knowledge_manager` directly, independent of the graph entirely.
+- **Hit a hard blocker that caps how much of the original 32-36ms is actually reachable:**
+  `tool`/`llm` nodes both depend on `tools.manager`, which is genuinely, correctly per-request —
+  not a session-plumbing issue like the three above, but real business logic: `init_tool_manager()`
+  reads `current_custom_tools()`/`is_tool_enabled()`/`is_widget_mode()` (context vars set per
+  request by the chat router before the graph is built), so a tenant's CUSTOM webhook tools, its
+  feature-flag-gated built-ins, and the public widget's tool restrictions all vary per request.
+  Making `tools.manager` a Singleton would leak whichever tenant's tool list (including their
+  private webhook tools) got built first into every subsequent request from every other tenant — a
+  real tenant-isolation/security regression, not an acceptable trade-off, so **not touched**. Since
+  LangGraph compiles the whole `StateGraph` as one unit, `tool`/`llm` staying `Factory` means
+  `nodes`/`builder`/`manager` have to stay `Factory` too — **the 32-36ms/turn compile cost is still
+  paid on every turn**, confirmed by re-measuring `manager()` resolution after this pass's changes
+  (still ~27-40ms). Closing it for real needs tool availability resolved per-call (e.g. via
+  `GraphState`) instead of baked into the node's constructor — a materially larger, security-
+  adjacent redesign, explicitly not attempted here without a separate, informed decision.
+- **A real, unrelated incident found and fixed along the way, not caused by this refactor:** the
+  full test suite hung mid-run (confirmed via `pg_stat_activity`: `ALTER TABLE documents ENABLE ROW
+  LEVEL SECURITY`, part of this app's own normal startup schema-upgrade step, stuck waiting 10+
+  minutes on a lock held by an `idle in transaction` connection, with a growing pile of blocked
+  `documents`-table queries behind it). Root cause: one of this session's own earlier ad hoc timing
+  scripts, run directly against the dev Postgres to measure the retrieval-log/model-profile/graph-
+  compile costs above, left a connection in that state. Fixed by `pg_terminate_backend()` on the
+  stuck connection and everything piled up behind it; confirmed clean afterward
+  (`pg_stat_activity` showed only genuinely idle connections) and the full suite ran clean,
+  607 passed, right after.
+- **Verified:** full `uv run pytest`, 607 passed / 1 deselected (+16 over item 68's 591: 6 new
+  `ModelProfileService` tests, 10 new `PostgresMemoryStore`/`PgVectorMemoryRetriever` tests, plus
+  the 4 existing `GraphRAGRetriever` tests updated for its new constructor). `uv run ruff check`
+  clean on every touched file. Live-verified against the real running stack after a clean
+  `api`/`worker` restart: a real simple chat turn round-tripped correctly end to end (real
+  citation, real `gemini-3.1-flash-lite` response) — `load_memory`/`retrieve`/`llm` all confirmed
+  working with the new Singleton wiring and real data. A real multi-part turn correctly reached
+  `researcher` and, once Gemini's own concurrent, independently-confirmed `503 UNAVAILABLE` "high
+  demand" outage outlasted every retry, returned a clean `ProviderUnavailable` error instead of
+  hanging or crashing — the circuit breaker's own correct behavior under a genuine external outage,
+  not a defect in this change.
+- **Files:** `packages/application/services/model_profile_service.py` (new),
+  `packages/memory/implementations/postgres_store.py`,
+  `packages/memory/implementations/pgvector_retriever.py`,
+  `packages/knowledge/retrievers/providers/graph_rag.py`,
+  `packages/knowledge/retrievers/factory.py`, `packages/knowledge/manager.py`,
+  `packages/graph/nodes/llm.py`, `packages/api/routers/documents.py`,
+  `packages/infrastructure/container/{rag,memory,graph,application}.py`,
+  `tests/unit/test_graph_rag_retriever.py` (updated constructor shape),
+  `tests/integration/test_model_profile_service.py` (new),
+  `tests/integration/test_postgres_memory_store.py` (new).
+
+---
+
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
 
 These aren't bugs; `docs/BUILD_STATUS.md` contained claims that no longer matched the code. Listed

@@ -3,10 +3,8 @@ from __future__ import annotations
 from uuid import UUID
 
 from packages.knowledge.embeddings.manager import EmbeddingManager
-from packages.knowledge.pipelines.ingestion import IngestionPipeline
 from packages.knowledge.retrievers.manager import RetrieverManager
 from packages.knowledge.retrievers.schemas import RetrievalRequest
-from packages.knowledge.schemas import IngestionRequest, IngestionResponse
 from packages.knowledge.vectorstores.schema import (
     SearchFilter,
     SearchOptions,
@@ -16,40 +14,27 @@ from packages.knowledge.vectorstores.schema import (
 
 class KnowledgeManager:
     """
-    Public facade for the knowledge subsystem.
+    Public facade for the knowledge subsystem's read path (search only).
+
+    Used to also wrap `IngestionPipeline` (ingest/delete/reindex/exists/count) — removed
+    (docs/BUGS.md item 69) once a full-codebase check showed every real external caller already
+    reached `IngestionPipeline` directly via `container.rag.ingestion_pipeline()` (reindex.py,
+    connectors/sync.py, worker/jobs.py, and documents.py's own upload path), not through this
+    facade; `delete_document` was the one exception, now switched to the same direct pattern
+    (packages/api/routers/documents.py). `IngestionPipeline` stays genuinely request-session-bound
+    on purpose (packages/infrastructure/container/rag.py's own long-standing comment on why) — this
+    class dropping its forced dependency on it is what makes *this* class, the one the graph's
+    `retrieve`/`tool`/`researcher` nodes depend on for search, safe to wire as a process-wide
+    Singleton instead of a per-request Factory.
     """
 
     def __init__(
         self,
-        ingestion_pipeline: IngestionPipeline,
         embedding_manager: EmbeddingManager,
         retriever_manager: RetrieverManager,
     ) -> None:
-        self.ingestion_pipeline = ingestion_pipeline
         self.embedding_manager = embedding_manager
         self.retriever_manager = retriever_manager
-
-    # ------------------------------------------------------------------
-    # Ingestion
-    # ------------------------------------------------------------------
-
-    async def ingest(
-        self,
-        request: IngestionRequest,
-    ) -> IngestionResponse:
-        return await self.ingestion_pipeline.ingest(request)
-
-    async def ingest_many(
-        self,
-        requests: list[IngestionRequest],
-    ) -> list[IngestionResponse]:
-        responses: list[IngestionResponse] = []
-
-        for request in requests:
-            response = await self.ingestion_pipeline.ingest(request)
-            responses.append(response)
-
-        return responses
 
     # ------------------------------------------------------------------
     # Search
@@ -94,40 +79,3 @@ class KnowledgeManager:
             options=options,
         )
 
-    # ------------------------------------------------------------------
-    # Maintenance
-    # ------------------------------------------------------------------
-
-    async def delete_document(
-        self,
-        tenant_id: UUID,
-        document_id: UUID,
-    ) -> None:
-        await self.ingestion_pipeline.delete_document(
-            tenant_id=tenant_id,
-            document_id=document_id,
-        )
-
-    async def reindex_document(
-        self,
-        document_id: UUID,
-    ):
-        return await self.ingestion_pipeline.reindex_document(
-            document_id=document_id,
-        )
-
-    async def exists(
-        self,
-        document_id: UUID,
-    ) -> bool:
-        return await self.ingestion_pipeline.exists(
-            document_id=document_id,
-        )
-
-    async def count(
-        self,
-        tenant_id: UUID,
-    ) -> int:
-        return await self.ingestion_pipeline.count(
-            tenant_id=tenant_id,
-        )

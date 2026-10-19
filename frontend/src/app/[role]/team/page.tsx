@@ -120,9 +120,9 @@ export default function TeamPage() {
         <CardHeader>
           <CardTitle>Members</CardTitle>
           <CardDescription>
-            Real accounts in this workspace — IAM is the system of record, this doesn't show which
-            specific role each member holds (a separate, real limit worth being upfront about: the
-            list endpoint doesn't return it, only membership).
+            Real accounts in this workspace — IAM is the system of record, this doesn&apos;t show
+            which specific role each member holds (a separate, real limit worth being upfront
+            about: the list endpoint doesn&apos;t return it, only membership).
           </CardDescription>
         </CardHeader>
         <CardContent>

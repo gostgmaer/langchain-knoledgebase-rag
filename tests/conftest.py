@@ -146,11 +146,21 @@ async def db_session(container: ApplicationContainer) -> AsyncIterator[AsyncSess
     (packages/infrastructure/database/session.py's `resolve_session`), so
     any repository/service resolved through `container` during the test
     transparently shares this one session instead of opening its own.
+
+    `expire_on_commit=False`, matching `create_session_factory`'s real
+    production session exactly (docs/BUGS.md F3) — without it, this
+    fixture's session behaves differently from every real request's:
+    any service that commits and then immediately reads an attribute off
+    the object it just committed (e.g. ConversationService.create()
+    building its Pydantic response right after `await self._uow.commit()`)
+    hits a `MissingGreenlet` error here that can never happen against the
+    real session, since SQLAlchemy would otherwise expire and try to
+    lazily reload that attribute outside of an active greenlet context.
     """
     engine = container.database.engine()
     connection = await engine.connect()
     trans = await connection.begin()
-    session = AsyncSession(bind=connection, join_transaction_mode="create_savepoint")
+    session = AsyncSession(bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False)
 
     token = current_session.set(session)
     try:
@@ -160,6 +170,37 @@ async def db_session(container: ApplicationContainer) -> AsyncIterator[AsyncSess
         await session.close()
         await trans.rollback()
         await connection.close()
+
+
+class _SameSessionFactory:
+    """
+    Adapts a single already-open `db_session` into the `session_factory` callable shape
+    (`Callable[[], AsyncSession] | async_sessionmaker`) that services like AuditService,
+    PlatformSettingsService and retention_service.purge_expired take — calling it returns an
+    async context manager yielding the *same* session every time, so a service's own internal
+    `async with self._session_factory() as session: ... await session.commit()` still lands on
+    the one connection the `db_session` fixture is wrapping in a rolled-back outer transaction,
+    instead of opening a second, unrelated connection that would see none of the test's setup
+    and whose own commit would need its own rollback.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    def __call__(self) -> _SameSessionFactory:
+        return self
+
+    async def __aenter__(self) -> AsyncSession:
+        return self._session
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
+@pytest_asyncio.fixture
+def session_factory(db_session: AsyncSession) -> _SameSessionFactory:
+    """A `session_factory` for services that take one, bound to the test's real `db_session`."""
+    return _SameSessionFactory(db_session)
 
 
 @pytest_asyncio.fixture

@@ -3,10 +3,17 @@ GraphRAGRetriever (packages/knowledge/retrievers/providers/graph_rag.py)
 — pure logic tests against a fake inner retriever, fake vector store,
 and fake entity/relationship repositories. No real DB/Chroma, mirroring
 tests/unit/test_multi_vector_retriever.py's fake-collaborator structure.
+
+Since docs/BUGS.md item 69, GraphRAGRetriever takes a `session_factory` and constructs
+EntityRepository/RelationshipRepository itself inside retrieve() rather than taking them as
+constructor arguments — monkeypatch those two names in the module's own namespace to return the
+fakes regardless of the (unused-by-the-fakes) session object, same pattern as
+tests/unit/test_reindex.py's `request_scoped_session` monkeypatch.
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import pytest
@@ -14,6 +21,7 @@ import pytest
 from packages.domain.models.document_chunk import DocumentChunk
 from packages.domain.models.entity import Entity
 from packages.domain.models.relationship import Relationship
+from packages.knowledge.retrievers.providers import graph_rag as graph_rag_module
 from packages.knowledge.retrievers.providers.graph_rag import GraphRAGRetriever
 from packages.knowledge.retrievers.schemas import RetrievalRequest
 from packages.knowledge.vectorstores.schema import SearchFilter, SearchResult
@@ -99,6 +107,17 @@ class _FakeRelationshipRepository:
         ]
 
 
+@asynccontextmanager
+async def _null_session():
+    yield None
+
+
+def _retriever(inner, store, entities: _FakeEntityRepository, relationships: _FakeRelationshipRepository, monkeypatch):
+    monkeypatch.setattr(graph_rag_module, "EntityRepository", lambda _session: entities)
+    monkeypatch.setattr(graph_rag_module, "RelationshipRepository", lambda _session: relationships)
+    return GraphRAGRetriever(inner, store, session_factory=lambda: _null_session())
+
+
 def _request(query: str = "a real query", document_id=None) -> RetrievalRequest:
     return RetrievalRequest(
         query_embedding=[0.1],
@@ -108,7 +127,7 @@ def _request(query: str = "a real query", document_id=None) -> RetrievalRequest:
 
 
 @pytest.mark.asyncio
-async def test_no_entity_match_returns_only_the_inner_retrievers_results():
+async def test_no_entity_match_returns_only_the_inner_retrievers_results(monkeypatch):
     document_id = uuid4()
     match = _chunk(document_id, 0, "an ordinary chunk")
 
@@ -117,7 +136,7 @@ async def test_no_entity_match_returns_only_the_inner_retrievers_results():
     entities = _FakeEntityRepository([_entity("Unrelated Co")], {})
     relationships = _FakeRelationshipRepository([])
 
-    retriever = GraphRAGRetriever(inner, store, entities, relationships)
+    retriever = _retriever(inner, store, entities, relationships, monkeypatch)
     results = await retriever.retrieve(_request(query="tell me about something else"))
 
     assert len(results) == 1
@@ -126,7 +145,7 @@ async def test_no_entity_match_returns_only_the_inner_retrievers_results():
 
 
 @pytest.mark.asyncio
-async def test_matched_entity_with_a_neighbor_pulls_in_an_extra_document():
+async def test_matched_entity_with_a_neighbor_pulls_in_an_extra_document(monkeypatch):
     seed_document_id = uuid4()
     neighbor_document_id = uuid4()
     seed_chunk = _chunk(seed_document_id, 0, "chunk about Acme Corp")
@@ -144,7 +163,7 @@ async def test_matched_entity_with_a_neighbor_pulls_in_an_extra_document():
     )
     relationships = _FakeRelationshipRepository([edge])
 
-    retriever = GraphRAGRetriever(inner, store, entities, relationships)
+    retriever = _retriever(inner, store, entities, relationships, monkeypatch)
     results = await retriever.retrieve(_request(query="What does Acme Corp do?"))
 
     result_chunks = {result.chunk.id for result in results}
@@ -154,7 +173,7 @@ async def test_matched_entity_with_a_neighbor_pulls_in_an_extra_document():
 
 
 @pytest.mark.asyncio
-async def test_document_already_covered_by_the_inner_retriever_is_not_refetched():
+async def test_document_already_covered_by_the_inner_retriever_is_not_refetched(monkeypatch):
     document_id = uuid4()
     chunk = _chunk(document_id, 0, "chunk about Acme Corp")
 
@@ -165,7 +184,7 @@ async def test_document_already_covered_by_the_inner_retriever_is_not_refetched(
     entities = _FakeEntityRepository([acme], {acme.id: document_id})
     relationships = _FakeRelationshipRepository([])
 
-    retriever = GraphRAGRetriever(inner, store, entities, relationships)
+    retriever = _retriever(inner, store, entities, relationships, monkeypatch)
     results = await retriever.retrieve(_request(query="What does Acme Corp do?"))
 
     assert len(results) == 1
@@ -173,7 +192,7 @@ async def test_document_already_covered_by_the_inner_retriever_is_not_refetched(
 
 
 @pytest.mark.asyncio
-async def test_document_id_already_scoped_skips_graph_expansion_entirely():
+async def test_document_id_already_scoped_skips_graph_expansion_entirely(monkeypatch):
     document_id = uuid4()
     chunk = _chunk(document_id, 0, "chunk about Acme Corp")
 
@@ -182,7 +201,7 @@ async def test_document_id_already_scoped_skips_graph_expansion_entirely():
     entities = _FakeEntityRepository([_entity("Acme Corp")], {})
     relationships = _FakeRelationshipRepository([])
 
-    retriever = GraphRAGRetriever(inner, store, entities, relationships)
+    retriever = _retriever(inner, store, entities, relationships, monkeypatch)
     results = await retriever.retrieve(_request(query="What does Acme Corp do?", document_id=document_id))
 
     assert len(results) == 1

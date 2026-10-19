@@ -13,19 +13,30 @@ from .models import (
     ExecutionPlan,
     ExecutionStep,
 )
-from .rules import RETRIEVAL_KEYWORDS
 
 logger = get_logger(__name__)
 
 
 class GraphPlanner:
     """
-    Decides whether this turn needs retrieval, and (when a
-    QueryAnalyzer is available) rewrites/expands the query via a real
-    LLM call. Falls back to rule-based keyword matching whenever the
-    analyzer is absent or its call fails — a classifier hiccup should
-    never crash a turn, so retrieval routing degrades to the original
-    substring-match behavior rather than raising.
+    Builds this turn's execution plan. Retrieval runs on every turn,
+    by design — the model must ground every answer in the knowledge
+    base rather than ever falling back to its own training knowledge
+    (docs/BUGS.md item 57). When a QueryAnalyzer is available, it still
+    rewrites the query to resolve pronouns/context from conversation
+    history and generates expansion variants to widen recall; a
+    classifier hiccup here only costs query-rewriting quality — it
+    never skips retrieval itself, since RetrieveNode already falls
+    back to the raw message when no rewritten_query is set.
+
+    Also decides whether the turn is genuinely multi-part (docs/BUGS.md
+    item 63) — SupervisorNode's old, separate structured-output call,
+    folded into this same QueryAnalyzer call instead of a second
+    concurrent LLM round-trip. Same hard fail-open guarantee
+    SupervisorNode had: any analyzer error, a missing analyzer, or a
+    response claiming is_multi_part=True with zero real sub-questions
+    all collapse to is_multi_part=False — this must never crash and
+    must never route into Researcher with nothing to research.
     """
 
     def __init__(
@@ -53,39 +64,43 @@ class GraphPlanner:
         )
 
         #
-        # Retrieval — LLM-backed classification/rewriting/expansion,
-        # falling back to keyword matching on any failure.
+        # Retrieval — always runs. Query rewriting/expansion is
+        # LLM-backed when a QueryAnalyzer is available; on any failure
+        # it's simply skipped, not treated as a reason to skip
+        # retrieval itself.
         #
 
-        result: dict = {}
-        needs_retrieval = False
+        result: dict = {
+            # Hard fail-open default (SupervisorNode's old guarantee) —
+            # overwritten below only on a genuinely successful,
+            # sensible analysis. Never left unset: no analyzer
+            # configured must behave exactly like an analyzer that
+            # failed, not like multi-part was never decided.
+            "is_multi_part": False,
+            "sub_questions": [],
+        }
 
         if self._analyzer is not None:
             try:
                 analysis = await self._analyzer.analyze(state["messages"])
-                needs_retrieval = analysis.needs_retrieval
                 result["rewritten_query"] = analysis.rewritten_query
                 result["expanded_queries"] = analysis.expanded_queries
+
+                is_multi_part = analysis.is_multi_part and bool(analysis.sub_questions)
+                result["is_multi_part"] = is_multi_part
+                result["sub_questions"] = analysis.sub_questions if is_multi_part else []
             except Exception as exc:
                 logger.warning(
-                    "Query analysis failed, falling back to keyword matching",
+                    "Query analysis failed, retrieval will use the raw message and the single-question path",
                     error=str(exc),
                 )
 
-        if self._analyzer is None or "rewritten_query" not in result:
-            message = state["messages"][-1].content.lower()
-            needs_retrieval = any(
-                keyword in message
-                for keyword in RETRIEVAL_KEYWORDS
+        plan.steps.append(
+            ExecutionStep(
+                capability=Capability.RETRIEVAL,
+                reason="Every turn is grounded in the knowledge base, by design.",
             )
-
-        if needs_retrieval:
-            plan.steps.append(
-                ExecutionStep(
-                    capability=Capability.RETRIEVAL,
-                    reason="Knowledge lookup required.",
-                )
-            )
+        )
 
         #
         # Final response

@@ -1,7 +1,10 @@
 # graph_rag.py
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from packages.domain.models.entity import Entity
 from packages.infrastructure.repositories.entity import EntityRepository
@@ -50,19 +53,30 @@ class GraphRAGRetriever(BaseRetriever):
     "resolve a signal back to real chunk content" pattern. The graph
     traversal itself is never returned as literal context, only real
     chunk content is.
+
+    Takes a raw `session_factory` rather than already-bound `EntityRepository`/
+    `RelationshipRepository` instances (docs/BUGS.md item 69) — opens one session for the whole
+    graph-traversal portion of one `retrieve()` call (all three repository reads below share it;
+    they're a single logical read, not independent operations needing their own sessions), then
+    closes it before the per-document vector-store lookups that follow. This is what makes the
+    class safe to wire as a process-wide Singleton instead of a per-request Factory: the previous
+    already-bound-repository shape is exactly the pattern that already caused a real, silent
+    data-loss bug once in this app when something depending on it got wired as Singleton before a
+    session existed to bind (docs/TUTORIAL_LONG_TERM_MEMORY.md's "Bug 3") — a `session_factory`
+    closure has nothing to capture. `EntityRepository`/`RelationshipRepository` themselves are
+    unchanged and still used exactly this way, request-session-bound, by the ingestion pipeline
+    (packages/knowledge/pipelines/ingestion.py) — only how *this* class obtains them changes.
     """
 
     def __init__(
         self,
         inner: BaseRetriever,
         vector_store: VectorStoreManager,
-        entity_repository: EntityRepository,
-        relationship_repository: RelationshipRepository,
+        session_factory: Callable[[], AsyncSession] | async_sessionmaker,
     ) -> None:
         self._inner = inner
         self._vector_store = vector_store
-        self._entities = entity_repository
-        self._relationships = relationship_repository
+        self._session_factory = session_factory
 
     async def retrieve(
         self,
@@ -87,21 +101,26 @@ class GraphRAGRetriever(BaseRetriever):
         if not request.query.strip() or request.filters.document_id is not None:
             return list(deduped.values())
 
-        tenant_entities = await self._entities.list_by_tenant(request.filters.tenant_id)
-        seed_entities = _match_entities(request.query.lower(), tenant_entities, _ENTITY_MATCH_LIMIT)
+        async with self._session_factory() as session:
+            entities = EntityRepository(session)
+            relationships = RelationshipRepository(session)
 
-        if not seed_entities:
-            return list(deduped.values())
+            tenant_entities = await entities.list_by_tenant(request.filters.tenant_id)
+            seed_entities = _match_entities(request.query.lower(), tenant_entities, _ENTITY_MATCH_LIMIT)
 
-        seed_ids = [entity.id for entity in seed_entities]
-        neighbor_relationships = await self._relationships.list_neighbors(seed_ids)
+            if not seed_entities:
+                return list(deduped.values())
 
-        expanded_ids = set(seed_ids)
-        for relationship in neighbor_relationships:
-            expanded_ids.add(relationship.source_entity_id)
-            expanded_ids.add(relationship.target_entity_id)
+            seed_ids = [entity.id for entity in seed_entities]
+            neighbor_relationships = await relationships.list_neighbors(seed_ids)
 
-        document_ids = await self._entities.list_mentioned_document_ids(list(expanded_ids))
+            expanded_ids = set(seed_ids)
+            for relationship in neighbor_relationships:
+                expanded_ids.add(relationship.source_entity_id)
+                expanded_ids.add(relationship.target_entity_id)
+
+            document_ids = await entities.list_mentioned_document_ids(list(expanded_ids))
+
         already_covered = {result.chunk.document_id for result in deduped.values()}
 
         for document_id in document_ids:

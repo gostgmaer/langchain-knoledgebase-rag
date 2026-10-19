@@ -4,6 +4,10 @@ packages/memory/implementations/pgvector_retriever.py
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from packages.domain.models.memory import Memory as MemoryRow
 from packages.infrastructure.repositories.memory import MemoryRepository
 from packages.knowledge.embeddings.manager import EmbeddingManager
@@ -21,14 +25,19 @@ class PgVectorMemoryRetriever(MemoryRetriever):
     Retrieves long-term memories from the dedicated `memories` table
     via pgvector cosine-similarity search — the same table
     PostgresMemoryStore writes to.
+
+    Takes a raw `session_factory` rather than an already-bound `MemoryRepository` (docs/BUGS.md
+    item 69) — same reasoning as PostgresMemoryStore's own docstring: this is what makes the class
+    safe to wire as a process-wide Singleton instead of a per-request Factory, since it has no
+    session to permanently capture at construction time.
     """
 
     def __init__(
         self,
-        repository: MemoryRepository,
+        session_factory: Callable[[], AsyncSession] | async_sessionmaker,
         embeddings: EmbeddingManager,
     ) -> None:
-        self._repository = repository
+        self._session_factory = session_factory
         self._embeddings = embeddings
 
     @staticmethod
@@ -55,12 +64,13 @@ class PgVectorMemoryRetriever(MemoryRetriever):
             request.query,
         )
 
-        rows = await self._repository.search_similar(
-            tenant_id=request.tenant_id,
-            user_id=request.user_id,
-            query_vector=query_vector,
-            k=request.top_k,
-        )
+        async with self._session_factory() as session:
+            rows = await MemoryRepository(session).search_similar(
+                tenant_id=request.tenant_id,
+                user_id=request.user_id,
+                query_vector=query_vector,
+                k=request.top_k,
+            )
 
         results = [
             SearchResult(memory=self._to_fact(row), score=1.0)
