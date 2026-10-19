@@ -158,7 +158,8 @@ async def reindex_document_job(ctx: dict[str, Any], document_id: str, actor_id: 
 
 
 async def source_sync_job(ctx: dict[str, Any], source_id: str, run_id: str) -> str:
-    """Runs one queued knowledge-source sync. The engine records its own failures; this only raises on infrastructure errors."""
+    """Runs one queued knowledge-source sync. The engine records its own failures; this only
+    raises on infrastructure errors."""
     from uuid import UUID
 
     from packages.connectors.sync import SyncEngine

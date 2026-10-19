@@ -2350,6 +2350,93 @@ the package:
 
 ---
 
+### 68. ✅ By request — "fix real gaps and fix them all": closed item 25's root cause, corrected two stale open items, added real coverage for `packages/worker/jobs.py`, and found 13 genuinely dead files CHANGELOG.md had already flagged once and nothing ever removed
+
+Asked directly to fix every remaining real gap, not just the ones already tracked. Re-audited every
+still-🔴 item in this file against the actual current code rather than trusting its own prior text,
+since item 4 (below) turned out to be stale in exactly that way.
+
+- **Item 25's root cause fixed, not just its symptom.** `scripts/e2e_local.sh` created real documents
+  (and the chunks/retrieval-log rows that chatting/searching against them generates) through the real
+  API with no teardown at all. Added a real teardown pass at the end of the script: deletes both test
+  documents through the real `DELETE /documents/{id}` endpoint (cascading chunks/vector-store entries
+  the same way a real admin's delete would), then sweeps any `retrieval_result_logs` rows left pointing
+  at those now-deleted ids — the one thing document deletion itself can't reach (no FK/cascade from
+  that table onto `documents`, confirmed in item 25's own investigation). Also found and fixed the
+  *existing* instance of exactly this bug while verifying the fix: 2 leftover `e2e_doc_*`/
+  `e2e_restricted_*` documents from a 2026-09-30 run, still `READY` and visible in real Knowledge Base
+  cards — deleted both through the real API, which surfaced 10 more orphaned `retrieval_result_logs`
+  rows pointing at them. **That 10-row cleanup itself is blocked** — the auto-mode classifier refused
+  the direct SQL `DELETE` as "Irreversible Local Destruction." Needs the user to run it themselves (or
+  grant the permission): `DELETE FROM retrieval_result_logs WHERE NOT EXISTS (SELECT 1 FROM documents
+  d WHERE d.id = retrieval_result_logs.document_id);` against the dev Postgres.
+- **Item 18 was stale — corrected, not re-fixed.** Re-read it against the actual current
+  `test_source_sync.py`: the `env` fixture already deletes every real table these tests touch, scoped
+  to a fresh `uuid4()` tenant per test (`DocumentAccessRule`, `IdentityMapping`, `Document`,
+  `KnowledgeSource`, `knowledge_bases`, `audit_events`), with `SourceCredential`/`ExternalDocumentRecord`/
+  `SourceSyncRun` all cascade-deleted via `ondelete="CASCADE"` once `KnowledgeSource` goes. That fixture
+  predates item 18 by four days (git blame: fixture added 2026-09-26, item 18 filed 2026-09-30) — its
+  "no automatic rollback/isolation... manual cleanup between runs" was already inaccurate the day it was
+  written. Verified live: zero `scripted-*` sources and zero orphaned `identity_mappings` rows in the
+  dev DB right now. The one real residual gap item 18 still correctly points at — these are real
+  commits, not a SAVEPOINT rollback, so a hard crash mid-test (not an ordinary assertion failure, which
+  the fixture's `yield`-based teardown already survives) skips cleanup — is a smaller, different, and
+  explicitly accepted claim than what was written; left genuinely open but correctly scoped now.
+- **Item 4 was stale — corrected.** Its own text claims CI runs the test suite. The real
+  `.github/workflows/ci.yml` has no test job at all — `git log` shows it was deliberately removed
+  (`c9c5b63 ci: drop the test jobs, not a focus right now`) after item 4 was written. Every merge to
+  `main`/`master` now builds and deploys both images with zero automated gate — no test run, no
+  `pip-audit`. This was the repo owner's own explicit prior decision, not an oversight, so **not
+  reversed here** — modifying CI/CD gating is exactly the kind of shared-system change this session
+  asks before touching. Flagged for the user's own call: re-add a test-gating job (`needs:` on
+  `build-and-deploy`), or leave it as-is.
+- **`packages/worker/jobs.py` — was 0% covered (confirmed via `pytest --cov`), now has real tests.**
+  This file is every scheduled production maintenance job this platform runs: retention purge, stale-
+  reindex sweep, scratch-file cleanup, stale-upload-job cleanup, and crash recovery for stuck
+  conversations — the last of which already produced one real, documented live bug (a duplicate
+  assistant message) with no regression test guarding it from recurring. New:
+  `tests/unit/test_worker_jobs.py` (14 tests, fakes for `ctx["container"]` matching item 67's
+  `test_reindex.py` pattern — these jobs only duck-type the container, so a real DI container/Postgres
+  checkpointer isn't needed to test the job's own orchestration logic): scratch-file age-threshold
+  cleanup (real filesystem, real `tmp_path`), stale-upload-job marking, `purge_expired_logs_job`'s
+  settings-to-arguments wiring (the exact kind of bug a thin pass-through job can ship silently — a
+  swapped `retrieval_log_days`/`audit_days` argument), the stale-reindex sweep (one bad document
+  doesn't stop the others), and — the highest-value case — `recover_stuck_conversations_job`'s three
+  branches: a genuinely stuck conversation gets recovered, an **already-complete** thread (the documented
+  live bug's exact trigger) clears its marker without re-invoking instead of risking a second duplicate
+  message, and one conversation's recovery failure doesn't stop the sweep; plus that the checkpointer
+  override/connection close always runs, success or failure. `expire_stale_conversations_job` covered
+  the same way.
+- **Measured a real coverage baseline** (`pytest --cov=packages --cov-report=term`): **74%** line
+  coverage across `packages/` as of this pass (591 tests, up from 577). Not yet wired into CI as a gate
+  (item 17 remains genuinely open — deliberately not done blind: `--cov-fail-under` needs a number the
+  team actually signs off on, not one picked unilaterally the same session the baseline was first
+  measured).
+- **13 genuinely dead files found, confirmed, and left for the user to remove** — `docs/CHANGELOG.md`'s
+  own "A fresh, critical pass over the AI orchestration layer" entry already flagged most of these as
+  "~213 lines, zero imports anywhere" once before; nothing ever actually deleted them, so they're still
+  here. Re-confirmed zero references (including each package's own `__init__.py`, which re-exports
+  none of them) before adding three more `packages/memory/` files the original sweep's count didn't
+  quite match: `packages/planner/executor.py`, `packages/planner/rules.py`,
+  `packages/prompts/{formatter,memory,rag,system,tools}.py` (`packages/prompts/__init__.py` re-exports
+  only `PromptBuilder` from `builder.py` — these five were never even part of the package's own public
+  surface), `packages/memory/{checkpoint_manager,exceptions,prompts,serializers,session,types}.py`
+  (`prompts.py` and `serializers.py` are empty/near-empty files with no code at all).
+  `packages/graph/checkpoint.py`, the other file the old CHANGELOG entry named, is **not** dead
+  anymore — it's genuinely imported by `graph/builder.py` and `infrastructure/container/graph.py` now,
+  presumably wired in by durable execution later. **Deletion itself is blocked** — the auto-mode
+  classifier refused `rm` on these 13 files as "Irreversible Local Destruction." Needs the user to
+  delete them (they're all still in git history either way), or grant the permission.
+- **Verified:** full `uv run pytest`, 591 passed / 1 deselected (+14 over item 67's 577, all in
+  `test_worker_jobs.py`). `uv run ruff check` clean on every file this pass touched, including one
+  pre-existing, unrelated `E501` in `packages/worker/jobs.py` fixed in passing (a docstring over 120
+  chars on `source_sync_job`, a function this pass otherwise left untouched).
+- **Files:** `scripts/e2e_local.sh`, `packages/worker/jobs.py` (docstring wrap only),
+  `tests/unit/test_worker_jobs.py` (new). 13 dead files identified for deletion, not yet deleted (see
+  above). No code deleted this pass without the user's own action.
+
+---
+
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
 
 These aren't bugs; `docs/BUILD_STATUS.md` contained claims that no longer matched the code. Listed
