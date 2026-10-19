@@ -6,13 +6,11 @@ from __future__ import annotations
 
 from langgraph.config import get_stream_writer
 
+from packages.application.services.model_profile_service import ModelProfileService
 from packages.chat.chat_service import LLMChatService
 from packages.chat.request import LLMChatRequest
 from packages.chat.response import LLMChatResponse
-from packages.domain.enums.model_status import ModelStatus
 from packages.graph.state import GraphState
-from packages.infrastructure.ai.config import build_llm_config_from_profile
-from packages.infrastructure.repositories.model_profile import ModelProfileRepository
 from packages.prompts.builder import PromptBuilder
 from packages.shared.messages import normalize_message_content, sanitize_tool_call_args
 from packages.tools.manager import ToolManager
@@ -36,13 +34,13 @@ class LLMNode:
         chat_service: LLMChatService,
         prompt_builder: PromptBuilder,
         tool_manager: ToolManager,
-        model_profile_repository: ModelProfileRepository,
+        model_profile_service: ModelProfileService,
     ) -> None:
 
         self._chat = chat_service
         self._builder = prompt_builder
         self._tools = tool_manager
-        self._model_profiles = model_profile_repository
+        self._model_profiles = model_profile_service
 
     async def __call__(
         self,
@@ -79,23 +77,10 @@ class LLMNode:
         return state
 
     async def _resolve_llm_config(self, model_profile_id):
-        """
-        None means "use LLMChatService's default LLMManager", same as before
-        this existed — a missing id, a deleted profile, a DISABLED/
-        DEPRECATED one, or a provider LLMFactory doesn't implement yet
-        (build_llm_config_from_profile's own fallback) are all treated the
-        same way: fail soft to the global default rather than ever failing
-        a chat turn over a model-profile lookup.
-        """
+        """Delegates to ModelProfileService (docs/BUGS.md item 69) — see its own docstring for
+        the resolution contract (None for anything not usable) and why this exists."""
 
-        if model_profile_id is None:
-            return None
-
-        profile = await self._model_profiles.get(model_profile_id)
-        if profile is None or profile.status != ModelStatus.ACTIVE:
-            return None
-
-        return build_llm_config_from_profile(profile)
+        return await self._model_profiles.resolve_llm_config(model_profile_id)
 
     async def _stream(self, request: LLMChatRequest, citations: list, retrieval_id=None):
         """

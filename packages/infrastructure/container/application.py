@@ -124,6 +124,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         repositories=repositories,
         upload=upload,
         platform_settings=platform_settings,
+        database=database,
     )
 
     # Declared after `rag` — the knowledge-base/document-search tools need

@@ -61,6 +61,9 @@ class RAGContainer(
 
     upload = providers.DependenciesContainer()
 
+    # Only `retriever` (graph_rag's entity/relationship reads — docs/BUGS.md item 69) needs this.
+    database = providers.DependenciesContainer()
+
     platform_settings = providers.DependenciesContainer()
 
     embeddings = providers.Singleton(
@@ -152,17 +155,15 @@ class RAGContainer(
         llm=ai.manager,
     )
 
-    # NOTE: ingestion_pipeline and knowledge_manager are Factory, not
-    # Singleton, on purpose — ingestion_pipeline now depends on
-    # repositories.document, which is itself Factory-wired onto a
-    # per-request database session (see packages/infrastructure/
-    # container/repositories.py + packages/api/dependencies.py's
-    # request_scoped_session). A Singleton here would be constructed
-    # once, the first time anything touches it, permanently capturing
-    # whatever session existed at that moment — the exact bug fixed
-    # earlier for the memory pipeline (see docs/CHANGELOG.md). The same
-    # rule is why repositories.entity/relationship are threaded in here
-    # too, not resolved once at startup.
+    # Stays Factory, deliberately — genuinely needs a real per-request database session threaded
+    # through document_repository/document_version_repository/model_profile_repository/
+    # entity_repository/relationship_repository for one atomic ingest, not just a read. A
+    # Singleton here would be constructed once, the first time anything touches it, permanently
+    # capturing whatever session existed at that moment — the exact bug fixed earlier for the
+    # memory pipeline (docs/TUTORIAL_LONG_TERM_MEMORY.md's "Bug 3"). Real callers all reach this
+    # directly (`container.rag.ingestion_pipeline()` — documents.py, reindex.py,
+    # connectors/sync.py, worker/jobs.py), not through KnowledgeManager, which dropped its
+    # ingestion-facade surface entirely for exactly this reason (docs/BUGS.md item 69).
 
     ingestion_pipeline = providers.Factory(
         IngestionPipeline,
@@ -188,35 +189,33 @@ class RAGContainer(
         CrossEncoderReranker,
     )
 
-    # Factory, not Singleton, as of Graph RAG (docs/mvpRAG.md v2.0) —
-    # RetrieverFactory.create() now always takes entity/relationship
-    # repositories (unused by every strategy except "graph_rag", same
-    # as `llm` is already unused by similarity/mmr/hybrid), which are
-    # themselves Factory-wired onto a per-request database session. A
-    # Singleton here would be constructed once, the first time anything
-    # touches it, permanently capturing whatever session existed at
-    # that moment — the exact bug already found and fixed twice in
-    # this codebase (memory pipeline, then ingestion pipeline). This
-    # changes every retrieval strategy to construct fresh per request
-    # instead of once at startup — cheap, stateless object
-    # construction, negligible overhead.
-    retriever = providers.Factory(
+    # Singleton as of docs/BUGS.md item 69 (was Factory since Graph RAG, docs/mvpRAG.md v2.0,
+    # when RetrieverFactory.create() started always taking entity/relationship repositories —
+    # unused by every strategy except "graph_rag", same as `llm` is already unused by
+    # similarity/mmr/hybrid). `GraphRAGRetriever` now takes a `session_factory` instead of
+    # already-bound repository instances, opening its own session only for the one `retrieve()`
+    # call that actually needs the graph traversal — nothing session-bound is captured at
+    # construction time anymore, so this is safe to build once and reuse (the same fix already
+    # applied to the memory pipeline — see that container's own comment on the identical bug
+    # class, docs/TUTORIAL_LONG_TERM_MEMORY.md's "Bug 3"). This is what lets the graph's
+    # `retrieve`/`tool`/`researcher` nodes stop rebuilding their search path on every request.
+    retriever = providers.Singleton(
         RetrieverFactory.create,
         vector_store=vectorstore,
         llm=ai.manager,
-        entity_repository=repositories.entity,
-        relationship_repository=repositories.relationship,
+        session_factory=database.session_factory,
         platform_settings=platform_settings.service,
     )
 
-    retriever_manager = providers.Factory(
+    retriever_manager = providers.Singleton(
         RetrieverManager,
         retriever=retriever,
     )
 
-    knowledge_manager = providers.Factory(
+    # Singleton as of docs/BUGS.md item 69 — dropped its `ingestion_pipeline` dependency entirely
+    # (see KnowledgeManager's own docstring), which was the only thing forcing this to Factory.
+    knowledge_manager = providers.Singleton(
         KnowledgeManager,
-        ingestion_pipeline=ingestion_pipeline,
         embedding_manager=embeddings,
         retriever_manager=retriever_manager,
     )

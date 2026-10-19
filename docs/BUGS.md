@@ -2437,6 +2437,101 @@ since item 4 (below) turned out to be stale in exactly that way.
 
 ---
 
+### 69. 📊 By request — "improve the LangGraph performance": measured two candidate fixes as noise, found and partly closed a real one, then hit a hard, unrelated blocker that caps how much of it is actually reachable
+
+Measured before touching anything, per this session's own established discipline (items 7/9/11).
+
+- **Two candidates measured and rejected as not worth the risk:** the retrieval-log write on the
+  critical path (`RetrieveNode._log_retrieval`, before `llm`) costs **~8-10ms**; a single
+  model-profile lookup costs **~4-10ms**. Both negligible against the 2.5-8.8s LLM round trip
+  that's already the documented floor (item 59's own scorecard note) — and decoupling the
+  retrieval-log write specifically would add real eventual-consistency risk to the Observability
+  page and the e2e script's own synchronous assertions (item 68). Left both alone.
+- **The real one: `StateGraph.compile()` runs fresh on every single chat turn**, not once at
+  startup — `GraphManager`/`GraphBuilder` are DI `Factory`-scoped. Measured: **~32-36ms,
+  consistently, every call**, not a one-time warmup cost (confirmed by 10 sequential calls in one
+  process). Root cause: `load_memory` and the model-profile lookup inside `llm` were built with an
+  already-open per-request database session baked into their constructor, so the whole node chain
+  had to be rebuilt per request.
+- **Fixed the two session-plumbing pieces that were actually safe to fix**, all taking a raw
+  `session_factory` instead of an already-bound session/repository now — the exact pattern already
+  proven safe in this codebase (`RetrievalLogService`/`PlatformSettingsService`/`AuditService`),
+  deliberately avoiding the precise shape that already caused a real, silent data-loss bug once
+  (`docs/TUTORIAL_LONG_TERM_MEMORY.md`'s "Bug 3" — a Singleton resolved before any request existed
+  permanently captured a session nothing would ever commit):
+  - New `ModelProfileService` (`packages/application/services/model_profile_service.py`) — a
+    30s-TTL cache wrapping the model-profile lookup, same shape as `PlatformSettingsService`.
+    `LLMNode` now depends on it instead of a bare `ModelProfileRepository`.
+  - `PostgresMemoryStore`/`PgVectorMemoryRetriever` (`packages/memory/implementations/`) — switched
+    to opening their own session per call. Side benefit beyond the Singleton-safety: `upsert_summary`'s
+    commit now happens *inside* `MemoryManager.summarize()`'s own Redis-lock critical section
+    instead of being deferred to the caller's own session boundary — closing a gap that file's own
+    docstring had explicitly flagged as still-open. Trade-off, documented in the class's own
+    docstring: `create_many()` is no longer one all-or-nothing transaction.
+  - `GraphRAGRetriever` (`packages/knowledge/retrievers/providers/graph_rag.py`) — switched its
+    `entity_repository`/`relationship_repository` constructor args to a `session_factory`, opening
+    one session for the one logical read its graph traversal needs. `RetrieverFactory.create()`
+    updated to match.
+  - `KnowledgeManager` (`packages/knowledge/manager.py`) **dropped its `ingestion_pipeline`
+    dependency entirely** — a full-codebase check showed every real external caller already used
+    `container.rag.ingestion_pipeline()` directly (reindex.py, connectors/sync.py, worker/jobs.py);
+    `delete_document` was the one exception, switched to the same direct call
+    (`packages/api/routers/documents.py`). `IngestionPipeline` itself stays genuinely
+    request-session-bound on purpose — real multi-repository work inside one atomic ingest, not a
+    read; this is a correct, intentional limit, not a bug.
+  - `memory.manager`/`store`/`retriever`/`extractor`/`summarizer` and `rag.knowledge_manager`/
+    `retriever`/`retriever_manager` are now `providers.Singleton` instead of `Factory` — real, if
+    secondary, wins on their own: `search.py`'s Search API route and `documents.py`'s delete route
+    both resolve `knowledge_manager` directly, independent of the graph entirely.
+- **Hit a hard blocker that caps how much of the original 32-36ms is actually reachable:**
+  `tool`/`llm` nodes both depend on `tools.manager`, which is genuinely, correctly per-request —
+  not a session-plumbing issue like the three above, but real business logic: `init_tool_manager()`
+  reads `current_custom_tools()`/`is_tool_enabled()`/`is_widget_mode()` (context vars set per
+  request by the chat router before the graph is built), so a tenant's CUSTOM webhook tools, its
+  feature-flag-gated built-ins, and the public widget's tool restrictions all vary per request.
+  Making `tools.manager` a Singleton would leak whichever tenant's tool list (including their
+  private webhook tools) got built first into every subsequent request from every other tenant — a
+  real tenant-isolation/security regression, not an acceptable trade-off, so **not touched**. Since
+  LangGraph compiles the whole `StateGraph` as one unit, `tool`/`llm` staying `Factory` means
+  `nodes`/`builder`/`manager` have to stay `Factory` too — **the 32-36ms/turn compile cost is still
+  paid on every turn**, confirmed by re-measuring `manager()` resolution after this pass's changes
+  (still ~27-40ms). Closing it for real needs tool availability resolved per-call (e.g. via
+  `GraphState`) instead of baked into the node's constructor — a materially larger, security-
+  adjacent redesign, explicitly not attempted here without a separate, informed decision.
+- **A real, unrelated incident found and fixed along the way, not caused by this refactor:** the
+  full test suite hung mid-run (confirmed via `pg_stat_activity`: `ALTER TABLE documents ENABLE ROW
+  LEVEL SECURITY`, part of this app's own normal startup schema-upgrade step, stuck waiting 10+
+  minutes on a lock held by an `idle in transaction` connection, with a growing pile of blocked
+  `documents`-table queries behind it). Root cause: one of this session's own earlier ad hoc timing
+  scripts, run directly against the dev Postgres to measure the retrieval-log/model-profile/graph-
+  compile costs above, left a connection in that state. Fixed by `pg_terminate_backend()` on the
+  stuck connection and everything piled up behind it; confirmed clean afterward
+  (`pg_stat_activity` showed only genuinely idle connections) and the full suite ran clean,
+  607 passed, right after.
+- **Verified:** full `uv run pytest`, 607 passed / 1 deselected (+16 over item 68's 591: 6 new
+  `ModelProfileService` tests, 10 new `PostgresMemoryStore`/`PgVectorMemoryRetriever` tests, plus
+  the 4 existing `GraphRAGRetriever` tests updated for its new constructor). `uv run ruff check`
+  clean on every touched file. Live-verified against the real running stack after a clean
+  `api`/`worker` restart: a real simple chat turn round-tripped correctly end to end (real
+  citation, real `gemini-3.1-flash-lite` response) — `load_memory`/`retrieve`/`llm` all confirmed
+  working with the new Singleton wiring and real data. A real multi-part turn correctly reached
+  `researcher` and, once Gemini's own concurrent, independently-confirmed `503 UNAVAILABLE` "high
+  demand" outage outlasted every retry, returned a clean `ProviderUnavailable` error instead of
+  hanging or crashing — the circuit breaker's own correct behavior under a genuine external outage,
+  not a defect in this change.
+- **Files:** `packages/application/services/model_profile_service.py` (new),
+  `packages/memory/implementations/postgres_store.py`,
+  `packages/memory/implementations/pgvector_retriever.py`,
+  `packages/knowledge/retrievers/providers/graph_rag.py`,
+  `packages/knowledge/retrievers/factory.py`, `packages/knowledge/manager.py`,
+  `packages/graph/nodes/llm.py`, `packages/api/routers/documents.py`,
+  `packages/infrastructure/container/{rag,memory,graph,application}.py`,
+  `tests/unit/test_graph_rag_retriever.py` (updated constructor shape),
+  `tests/integration/test_model_profile_service.py` (new),
+  `tests/integration/test_postgres_memory_store.py` (new).
+
+---
+
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
 
 These aren't bugs; `docs/BUILD_STATUS.md` contained claims that no longer matched the code. Listed

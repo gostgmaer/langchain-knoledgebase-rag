@@ -21,6 +21,9 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg import Connection
 from psycopg.rows import dict_row
 
+from packages.application.services.model_profile_service import ModelProfileService
+from packages.application.services.retrieval_log_service import RetrievalLogService
+from packages.application.services.retrieval_settings_service import RetrievalSettingsService
 from packages.config.loader import settings as app_settings
 from packages.graph.builder import GraphBuilder
 from packages.graph.manager import GraphManager
@@ -29,8 +32,6 @@ from packages.graph.nodes.extract_memory import ExtractMemoryNode
 from packages.graph.nodes.llm import LLMNode
 from packages.graph.nodes.load_memory import LoadMemoryNode
 from packages.graph.nodes.researcher import ResearcherNode
-from packages.application.services.retrieval_log_service import RetrievalLogService
-from packages.application.services.retrieval_settings_service import RetrievalSettingsService
 from packages.graph.nodes.retrieve import RetrieveNode
 from packages.graph.nodes.tool import GraphToolNode
 from packages.graph.nodes.writer import WriterNode
@@ -263,6 +264,13 @@ class GraphContainer(containers.DeclarativeContainer):
         session_factory=database.session_factory,
     )
 
+    # Singleton: holds a short-lived per-profile cache and only the session factory (docs/BUGS.md
+    # item 69) — this is what lets `llm` below, and therefore the whole graph, become Singleton.
+    model_profile_cache = providers.Singleton(
+        ModelProfileService,
+        session_factory=database.session_factory,
+    )
+
     retrieve = providers.Factory(
         RetrieveNode,
         knowledge_manager=rag.knowledge_manager,
@@ -281,7 +289,7 @@ class GraphContainer(containers.DeclarativeContainer):
         chat_service=services.chat,
         prompt_builder=prompt_builder,
         tool_manager=tools.manager,
-        model_profile_repository=repositories.model_profile,
+        model_profile_service=model_profile_cache,
     )
 
     # Multi-Agent (docs/mvpRAG.md v2.0) — all Factory, matching this

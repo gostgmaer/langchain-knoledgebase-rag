@@ -20,25 +20,29 @@ class MemoryContainer(containers.DeclarativeContainer):
     rag = providers.DependenciesContainer()
     repositories = providers.DependenciesContainer()
 
-    store = providers.Factory(
+    # Singleton, not Factory (docs/BUGS.md item 69) — store/retriever hold only a session_factory
+    # now, not an already-bound per-request MemoryRepository, so there's nothing request-scoped
+    # left to capture. This is what lets `manager` below, and therefore the graph's `load_memory`
+    # node, become Singleton too.
+    store = providers.Singleton(
         PostgresMemoryStore,
-        repository=repositories.memory,
+        session_factory=database.session_factory,
         embeddings=rag.embeddings,
     )
 
-    extractor = providers.Factory(
+    extractor = providers.Singleton(
         LLMMemoryExtractor,
         llm=ai.manager,
     )
 
-    summarizer = providers.Factory(
+    summarizer = providers.Singleton(
         LLMMemorySummarizer,
         llm=ai.manager,
     )
 
-    retriever = providers.Factory(
+    retriever = providers.Singleton(
         PgVectorMemoryRetriever,
-        repository=repositories.memory,
+        session_factory=database.session_factory,
         embeddings=rag.embeddings,
     )
 
@@ -47,7 +51,7 @@ class MemoryContainer(containers.DeclarativeContainer):
         strategy=MemoryStrategy.MEMORY,
     )
 
-    manager = providers.Factory(
+    manager = providers.Singleton(
         MemoryManager,
         store=store,
         extractor=extractor,

@@ -2,24 +2,24 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
 from io import BytesIO
 from pathlib import Path
+from typing import Literal
 from uuid import UUID, uuid4
 
 import httpx
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
 
 from packages.api.dependencies import (
     DEFAULT_TENANT_ID,
     DEFAULT_USER_ID,
     get_scoped_container,
     request_scoped_session,
-    require_uuid_header,
     require_admin,
     require_permission,
+    require_uuid_header,
 )
 from packages.api.permissions import Permission
 from packages.api.responses import ApiResponse
@@ -42,9 +42,9 @@ from packages.domain.enums.document_status import DocumentStatus
 from packages.domain.models.knowledge_source import KnowledgeSource
 from packages.domain.models.upload_job import UploadJob
 from packages.infrastructure.container import ApplicationContainer
-from packages.knowledge.pipelines.ingestion import PIPELINE_VERSION
 from packages.knowledge.bootstrap import ensure_default_knowledge_base
 from packages.knowledge.loaders.factory import LoaderFactory
+from packages.knowledge.pipelines.ingestion import PIPELINE_VERSION
 from packages.knowledge.schemas import ChunkingStrategy, IngestionRequest
 from packages.sdk.common.exceptions import SDKException
 from packages.shared.logging import get_logger
@@ -757,8 +757,10 @@ async def delete_document(
             detail="Document not found.",
         )
 
-    knowledge_manager = container.rag.knowledge_manager()
-    await knowledge_manager.delete_document(tenant_id=tenant_id, document_id=document_id)
+    # Direct, not via KnowledgeManager (docs/BUGS.md item 69 — that facade dropped its
+    # ingestion/maintenance surface once every other real caller turned out to already use this
+    # same direct path: reindex.py, connectors/sync.py, worker/jobs.py).
+    await container.rag.ingestion_pipeline().delete_document(tenant_id=tenant_id, document_id=document_id)
     await documents.delete(document)
 
     await container.audit().record(

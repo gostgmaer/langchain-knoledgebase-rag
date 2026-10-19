@@ -1,10 +1,12 @@
 # factory.py
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from packages.application.services.platform_settings_service import PlatformSettingsService
 from packages.infrastructure.ai.manager import LLMManager
-from packages.infrastructure.repositories.entity import EntityRepository
-from packages.infrastructure.repositories.relationship import RelationshipRepository
 from packages.knowledge.retrievers.base import BaseRetriever
 from packages.knowledge.retrievers.providers.graph_rag import GraphRAGRetriever
 from packages.knowledge.retrievers.providers.hybrid import HybridRetriever
@@ -31,8 +33,7 @@ class RetrieverFactory:
     def create(
         vector_store: VectorStoreManager,
         llm: LLMManager,
-        entity_repository: EntityRepository,
-        relationship_repository: RelationshipRepository,
+        session_factory: Callable[[], AsyncSession] | async_sessionmaker,
         platform_settings: PlatformSettingsService,
     ) -> BaseRetriever:
 
@@ -77,8 +78,7 @@ class RetrieverFactory:
             return GraphRAGRetriever(
                 HybridRetriever(vector_store, platform_settings),
                 vector_store,
-                entity_repository,
-                relationship_repository,
+                session_factory,
             )
 
         raise ValueError(
