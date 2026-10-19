@@ -194,4 +194,25 @@ chk "list connected accounts" "$(curl -s -o /dev/null -w '%{http_code}' $GW/api/
 chk "Google authorize redirect" "$(curl -s -o /dev/null -w '%{http_code}' $GW/api/auth/social/google/start -H "$O")" 302
 chk "Microsoft authorize redirect" "$(curl -s -o /dev/null -w '%{http_code}' $GW/api/auth/social/microsoft/start -H "$O")" 302
 
+echo; echo "== 7. Teardown: remove this run's test documents"
+# docs/BUGS.md item 25: this script used to create real documents (and the chunks/retrieval-log
+# rows that chatting/searching against them generates) through the real API with no cleanup at
+# all, leaving them permanently visible in real Knowledge Base cards and, once any document got
+# deleted by some other means, as orphaned rows in retrieval_result_logs (document_id has no FK/
+# cascade onto documents - confirmed by that item's own investigation). Delete through the real
+# DELETE endpoint, same as a real admin would, so chunks/vector-store entries are cleaned up too,
+# not just the document row - then sweep any retrieval_result_logs this run's own searches left
+# pointing at those now-deleted document ids (the one thing document deletion itself can't reach).
+for did in "$DOCID" "$RDID"; do
+  if [ -n "$did" ]; then
+    dc=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$RAG/documents/$did" -H "Authorization: Bearer $ATOK")
+    case "$dc" in 200|204|404) ok "teardown: deleted test document $did ($dc)";; *) bad "teardown: delete $did returned $dc";; esac
+  fi
+done
+if [ -n "$DOCID" ] || [ -n "$RDID" ]; then
+  ids="'${DOCID:-00000000-0000-0000-0000-000000000000}','${RDID:-00000000-0000-0000-0000-000000000000}'"
+  docker compose -f "c:/Users/kisho/WorkSpace/learning/ai/langchain-knoledgebase-rag/docker-compose.yml" exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"delete from retrieval_result_logs where document_id in ($ids)\"" >/dev/null 2>&1
+  ok "teardown: swept any retrieval_result_logs left pointing at this run's deleted documents"
+fi
+
 echo; echo "RESULT: $pass passed, $fail failed"

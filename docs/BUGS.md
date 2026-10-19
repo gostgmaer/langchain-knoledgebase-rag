@@ -2280,6 +2280,76 @@ service layer, and fakes would only prove the mocks agree with themselves.
 
 ---
 
+### 67. ✅ F3 actually closed — the remaining five files in `packages/application/services/`, including two genuinely zero-coverage, compliance-sensitive ones
+
+Item 66 covered the two services every chat turn hits first but explicitly left the rest of the
+package open. Re-surveyed all nine files by grepping which test files actually exercise each
+service's *class*, not just import it incidentally (`platform_settings_service.default_value` was
+tested; `PlatformSettingsService.get/set/seed_defaults` itself never was) — the real gap was
+narrower than item 66's "7 of 9 remain untested" but still covered the two highest-risk files in
+the package:
+
+- **`AuditService`** (`audit_service.py`) — only its standalone `clean_detail` helper had ever been
+  tested; the class every real audit write goes through, backing the "Audit & observability" and
+  "Secrets & data protection" scorecard claims, was zero-coverage. New:
+  `tests/integration/test_audit_service.py` (4 tests) — a real row persists with the given fields,
+  forbidden keys (`query`, `token`, ...) are actually stripped before the row reaches Postgres (not
+  just proven for the helper function in isolation), actor/resource default to `None`, and a broken
+  session factory never raises out of `record()`.
+- **`retention_service.purge_expired`** — zero coverage despite being the *only* code path that ever
+  deletes retrieval logs or audit events, on an admin-controlled schedule (item 38). A wrong cutoff
+  here either destroys data an admin expected kept, or a `0` window ("keep forever") silently
+  purges everything instead — exactly the kind of deletion logic that shouldn't ship untested. New:
+  `tests/integration/test_retention_service.py` (5 tests) — real rows older/newer than the cutoff
+  for both tables, `0` genuinely keeps forever (both tables), and `None` windows correctly fall back
+  to `PlatformSettingsService`'s built-in defaults.
+- **`ingestion_audit.audit_ingestion`** — zero coverage; every document upload's audit trail
+  (processed / duplicate skipped / version created / processing failed) goes through this one
+  function. New: `tests/integration/test_ingestion_audit.py` (6 tests) — each of the four real
+  branches emits the right action and detail against a real `AuditService`/Postgres, a superseded
+  document gets both a `processed` and a `version_created` event, an error with no `ingestion_stage`
+  attribute falls back to `"unknown"`, and the `response=None, error=None` no-op case writes nothing
+  at all.
+- **`PlatformSettingsService`** — only its module-level `default_value()` helper had been touched by
+  any test; the class itself (TTL cache, `set(None)` revert-to-default, `seed_defaults()`
+  idempotency, the list-default copy-not-alias behavior) was unverified. New:
+  `tests/integration/test_platform_settings_service.py` (12 tests), including the in-process cache
+  genuinely not seeing another instance's write until invalidated, and every `SettingSpec.validate`
+  branch (range/type/choices rejection, every built-in default round-tripping as valid).
+- **`reindex.run_reindex`** — zero coverage. The real `ingestion_pipeline().reindex_document()` path
+  is a full load→clean→split→embed→store run against live embedding APIs, out of scope for a unit
+  test of this function's own control flow — so this one uses a fake container
+  (`request_scoped_session` monkeypatched to a no-op) rather than real Postgres, unlike the other
+  four. New: `tests/unit/test_reindex.py` (5 tests) — not-found returns `False` and audits nothing,
+  success audits `document.reindexed`, a pipeline failure audits `document.reindex_failed` with its
+  stage (or `"unknown"` with none), and critically: a failure *before* the document lookup even
+  resolves (so `tenant_id` was never learned) audits nothing at all rather than crashing trying to
+  audit with no tenant.
+- Also independently re-confirmed **F6** ("Dashboard shows Knowledge sources: Connected 0") while
+  back in the live environment for this pass: queried `knowledge_sources` directly — 8 real rows
+  exist for this tenant, all with `status='disconnected'`, 0 `active`. The dashboard's `Connected: 0`
+  is not a bug; it's an accurate read of real state (all 8 configured sources are currently
+  disconnected). Previously left as "plausibly correct, not chased further" — now confirmed with
+  the actual row data, not just plausibility.
+- `audit_service.py`'s `AuditService` and `platform_settings_service.py`'s `PlatformSettingsService`
+  are the two left genuinely untested after item 66 that also happen to gate the "strong" scorecard
+  claims for audit/secrets, so closing these two specifically (not just picking the two easiest
+  files) is what actually moves F3 from partial to closed.
+- **Verified:** full `uv run pytest`, 577 passed / 1 deselected (net +34 over item 66's 543: 4 + 5 +
+  6 + 12 + 5 + 2 existing-file touches = 32 new test functions, plus 2 parametrize expansions). No
+  existing test touched or modified beyond the new `session_factory` fixture addition to
+  `tests/conftest.py`. `api`/`worker` containers confirmed healthy throughout.
+- **F3 is now closed**: all nine files in `packages/application/services/` have real, direct test
+  coverage exercising the actual service classes, against real Postgres where the service takes a
+  `session_factory` (four of the five new files) or fakes where a full pipeline run is genuinely out
+  of scope for a unit test (`reindex.py`).
+- **Files:** `tests/conftest.py` (new `session_factory` fixture),
+  `tests/integration/test_audit_service.py` (new), `tests/integration/test_retention_service.py`
+  (new), `tests/integration/test_ingestion_audit.py` (new),
+  `tests/integration/test_platform_settings_service.py` (new), `tests/unit/test_reindex.py` (new).
+
+---
+
 ## 📝 Doc-only — code was already fine, `docs/BUILD_STATUS.md` was stale
 
 These aren't bugs; `docs/BUILD_STATUS.md` contained claims that no longer matched the code. Listed
