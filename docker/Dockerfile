@@ -1,17 +1,36 @@
 # syntax=docker/dockerfile:1.7
+# Base image is overridable so a build can reuse the copy already in the local
+# image store when Docker Hub's layer CDN is unreachable (this machine's
+# recurring `tls: bad record MAC`): pin it to the local digest, e.g.
+#   docker compose build --build-arg PYTHON_BASE=python:3.14-slim@sha256:<digest>
+# (`docker image inspect python:3.14-slim --format '{{json .RepoDigests}}'`).
+ARG PYTHON_BASE=python:3.14-slim
 # ============================================================
 # Stage 1 - Builder
 # ============================================================
-FROM python:3.14-slim AS builder
+FROM ${PYTHON_BASE} AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
+# Venv lives OUTSIDE /app on purpose: docker-compose.yml bind-mounts the
+# source tree over /app for live code, which would hide an /app/.venv. The
+# old workaround (an anonymous `/app/.venv` volume) silently kept serving
+# the FIRST build's packages forever — Compose preserves anonymous volumes
+# across container recreation, so a rebuild after a uv.lock bump never
+# reached the running container (confirmed live: cryptography/pyjwt/
+# oauthlib/pypdf were all behind uv.lock). /opt/venv can't be shadowed.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+# This network intermittently corrupts downloads in transit (apt reports
+# `Hash Sum mismatch`, registries `tls: bad record MAC`) — confirmed live on
+# the host too, not just inside Docker. Without retries, one bad file out of
+# a whole fetch failed the entire build. uv's own default is 3.
+ENV UV_HTTP_RETRIES=8
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get -o Acquire::Retries=8 update && apt-get -o Acquire::Retries=8 install -y \
     build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -43,7 +62,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ============================================================
 # Stage 2 - Runtime
 # ============================================================
-FROM python:3.14-slim
+FROM ${PYTHON_BASE}
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -67,9 +86,9 @@ RUN groupadd -r app && useradd -r -m -g app app \
 # (its layer model has no concept of "metadata changed, content
 # didn't") — confirmed live, that one RUN chown -R line was doubling
 # this image's real size (~2.2GB re-copied for nothing).
-COPY --chown=app:app --from=builder /app/.venv /app/.venv
+COPY --chown=app:app --from=builder /opt/venv /opt/venv
 
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/opt/venv/bin:$PATH"
 
 COPY --chown=app:app . .
 

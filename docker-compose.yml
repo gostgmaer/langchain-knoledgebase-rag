@@ -18,8 +18,9 @@ services:
       - "8088:8000"
 
     volumes:
+      # Live source only — the venv is baked at /opt/venv (see docker/Dockerfile),
+      # so this mount can't shadow it and a rebuild always ships uv.lock's packages.
       - .:/app
-      - /app/.venv
       # Reranker model (~90MB) downloaded once from HuggingFace and kept across
       # container rebuilds instead of re-fetching it on the first query.
       - hf-cache:/home/app/.cache/huggingface
@@ -29,6 +30,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+    # IAM_BASE_URL / UPLOAD_SERVICE_URL point at host.docker.internal (the
+    # easydev-core / easydev-utility stacks publish on the host). Docker Desktop
+    # resolves that name on its own; a plain Linux engine needs this mapping.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     restart: unless-stopped
 
@@ -44,8 +51,9 @@ services:
       - .env
 
     volumes:
+      # Live source only — the venv is baked at /opt/venv (see docker/Dockerfile),
+      # so this mount can't shadow it and a rebuild always ships uv.lock's packages.
       - .:/app
-      - /app/.venv
       # Reranker model (~90MB) downloaded once from HuggingFace and kept across
       # container rebuilds instead of re-fetching it on the first query.
       - hf-cache:/home/app/.cache/huggingface
@@ -56,6 +64,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     restart: unless-stopped
 
@@ -104,6 +115,9 @@ services:
     profiles: [full, data]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
     restart: unless-stopped
 
@@ -151,7 +165,7 @@ services:
   # healthy to start) and no volume — traces are ephemeral, all-in-one
   # is dev/local-only, not meant for production trace retention.
   jaeger:
-    image: jaegertracing/all-in-one:latest
+    image: jaegertracing/all-in-one:1.76.0
 
     ports:
       - "4317:4317"   # OTLP gRPC receiver — matches OTEL_ENDPOINT's default
